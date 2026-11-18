@@ -6,7 +6,6 @@ mod json;
 mod price;
 mod say;
 mod table;
-mod web_order;
 
 use crate::source::{source, Source};
 

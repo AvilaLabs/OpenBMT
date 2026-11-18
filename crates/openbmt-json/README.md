@@ -16,6 +16,5 @@ looks up the few fields it wants.
   `Value::Number`, without its value, and `as_i64` and `as_u64` refuse it.
   Nothing is rounded.
 
-It is the reader of the price replies (`docs/RATE-RULES.md`, RT-10 to RT-14)
-and of the replies of a POS (`docs/POS-RULES.md`, PS-90). The fuzz targets
-of both (`rates_parse`, `pos_square_parse`, `pos_clover_parse`) run it.
+It is the reader of the price replies (`docs/RATE-RULES.md`, RT-10 to RT-14).
+The fuzz target `rates_parse` runs it.

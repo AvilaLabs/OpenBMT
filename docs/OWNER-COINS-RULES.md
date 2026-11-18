@@ -365,64 +365,14 @@ the rest by a check once a month. The code is in
   ranges. A payment that arrives late at a pruned index is still refused for
   that index. A reset drops the list with the receipts.
 
-## 8. Matching sales on the owner's phone
+## 8. The sales the node holds
 
-The owner node runs the till matcher of `docs/POS-RULES.md` itself. The
-orders come from the vendor, through the phone's own read-only token; the
-sale facts come from the counters' records the node already holds. The
-node does no network work for it: the app sends the request and hands back
-the reply (OA-16 to OA-19).
+The sale facts come from the counters' records the node already holds.
 
 - **OC-30.** The sale facts are folded from the node's verified copies of
-  each counter's records, with the device list the link holds (PS-06,
-  PS-09). If any counter's copy does not fold, no facts are given, the
-  poll fails with a named refusal, and nothing is matched on part of the
-  counters. The facts are asked for only when the last page of a read has
-  been taken.
-- **OC-31.** The setup (vendor, one location or merchant id, the names
-  that mean Bitcoin, the currencies the owner sells in) is the owner's own
-  and is not part of the shop's signed settings, which carry none of it.
-  It is kept in `pos-setup.bin`, in a strict frame with the magic `OBMr`:
-  read back with no byte left over, every bound checked, and refused if
-  writing it again would give other bytes. One location serves all the
-  counters the link holds. A vendor or location that differs from the
-  stored one starts an empty ledger; the ledger is written before the setup
-  that names it.
-- **OC-32.** The ledger is kept in `pos-ledger.bin` by the durable write
-  the node uses for its other files. A page is stored before it takes
-  effect; a page that cannot be stored takes no effect. A setup or ledger
-  file that does not read back does not stop the node from starting: every
-  till call but removal then refuses with a named state, until the owner
-  removes the till.
-- **OC-33.** A read is a request (Square: a POST of the search body; Clover:
-  a GET of the orders path) and a reply (a status and the body bytes). The
-  node builds the request from the cursor it holds and parses the reply
-  with `openbmt-pos-readers`. The request carries no sign-in text. Only a
-  200 is read. A 401 or 403 is "sign-in refused", a 429 is "asked to wait",
-  and any other status is "vendor unavailable"; each has its own words. A
-  reply that does not parse is a named refusal and changes nothing. After
-  a Square orders reply that has orders, the node hands out Square's
-  payments (a GET of `/v2/payments`, as PS-95 says) one request at a time,
-  and the page takes effect only when its payments are all read, through
-  `parse_pages` (PS-96). A page with no orders asks for no payments.
-- **OC-34.** A read starts at most once in `POS_MIN_POLL_SECS` (60). The
-  next page of a read already begun is not held back, and nor is a request
-  for payments, which is not a page. A read is at most 64 pages
-  (`MAX_PAGES`). A page that says more is coming but does not move the
-  cursor ends the read with a named refusal. The payments of one page of
-  orders are at most 64 pages of 100 (`POS_MAX_PAYMENT_PAGES`); a page that
-  repeats its marker ends them, and more than that refuses the whole read
-  with its own words, so nothing is cut or guessed.
-- **OC-35.** The pages are matched as PS-10 to PS-40 say, with the facts of
-  OC-30, when the last page has been taken or the page limit is reached. The
-  reply tells the app which matches and alerts are new, which cleared and
-  which were retired, and whether another page is wanted.
-- **OC-36.** An alert is acknowledged in the phone's own ledger and stays
-  there. No signed command is sent and none is needed; the Box and the
-  counters do not learn of it.
-- **OC-37.** Every refusal of the till has words that pass the checks of
-  `docs/SCREEN-RULES.md`: what happened, why, and what to do next, with no
-  rule numbers.
+  each counter's records, with the device list the link holds. If any
+  counter's copy does not fold, no facts are given and nothing is judged
+  on part of the counters.
 
 ## 8b. A counter's Paid, checked against the wallet
 
@@ -490,8 +440,8 @@ says so when one is missing.
   the counter recorded, the amount seen and the time of the Paid, in words
   that say the counter showed Paid and this phone sees no payment, or less,
   and that the counter may have been tampered with. Only the owner clears it,
-  on the owner phone; the acknowledgement is kept in the phone's own ledger as
-  OC-36 says, and a sale whose payment later arrives in full clears itself,
+  on the owner phone; the acknowledgement is kept in the phone's own marks
+  (OC-64), and a sale whose payment later arrives in full clears itself,
   with a line that says so. An alarm of a sale that is no longer checked
   (OC-61) shows what the marks keep: the counter, the sale's number and the
   time of the Paid. A mismatch is raised once per sale, with one exception: an

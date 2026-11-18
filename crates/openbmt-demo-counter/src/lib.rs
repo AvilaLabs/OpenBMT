@@ -19,7 +19,6 @@
 #[cfg(target_arch = "wasm32")]
 pub mod abi;
 pub mod record;
-pub mod till;
 pub mod world;
 
 use std::sync::atomic::{AtomicU64, Ordering};

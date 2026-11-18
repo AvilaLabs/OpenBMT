@@ -28,9 +28,8 @@ used only inside `Words`). `list<T>` is a u32 count and the
 elements; `list<u8>` is the bytes type. `option<T>` is a flag byte 0
 or 1 and then the value. An enum is a tag byte and then the fields of
 its variant. A record is its fields in the order given. A request is
-at most 9437184 bytes (9 MiB: the body of a till answer is at
-most 8 MiB), is read completely before anything is done,
-and is refused when bytes are left over.
+at most 9437184 bytes (9 MiB), is read completely before anything
+is done, and is refused when bytes are left over.
 
 Times are seconds since 1970. Money is in satoshis. A device
 identity and a session number are 32 bytes. A transaction ID is hex
@@ -93,12 +92,6 @@ ops run on another; it waits for at most 250 ms.
  61 rescan           handle node  args () -> ()
  62 recover_key1     handle node  args () -> ()
  63 archive_paid     handle node  args () -> u32
- 70 pos_state        handle node  args () -> PosStateView
- 71 pos_setup        handle node  args PosSetupView -> ()
- 72 pos_remove       handle node  args () -> ()
- 73 pos_request      handle node  args u64 -> PosRequestView
- 74 pos_reply        handle node  args PosReplyArgs -> PosReplyView
- 75 pos_acknowledge  handle node  args PosAckArgs -> ()
  80 ceremony_make_key1 handle zero  args Key1Args -> Key1Made
  81 ceremony_read_answer handle zero  args list<u8> -> AnswerView
  82 ceremony_build_wallet handle zero  args BuildArgs -> WalletBuiltView
@@ -224,13 +217,6 @@ ops run on another; it waits for at most 250 ms.
 224 request_stop_repeating handle node  args RequestNumberArgs -> ()
 225 request_state    handle node  args RequestAsk -> RequestStateView
 226 request_return_ask handle node  args RequestReturnArgs -> string
-227 web_pair_start   handle node  args WebPairArgs -> WebPairView
-228 web_pair_confirm handle node  args RequestAsk -> WebStateView
-229 web_unpair       handle node  args RequestAsk -> WebStateView
-230 web_state        handle node  args RequestAsk -> WebStateView
-231 web_step         handle node  args WebStepArgs -> WebStepView
-232 web_reply        handle node  args WebReplyArgs -> WebStateView
-233 web_code_read    handle zero  args string -> WebCodeView
 234 request_read     handle node  args RequestNumberArgs -> RequestDetailView
 235 starter_line_set handle node  args StarterLineSetArgs -> ()
 236 shop_lightning_report handle node  args () -> ShopLightningView
@@ -381,22 +367,6 @@ SettingsHeldView: record: version: u32, light_per_sale: LimitView, light_budget:
 OutboxKind: enum, one tag byte
     tags Transaction=0 Batch=1 Settings=2 Pairing=3 BoxWelcome=4
 OutboxRow: record: id: u32, kind: OutboxKind, txid: option<string>, counter: option<list<u8>>, version: option<u32>, signed_at: option<u64>, size: u32, words: Words
-PosVendorView: enum, one tag byte
-    tags Square=0 Clover=1
-PosSetupView: record: vendor: PosVendorView, location: string, tender_names: list<string>, currencies: list<string>
-PosMethodView: enum, one tag byte
-    tags Get=0 Post=1
-PosRequestView: record: method: PosMethodView, url: string, body: list<u8>
-PosReplyArgs: record: now: u64, status: u32, body: list<u8>
-PosAlertKind: enum, one tag byte
-    tags TenderWithoutPayment=0 ClosedBeforePaid=1 PaymentWithoutTender=2 AmountDiffers=3 TenderOnUnpaidSale=4 VoidedAfterPayment=5 DuplicateReference=6 BitcoinTip=7 UnknownCurrency=8
-PosSubjectView: enum, a tag byte, then: Tender(order: string, tender: string) | Sale(counter: list<u8>, index: u32)
-    tags Tender=0 Sale=1
-PosAlertKey: record: kind: PosAlertKind, subject: PosSubjectView
-PosAckArgs: record: now: u64, key: PosAlertKey
-PosAlertView: record: key: PosAlertKey, raised_at: u64, words: Words
-PosReplyView: record: again: bool, more_left: bool, pages: u32, orders_read: u32, new_matches: u32, new_alerts: list<PosAlertView>, cleared: u32, retired: u64
-PosStateView: record: setup: option<PosSetupView>, last_poll_at: option<u64>, open_alerts: list<PosAlertView>, acknowledged_alerts: u32, tracked_orders: u32, matches: u32, matches_by_order: u32, retired_matches: u64
 CounterScanView: record: pairing: u32, counter: list<u8>, name: string, session_words: list<string>, needs_rate: bool, window_secs: u32, shares: list<CounterShareView>, words: Words
 CounterConfirmArgs: record: pairing: u32, usd_per_btc: u64
 CounterQueuedView: record: settings: u32, version: u32, batch: u32, batch_count: u32, shares: list<CounterShareView>, words: Words
@@ -529,25 +499,6 @@ RequestReturnArgs: record: ask: RequestAsk, number: u64, in_currency: bool, amou
 RequestReturnAddedView: record: id: u64, refund: u32, sats: u64, groups: string, words: Words
 RequestRepeatsView: record: made: list<RequestMadeView>
 RequestStateView: record: off: option<Words>, ready: bool, open: u32, overdue: u32, ready_to_send: u32, overdue_row: option<string>, arrivals_waiting: u32, returns_queued: u32, returns_sats: u64, returns: option<Words>
-WebPairArgs: record: ask: RequestAsk, url: string, shop_name: string
-WebPairView: record: code: string, fingerprint: string, shop_name: string, url: string
-WebCodeView: record: fingerprint: string, shop_name: string
-WebPairingKind: enum, one tag byte
-    tags None=0 Waiting=1 Paired=2
-WebRefusedView: record: order: u64, address: string, sats: u64, at: u64, words: Words
-WebAmountOffView: record: order: u64, sats: u64, words: Words
-WebStateView: record: off: option<Words>, pairing: WebPairingKind, shop_name: string, url: string, fingerprint: string, code: option<string>, last_visit: option<u64>, failure: option<Words>, retry_at: option<u64>, left: option<u64>, addresses_sent: u32, trouble: option<Words>, orders: u32, waiting: u32, told: u32, notices_waiting: u32, refused: list<WebRefusedView>, amount_off: list<WebAmountOffView>
-WebStepArgs: record: ask: RequestAsk, force: bool
-WebStepKind: enum, one tag byte
-    tags Idle=0 Busy=1 Call=2
-WebCallKindView: enum, one tag byte
-    tags Orders=0 Range=1 Notice=2
-WebHeaderView: record: name: string, value: string
-WebCallView: record: kind: WebCallKindView, url: string, headers: list<WebHeaderView>, content_type: string, body: list<u8>
-WebStepView: record: step: WebStepKind, call: option<WebCallView>
-WebOutcome: enum, one tag byte
-    tags Answered=0 NotReached=1 TorMissing=2 TooLong=3
-WebReplyArgs: record: ask: RequestAsk, outcome: WebOutcome, status: u32, body: list<u8>
 RequestStatusView: enum, one tag byte
     tags Waiting=0 PartPaid=1 Paid=2 Overpaid=3 Almost=4
 RequestEndView: enum, one tag byte

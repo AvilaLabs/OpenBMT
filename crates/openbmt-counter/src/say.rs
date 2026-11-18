@@ -626,13 +626,6 @@ impl<E: Display> OpenRefused<E> {
                 "CR-61",
             ),
             Self::BadNote => note_not_read(),
-            Self::BadReference => refused(
-                "Sale not opened",
-                "The till reference has a sign or a space that is not allowed, or is over 32 characters, so the sale was not opened.",
-                Who::Cashier,
-                "Type the reference again as the till shows it, without spaces.",
-                "CR-245",
-            ),
             Self::AddressNotStored(fault) => store_failed(
                 fault,
                 "Payment code not saved",
@@ -2169,7 +2162,6 @@ pub fn all_words() -> Vec<(String, Words)> {
     all.push(("Screen::tipChoose".to_string(), tip_choose_words("$12.50")));
     all.push(("Screen::stuck".to_string(), stuck_words()));
     all.push(("Screen::late".to_string(), late_words()));
-    all.extend(crate::till_say::all_till_words());
 
     let w = write_fault;
     let open: Vec<(&str, OpenRefused<String>)> = vec![
@@ -2206,7 +2198,6 @@ pub fn all_words() -> Vec<(String, Words)> {
         ("AddressInUse", OpenRefused::AddressInUse),
         ("BadName", OpenRefused::BadName),
         ("BadNote", OpenRefused::BadNote),
-        ("BadReference", OpenRefused::BadReference),
         ("AddressNotStored", OpenRefused::AddressNotStored(w())),
         ("Store", OpenRefused::Store(w())),
         ("Store/Record", OpenRefused::Store(record_fault())),

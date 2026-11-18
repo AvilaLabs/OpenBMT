@@ -33,7 +33,7 @@
     host: import(assets.host), ownerHost: import(assets.ownerHost),
     model: import(assets.model), ownerModel: import(assets.ownerModel),
     // The pairing record made at build time; without it the counter makes it at each start (about two seconds).
-    record: made(assets.record), recordWithBox: made(assets.recordWithBox),
+    record: made(assets.record),
   };
   for (const k in engines) engines[k].catch(() => {});
   const palette = new U.PaletteOf(await (await fetch(assets.palette)).json());
@@ -56,7 +56,7 @@
   box.prepare();
 
   // Filled in when the engines are ready (ready()); nothing below runs a counter before that.
-  let wasm, loadCounter, flow, ownerWasm, loadOwner, ownerFlow, record, recordWithBox;
+  let wasm, loadCounter, flow, ownerWasm, loadOwner, ownerFlow, record;
   let readyOnce = null;
   const ready = () => readyOnce || (readyOnce = (async () => {
     wasm = await engines.counter;
@@ -66,7 +66,6 @@
     ({ loadOwner } = await engines.ownerHost);
     ownerFlow = (await engines.ownerModel).OwnerFlowDemo.getInstance();
     record = await engines.record;
-    recordWithBox = await engines.recordWithBox;
   })());
 
   // The page's clock. A visitor who jumps to a later step has the seconds a real counter would have waited skipped.
@@ -162,11 +161,11 @@
       },
       event(kind, data) {
         if (r.dead || !current()) return;
-        // Controller.kt:2498 first: the first time this sale's screen is green or red, its sound plays, once; the model's
+        // Controller.kt:2828 first: the first time this sale's screen is green or red, its sound plays, once; the model's
         // OutcomePlays (SaleModel.kt:87) keeps count, and the notice of CR-284 shares it. A visitor's skipped taps
         // (r.quiet) are made without it.
         if (kind === "sale" && flow.outcomeFirst(data.number - 1, data.says.colour) && !r.quiet) box.outcome(data.says.colour);
-        // Controller.kt:681 onTurns: a sale that turned on another screen plays its colour's sound once, with its notice.
+        // Controller.kt:593 onTurns: a sale that turned on another screen plays its colour's sound once, with its notice.
         if (kind === "notice" && !r.quiet) box.outcome(data.colour);
         r.onEvent(kind, data);
       },
@@ -243,9 +242,6 @@
     if (b) b.disabled = true;
   }
 
-  /** What the register's two ways need of this page. */
-  const registerRun = () => ({ assets, palette, clock, flow, ownerFlow, wasm, ownerWasm, loadCounter, loadOwner, stopRun, exclusiveStart, record, recordWithBox });
-
   // ---- As a merchant: the counter and the owner's phone; the demo plays the customer. ----
   function merchantMoments(go, S) {
     const c = () => run.controller;
@@ -260,7 +256,6 @@
       }, auto() { c().showNewSale(); } },
       { step: 0, enter() {
         shell.say("The customer's order comes to 8.00 USD.", ["Type the amount, then tap ", { b: "Open the sale" }, "."]);
-        OpenBmtRegister.play(shell, registerRun());
         aim(nextTap(flow.entryMinor()));
         S.on = { entry: (e) => aim(nextTap(e.minor)), sale: go };
       }, auto() { for (const key of AMOUNT) c().press(key); c().openEntered(); } },
@@ -509,34 +504,25 @@
     shell.start([
       { name: "As a customer", what: "Pay a shop in bitcoin, the way it works at the counter.", go: "Start", onPick: () => shell.pick("Customer") },
       { name: "A café", what: "Take a coffee and a meal at the counter, and see them reach the owner's phone.", go: "Start", onPick: () => shell.pick("Café") },
-      { name: "With your register", what: "The counter beside the register a shop already has.", go: "Start", onPick: () => shell.pick("With your register") },
       { name: "When something goes wrong", what: "A short payment or a cancelled one, and what the counter does.", go: "Start", onPick: () => shell.pick("A short payment") },
     ], snap, { quiet: first === true });
   };
   shell.onRestart = () => pick();
   // The ending card plays the logo's confirmation sound once, as the box's green outcome does; a red end has none.
   shell.onCard = (leaf) => { if (leaf !== "A cancelled payment") box.outcome("Green"); };
-  // A tab, a menu item or a card starts its scenario from the first moment; the register's tab opens its choice.
+  // A tab, a menu item or a card starts its scenario from the first moment.
   shell.onScenario = async (name) => {
     shell.leave();
-    const mine = ++playing;
+    ++playing;
     shell.onStep = null;
     stopRun();
     if (name === "Customer") await play(customer);
     else if (name === "Café") await play(merchant);
     else if (name === "A short payment") await play(wrong);
     else if (name === "A cancelled payment") await play(cancelled);
-    else {
-      await ready();
-      if (mine !== playing) return;
-      OpenBmtRegister.open(shell, registerRun(), name === "With your register" ? undefined : name);
-    }
   };
   const want = new URLSearchParams(location.search).get("path");
-  // The register's ways by name: sends, square, clover ("any", the way's first name, is Square), and register for the choice.
-  const registerWay = { sends: "Your register sends the amount", square: "Square", any: "Square", clover: "Clover", register: undefined };
-  if (want in registerWay) { await ready(); OpenBmtRegister.open(shell, registerRun(), registerWay[want]); }
-  else if (want === "merchant") await play(merchant);
+  if (want === "merchant") await play(merchant);
   else if (want === "customer") await play(customer);
   else if (want === "wrong") await play(wrong);
   else if (want === "cancelled") await play(cancelled);

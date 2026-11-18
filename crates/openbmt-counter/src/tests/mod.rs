@@ -27,7 +27,6 @@ mod staff;
 mod states;
 mod storage;
 mod switch;
-mod till;
 mod tips;
 mod totals;
 mod valuation;

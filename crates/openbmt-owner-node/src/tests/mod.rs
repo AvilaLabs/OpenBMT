@@ -25,8 +25,6 @@ mod live;
 mod node;
 mod own_waiting;
 mod paid_check;
-mod pos;
-mod pos_notice;
 mod price;
 mod refunds;
 mod say;

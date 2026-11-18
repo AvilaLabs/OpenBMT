@@ -26,6 +26,5 @@ mod starter;
 mod strict;
 mod switch;
 mod tap;
-mod till;
 mod tips;
 pub(crate) mod wire;

@@ -92,12 +92,6 @@ private const val OP_NOTES = 60
 private const val OP_RESCAN = 61
 private const val OP_RECOVER_KEY1 = 62
 private const val OP_ARCHIVE_PAID = 63
-private const val OP_POS_STATE = 70
-private const val OP_POS_SETUP = 71
-private const val OP_POS_REMOVE = 72
-private const val OP_POS_REQUEST = 73
-private const val OP_POS_REPLY = 74
-private const val OP_POS_ACKNOWLEDGE = 75
 private const val OP_CEREMONY_MAKE_KEY1 = 80
 private const val OP_CEREMONY_READ_ANSWER = 81
 private const val OP_CEREMONY_BUILD_WALLET = 82
@@ -223,13 +217,6 @@ private const val OP_REQUEST_REPEATS = 223
 private const val OP_REQUEST_STOP_REPEATING = 224
 private const val OP_REQUEST_STATE = 225
 private const val OP_REQUEST_RETURN_ASK = 226
-private const val OP_WEB_PAIR_START = 227
-private const val OP_WEB_PAIR_CONFIRM = 228
-private const val OP_WEB_UNPAIR = 229
-private const val OP_WEB_STATE = 230
-private const val OP_WEB_STEP = 231
-private const val OP_WEB_REPLY = 232
-private const val OP_WEB_CODE_READ = 233
 private const val OP_REQUEST_READ = 234
 private const val OP_STARTER_LINE_SET = 235
 private const val OP_SHOP_LIGHTNING_REPORT = 236
@@ -256,19 +243,6 @@ private const val TAG_REQUEST_PRICE_IN_SHOP_CURRENCY = 1
 private const val TAG_REQUEST_EVERY_WEEK = 0
 private const val TAG_REQUEST_EVERY_MONTH = 1
 private const val TAG_REQUEST_EVERY_YEAR = 2
-private const val TAG_WEB_PAIRING_KIND_NONE = 0
-private const val TAG_WEB_PAIRING_KIND_WAITING = 1
-private const val TAG_WEB_PAIRING_KIND_PAIRED = 2
-private const val TAG_WEB_STEP_KIND_IDLE = 0
-private const val TAG_WEB_STEP_KIND_BUSY = 1
-private const val TAG_WEB_STEP_KIND_CALL = 2
-private const val TAG_WEB_CALL_KIND_VIEW_ORDERS = 0
-private const val TAG_WEB_CALL_KIND_VIEW_RANGE = 1
-private const val TAG_WEB_CALL_KIND_VIEW_NOTICE = 2
-private const val TAG_WEB_OUTCOME_ANSWERED = 0
-private const val TAG_WEB_OUTCOME_NOT_REACHED = 1
-private const val TAG_WEB_OUTCOME_TOR_MISSING = 2
-private const val TAG_WEB_OUTCOME_TOO_LONG = 3
 private const val TAG_REQUEST_STATUS_VIEW_WAITING = 0
 private const val TAG_REQUEST_STATUS_VIEW_PART_PAID = 1
 private const val TAG_REQUEST_STATUS_VIEW_PAID = 2
@@ -433,21 +407,6 @@ private const val TAG_OUTBOX_KIND_BATCH = 1
 private const val TAG_OUTBOX_KIND_SETTINGS = 2
 private const val TAG_OUTBOX_KIND_PAIRING = 3
 private const val TAG_OUTBOX_KIND_BOX_WELCOME = 4
-private const val TAG_POS_VENDOR_VIEW_SQUARE = 0
-private const val TAG_POS_VENDOR_VIEW_CLOVER = 1
-private const val TAG_POS_METHOD_VIEW_GET = 0
-private const val TAG_POS_METHOD_VIEW_POST = 1
-private const val TAG_POS_ALERT_KIND_TENDER_WITHOUT_PAYMENT = 0
-private const val TAG_POS_ALERT_KIND_CLOSED_BEFORE_PAID = 1
-private const val TAG_POS_ALERT_KIND_PAYMENT_WITHOUT_TENDER = 2
-private const val TAG_POS_ALERT_KIND_AMOUNT_DIFFERS = 3
-private const val TAG_POS_ALERT_KIND_TENDER_ON_UNPAID_SALE = 4
-private const val TAG_POS_ALERT_KIND_VOIDED_AFTER_PAYMENT = 5
-private const val TAG_POS_ALERT_KIND_DUPLICATE_REFERENCE = 6
-private const val TAG_POS_ALERT_KIND_BITCOIN_TIP = 7
-private const val TAG_POS_ALERT_KIND_UNKNOWN_CURRENCY = 8
-private const val TAG_POS_SUBJECT_VIEW_TENDER = 0
-private const val TAG_POS_SUBJECT_VIEW_SALE = 1
 
 // ---- the views ----------------------------------------------------------------------
 //
@@ -1560,107 +1519,8 @@ class RequestState(
     val returns: Words?,
 )
 
-// ---- web orders (docs/WEB-ORDER-RULES.md) ---------------------------------------------
-
-/** What `webPairStart` gives (WO-05): the [code] to paste into the store's settings and the [fingerprint] to compare with the one the store shows. */
-class WebPair(val code: String, val fingerprint: String, val shopName: String, val url: String)
-
-/** What a pairing code holds that the owner compares (WO-05). */
-class WebCode(val fingerprint: String, val shopName: String)
-
-/** How far the pairing has come. */
-enum class WebPairing { None, Waiting, Paired }
-
-/** One order the owner phone refused (WO-22). */
-class WebRefused(val order: Long, val address: String, val sats: Long, val at: Long, val words: Words)
-
-/** One order taken whose amount is more than 5% from its total at the phone's rate (WO-22). */
-class WebAmountOff(val order: Long, val sats: Long, val words: Words)
-
-/** What the store's page shows (WO-21, WO-22). */
-class WebState(
-    val off: Words?,
-    val pairing: WebPairing,
-    val shopName: String,
-    val url: String,
-    val fingerprint: String,
-    val code: String?,
-    val lastVisit: Long?,
-    val failure: Words?,
-    val retryAt: Long?,
-    val left: Long?,
-    val addressesSent: Long,
-    val trouble: Words?,
-    val orders: Long,
-    val waiting: Long,
-    val told: Long,
-    val noticesWaiting: Long,
-    val refused: List<WebRefused>,
-    val amountOff: List<WebAmountOff>,
-)
-
-/** Which call of a visit. */
-enum class WebCallKind { Orders, Range, Notice }
-
-/** What the node wants next. */
-enum class WebStepKind { Idle, Busy, Call }
-
-/** One POST to the store, to be sent as it is: [headers] are name and value pairs, [body] is exactly what is sent (WO-20). */
-class WebCall(
-    val kind: WebCallKind,
-    val url: String,
-    val headers: List<Pair<String, String>>,
-    val contentType: String,
-    val body: ByteArray,
-)
-
-/** What `webStep` gives: [call] is there for [WebStepKind.Call]. */
-class WebStep(val step: WebStepKind, val call: WebCall?)
-
-/** How a call ended, as the app saw it. */
-enum class WebOutcome { Answered, NotReached, TorMissing, TooLong }
-
 /** The code a counter takes: [code] is the bundle to show, [withBatch] says the first addresses are in it. */
 class CounterBundle(val code: ByteArray, val withBatch: Boolean, val words: Words)
-
-enum class PosVendor { Square, Clover }
-
-/** The owner's settings for the till: the vendor, its location id, the names of the Bitcoin tender and the shop's currencies. */
-class PosSetup(
-    val vendor: PosVendor,
-    val location: String,
-    val tenderNames: List<String>,
-    val currencies: List<String>,
-)
-
-enum class PosMethod { Get, Post }
-
-/** The request to send to the till: no sign-in in it; the app adds its own. */
-class PosRequest(val method: PosMethod, val url: String, val body: ByteArray)
-
-enum class PosAlertKind {
-    TenderWithoutPayment,
-    ClosedBeforePaid,
-    PaymentWithoutTender,
-    AmountDiffers,
-    TenderOnUnpaidSale,
-    VoidedAfterPayment,
-    DuplicateReference,
-    BitcoinTip,
-    UnknownCurrency,
-}
-
-/** What a till alert is about. */
-sealed class PosSubject {
-    class Tender(val order: String, val tender: String) : PosSubject()
-
-    class Sale(val counter: ByteArray, val index: Long) : PosSubject()
-}
-
-/** An alert's identity, as `posState` showed it. */
-class PosAlertKey(val kind: PosAlertKind, val subject: PosSubject)
-
-class PosAlert(val key: PosAlertKey, val raisedAt: Long, val words: Words)
 
 // ---- the counter checks (ops 239 to 242, `docs/OWNER-COINS-RULES.md` OC-60 to OC-64) ----
 
@@ -1718,29 +1578,6 @@ class PaidDay(
     val seenSats: Long,
     val differs: Boolean,
 )
-
-class PosReply(
-    val again: Boolean,
-    val moreLeft: Boolean,
-    val pages: Long,
-    val ordersRead: Long,
-    val newMatches: Long,
-    val newAlerts: List<PosAlert>,
-    val cleared: Long,
-    val retired: Long,
-)
-
-class PosState(
-    val setup: PosSetup?,
-    val lastPollAt: Long?,
-    val openAlerts: List<PosAlert>,
-    val acknowledgedAlerts: Long,
-    val trackedOrders: Long,
-    val matches: Long,
-    val matchesByOrder: Long,
-    val retiredMatches: Long,
-)
-
 
 // ---- the key ceremony on this phone (ops 80 to 86, no node) --------------------------------
 
@@ -2020,55 +1857,6 @@ internal fun Writer.requestEvery(v: RequestEvery): Writer =
         },
     )
 
-internal fun Writer.webOutcome(v: WebOutcome): Writer =
-    u8(
-        when (v) {
-            WebOutcome.Answered -> TAG_WEB_OUTCOME_ANSWERED
-            WebOutcome.NotReached -> TAG_WEB_OUTCOME_NOT_REACHED
-            WebOutcome.TorMissing -> TAG_WEB_OUTCOME_TOR_MISSING
-            WebOutcome.TooLong -> TAG_WEB_OUTCOME_TOO_LONG
-        },
-    )
-
-internal fun Reader.webPair(): WebPair = WebPair(string(), string(), string(), string())
-
-internal fun Reader.webPairing(): WebPairing =
-    when (val t = u8()) {
-        TAG_WEB_PAIRING_KIND_NONE -> WebPairing.None
-        TAG_WEB_PAIRING_KIND_WAITING -> WebPairing.Waiting
-        TAG_WEB_PAIRING_KIND_PAIRED -> WebPairing.Paired
-        else -> tag("WebPairingKind $t")
-    }
-
-internal fun Reader.webState(): WebState =
-    WebState(
-        option { words() }, webPairing(), string(), string(), string(), option { string() },
-        option { u64() }, option { words() }, option { u64() }, option { u64() }, u32(),
-        option { words() }, u32(), u32(), u32(), u32(),
-        list { WebRefused(u64(), string(), u64(), u64(), words()) },
-        list { WebAmountOff(u64(), u64(), words()) },
-    )
-
-internal fun Reader.webStep(): WebStep {
-    val kind = when (val t = u8()) {
-        TAG_WEB_STEP_KIND_IDLE -> WebStepKind.Idle
-        TAG_WEB_STEP_KIND_BUSY -> WebStepKind.Busy
-        TAG_WEB_STEP_KIND_CALL -> WebStepKind.Call
-        else -> tag("WebStepKind $t")
-    }
-    val call = option {
-        val callKind = when (val t = u8()) {
-            TAG_WEB_CALL_KIND_VIEW_ORDERS -> WebCallKind.Orders
-            TAG_WEB_CALL_KIND_VIEW_RANGE -> WebCallKind.Range
-            TAG_WEB_CALL_KIND_VIEW_NOTICE -> WebCallKind.Notice
-            else -> tag("WebCallKindView $t")
-        }
-        WebCall(callKind, string(), list { string() to string() }, string(), bytes())
-    }
-    if ((kind == WebStepKind.Call) != (call != null)) fail("a web step has a call exactly when it is a call")
-    return WebStep(kind, call)
-}
-
 internal fun Reader.requestMade(): RequestMade = RequestMade(u64(), u32(), string())
 
 internal fun Reader.requestShared(): RequestShared =
@@ -2241,39 +2029,6 @@ private fun Reader.alertKind(): AlertKind =
         else -> tag("AlertKind")
     }
 
-private fun Writer.posSetup(v: PosSetup): Writer =
-    u8(
-        when (v.vendor) {
-            PosVendor.Square -> TAG_POS_VENDOR_VIEW_SQUARE
-            PosVendor.Clover -> TAG_POS_VENDOR_VIEW_CLOVER
-        },
-    ).string(v.location).list(v.tenderNames) { string(it) }.list(v.currencies) { string(it) }
-
-private fun Writer.posAlertKind(v: PosAlertKind): Writer =
-    u8(
-        when (v) {
-            PosAlertKind.TenderWithoutPayment -> TAG_POS_ALERT_KIND_TENDER_WITHOUT_PAYMENT
-            PosAlertKind.ClosedBeforePaid -> TAG_POS_ALERT_KIND_CLOSED_BEFORE_PAID
-            PosAlertKind.PaymentWithoutTender -> TAG_POS_ALERT_KIND_PAYMENT_WITHOUT_TENDER
-            PosAlertKind.AmountDiffers -> TAG_POS_ALERT_KIND_AMOUNT_DIFFERS
-            PosAlertKind.TenderOnUnpaidSale -> TAG_POS_ALERT_KIND_TENDER_ON_UNPAID_SALE
-            PosAlertKind.VoidedAfterPayment -> TAG_POS_ALERT_KIND_VOIDED_AFTER_PAYMENT
-            PosAlertKind.DuplicateReference -> TAG_POS_ALERT_KIND_DUPLICATE_REFERENCE
-            PosAlertKind.BitcoinTip -> TAG_POS_ALERT_KIND_BITCOIN_TIP
-            PosAlertKind.UnknownCurrency -> TAG_POS_ALERT_KIND_UNKNOWN_CURRENCY
-        },
-    )
-
-private fun Writer.posAlertKey(v: PosAlertKey): Writer {
-    posAlertKind(v.kind)
-    when (val subject = v.subject) {
-        is PosSubject.Tender ->
-            u8(TAG_POS_SUBJECT_VIEW_TENDER).string(subject.order).string(subject.tender)
-        is PosSubject.Sale -> u8(TAG_POS_SUBJECT_VIEW_SALE).bytes(subject.counter).u32(subject.index)
-    }
-    return this
-}
-
 private fun Reader.cashAmount(): CashAmount =
     when (u8()) {
         TAG_CASH_AMOUNT_VIEW_SATS -> CashAmount.Sats(u64())
@@ -2368,43 +2123,6 @@ private fun Reader.oldKind(): OldKind =
         else -> tag("OldKind")
     }
 
-private fun Reader.posVendor(): PosVendor =
-    when (u8()) {
-        TAG_POS_VENDOR_VIEW_SQUARE -> PosVendor.Square
-        TAG_POS_VENDOR_VIEW_CLOVER -> PosVendor.Clover
-        else -> tag("PosVendorView")
-    }
-
-private fun Reader.posMethod(): PosMethod =
-    when (u8()) {
-        TAG_POS_METHOD_VIEW_GET -> PosMethod.Get
-        TAG_POS_METHOD_VIEW_POST -> PosMethod.Post
-        else -> tag("PosMethodView")
-    }
-
-private fun Reader.posAlertKind(): PosAlertKind =
-    when (u8()) {
-        TAG_POS_ALERT_KIND_TENDER_WITHOUT_PAYMENT -> PosAlertKind.TenderWithoutPayment
-        TAG_POS_ALERT_KIND_CLOSED_BEFORE_PAID -> PosAlertKind.ClosedBeforePaid
-        TAG_POS_ALERT_KIND_PAYMENT_WITHOUT_TENDER -> PosAlertKind.PaymentWithoutTender
-        TAG_POS_ALERT_KIND_AMOUNT_DIFFERS -> PosAlertKind.AmountDiffers
-        TAG_POS_ALERT_KIND_TENDER_ON_UNPAID_SALE -> PosAlertKind.TenderOnUnpaidSale
-        TAG_POS_ALERT_KIND_VOIDED_AFTER_PAYMENT -> PosAlertKind.VoidedAfterPayment
-        TAG_POS_ALERT_KIND_DUPLICATE_REFERENCE -> PosAlertKind.DuplicateReference
-        TAG_POS_ALERT_KIND_BITCOIN_TIP -> PosAlertKind.BitcoinTip
-        TAG_POS_ALERT_KIND_UNKNOWN_CURRENCY -> PosAlertKind.UnknownCurrency
-        else -> tag("PosAlertKind")
-    }
-
-private fun Reader.posSubject(): PosSubject =
-    when (u8()) {
-        TAG_POS_SUBJECT_VIEW_TENDER -> PosSubject.Tender(string(), string())
-        TAG_POS_SUBJECT_VIEW_SALE -> PosSubject.Sale(bytes(), u32())
-        else -> tag("PosSubjectView")
-    }
-
-private fun Reader.posSetup(): PosSetup = PosSetup(posVendor(), string(), strings(), strings())
-
 private fun Reader.paidAlarm(): PaidAlarm = PaidAlarm(bytes(), u32(), string(), u64(), u64(), u64(), u64(), bool())
 
 private fun Reader.paidArrived(): PaidArrived = PaidArrived(bytes(), u32(), u64())
@@ -2426,20 +2144,6 @@ internal fun Reader.paidCheck(): PaidCheck = PaidCheck(
 )
 
 internal fun Reader.paidDay(): PaidDay = PaidDay(bytes(), u32(), u64(), u32(), u32(), u32(), u32(), u64(), bool())
-
-private fun Reader.posAlert(): PosAlert =
-    PosAlert(PosAlertKey(posAlertKind(), posSubject()), u64(), words())
-
-internal fun Reader.posRequest(): PosRequest = PosRequest(posMethod(), string(), bytes())
-
-internal fun Reader.posReply(): PosReply =
-    PosReply(bool(), bool(), u32(), u32(), u32(), list { posAlert() }, u32(), u64())
-
-internal fun Reader.posState(): PosState =
-    PosState(
-        option { posSetup() }, option { u64() }, list { posAlert() }, u32(), u32(), u32(), u32(),
-        u64(),
-    )
 
 internal fun Reader.pump(): Pump = Pump(strings(), bool())
 
@@ -3769,42 +3473,6 @@ class OwnerNode private constructor(private val handle: Long) : AutoCloseable {
         return r.requestState().also { r.end() }
     }
 
-    /** WO-05, WO-06: make the key and the pairing code for the store at [url]; the owner pastes the code into the store's settings. */
-    fun webPairStart(ask: RequestAsk, url: String, shopName: String): WebPair {
-        val r = call(OP_WEB_PAIR_START, handle) { it.requestAsk(ask).string(url).string(shopName) }
-        return r.webPair().also { r.end() }
-    }
-
-    /** WO-05: the owner says the fingerprint the store shows is the one this phone shows; the store is visited from now on. */
-    fun webPairConfirm(ask: RequestAsk): WebState {
-        val r = call(OP_WEB_PAIR_CONFIRM, handle) { it.requestAsk(ask) }
-        return r.webState().also { r.end() }
-    }
-
-    /** WO-07: forget the key and the secret. The addresses given stay watched. */
-    fun webUnpair(ask: RequestAsk): WebState {
-        val r = call(OP_WEB_UNPAIR, handle) { it.requestAsk(ask) }
-        return r.webState().also { r.end() }
-    }
-
-    /** WO-21, WO-22: what the store's page shows. */
-    fun webState(ask: RequestAsk): WebState {
-        val r = call(OP_WEB_STATE, handle) { it.requestAsk(ask) }
-        return r.webState().also { r.end() }
-    }
-
-    /** WO-20: the next step of a visit; [force] asks for a visit now, without the waiting after a failure. */
-    fun webStep(ask: RequestAsk, force: Boolean): WebStep {
-        val r = call(OP_WEB_STEP, handle) { it.requestAsk(ask).bool(force) }
-        return r.webStep().also { r.end() }
-    }
-
-    /** WO-20: the store's answer to the call in the air: [status] and [body] when it answered, else the [outcome] that says why not. */
-    fun webReply(ask: RequestAsk, outcome: WebOutcome, status: Long, body: ByteArray): WebState {
-        val r = call(OP_WEB_REPLY, handle) { it.requestAsk(ask).webOutcome(outcome).u32(status).bytes(body) }
-        return r.webState().also { r.end() }
-    }
-
     /** RQ-27: the line that asks a customer for a bitcoin address, for a return of [amount] from request [number]. */
     fun requestReturnAsk(ask: RequestAsk, number: Long, inCurrency: Boolean, amount: Long, shopName: String): String {
         val r = call(OP_REQUEST_RETURN_ASK, handle) { w ->
@@ -3812,34 +3480,6 @@ class OwnerNode private constructor(private val handle: Long) : AutoCloseable {
         }
         return r.string().also { r.end() }
     }
-
-    /** What the till screen shows: the connection, the open alerts and the counts. */
-    fun posState(): PosState {
-        val r = call(OP_POS_STATE, handle)
-        return r.posState().also { r.end() }
-    }
-
-    /** Connect the till, or change its settings (the sign-in token is the app's, never the library's). */
-    fun posSetup(setup: PosSetup) = callUnit(OP_POS_SETUP, handle) { it.posSetup(setup) }
-
-    /** Take the till off: its settings and everything kept about it are removed. */
-    fun posRemove() = callUnit(OP_POS_REMOVE, handle)
-
-    /** The next request to send to the till; the app adds the sign-in and sends it. */
-    fun posRequest(now: Long): PosRequest {
-        val r = call(OP_POS_REQUEST, handle) { it.u64(now) }
-        return r.posRequest().also { r.end() }
-    }
-
-    /** Hand over the till's answer to the request just made: its status and the body bytes. */
-    fun posReply(now: Long, status: Long, body: ByteArray): PosReply {
-        val r = call(OP_POS_REPLY, handle) { it.u64(now).u32(status).bytes(body) }
-        return r.posReply().also { r.end() }
-    }
-
-    /** Acknowledge an open alert, in this phone's own ledger only. */
-    fun posAcknowledge(now: Long, key: PosAlertKey) =
-        callUnit(OP_POS_ACKNOWLEDGE, handle) { it.u64(now).posAlertKey(key) }
 }
 
 /**
@@ -3970,14 +3610,6 @@ object OwnerImport {
     fun read(text: String): ImportedWalletView {
         val r = call(OP_WALLET_IMPORT_READ, 0) { it.string(text) }
         return ImportedWalletView(r.importKind(), r.option { r.string() }, r.string()).also { r.end() }
-    }
-}
-
-object OwnerWeb {
-    /** WO-05: the fingerprint and the shop's name in a pairing code, or an [OwnerException] with the words. */
-    fun readCode(text: String): WebCode {
-        val r = call(OP_WEB_CODE_READ, 0) { it.string(text) }
-        return WebCode(r.string(), r.string()).also { r.end() }
     }
 }
 

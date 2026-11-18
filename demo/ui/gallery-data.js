@@ -72,7 +72,7 @@
 
   const counterWords = {
     newSale: "New sale", sales: "Sales", today: "Today", bills: "Bills and tabs", lock: "Lock", openRequests: "Open requests",
-    till: { card: "From the till", start: "Start", notNow: "Not now" }, starterSeen: "Seen",
+    starterSeen: "Seen",
     amountLabel: "Amount of the sale", open: "Open the sale", request: "Request to send",
     shareLink: "Share the link", shareCode: "Share the code", copy: "Copy the request", details: "Details and refunds",
     requote: "Requote", cancel: "Cancel the sale", override: "Accept by hand (manager)", done: "Done",
@@ -127,11 +127,11 @@
       ],
     },
     details: {
-      number: 1, says: paid, flags: [checkedLight], note: null, reference: null, notice: null,
+      number: 1, says: paid, flags: [checkedLight], note: null, notice: null,
       facts: [["Sale 1", "24.50 USD, 33,309 sats to send"], ["Received", "33,309 sats of 33,309 sats"]],
-      words: { note: "Note", reference: "Till reference", refunds: "Refunds", noRefund: "No refund was asked for." },
+      words: { note: "Note", refunds: "Refunds", noRefund: "No refund was asked for." },
       refunds: [],
-      actions: ["Add a note", "Add till reference", "Ask for a refund", "Refund in cash from the till", "Back to the sale", "Back to sales"],
+      actions: ["Add a note", "Ask for a refund", "Refund in cash from the till", "Back to the sale", "Back to sales"],
     },
     today: {
       paid: { label: "Sales paid", amount: "45.00 USD", detail: "3 sales · 54,000 sats" },

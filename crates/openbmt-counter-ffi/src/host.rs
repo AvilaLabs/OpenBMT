@@ -399,7 +399,6 @@ fn check_start(
             Some(LinkPlan {
                 hint,
                 identity: record.identity().map_err(record_refused)?,
-                notice_identity: record.identity().map_err(record_refused)?,
                 owner: record.owner(),
                 proxy: driver.proxy.or(proxy),
                 tor_on: settings.tor_on,
@@ -493,10 +492,7 @@ impl Entry {
             link,
         } = check_start(req, policy, &clock)?;
         let node = Node::start_with(config, spawn).map_err(|e| start_error(&e))?;
-        let link = link
-            .map(|plan| LinkSlot::start(plan, LEASE_WAIT, &node))
-            .transpose()
-            .map_err(|e| refused_by("BX-40", e))?;
+        let link = link.map(|plan| LinkSlot::start(plan, LEASE_WAIT, &node));
         Ok(Self {
             inner: Mutex::new(Inner {
                 node: Some(node),
@@ -676,7 +672,6 @@ impl Entry {
                 request_days: sale.request().map_or(0, RequestDays::days),
                 expires_at: sale.expires_at(),
                 cash_refund_only: node.refund_onchain_room(index) == Some(0),
-                reference: node.counter().sale_reference(index).map(str::to_string),
                 bill_number: node.bill_of_sale(index),
                 currency: sale.currency().to_string(),
             })
@@ -848,7 +843,6 @@ impl Entry {
             let extras = SaleExtras {
                 note: note.as_deref(),
                 request,
-                reference: None,
             };
             let opened = if note.is_some() || request.is_some() {
                 node.open_with_extras(
@@ -1255,7 +1249,7 @@ impl Entry {
             let (reports, out) = link.take_step(node, polled, now);
             held.extend(reports);
             // Settings may have changed in this very relay frame. Route
-            // notices only to the Box keys the node now trusts.
+            // only to the Box keys the node now trusts.
             crate::relay::sync_box_peers(link.courier_mut(), node.settings().boxes.iter().copied());
             Ok(out)
         })?;

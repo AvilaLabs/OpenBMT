@@ -1,10 +1,9 @@
 package org.openbmt.owner.app
 
 /**
- * The words of the first run: the welcome, the practice shop, the shop, the till and the steps for the till
- * (docs/DESIGN.md section 2.1). They are plain sentences and labels, written down once; the screens copy them
- * and write nothing of their own. `{till}` is the name of the till as listed. The list is written to
- * docs/screens/owner-app.md by [AppWords.screensMarkdown]. No Android class is used.
+ * The words of the first run: the welcome, the practice shop and the shop (docs/DESIGN.md section 2.1). They are
+ * plain sentences and labels, written down once; the screens copy them and write nothing of their own. The list is
+ * written to docs/screens/owner-app.md by [AppWords.screensMarkdown]. No Android class is used.
  */
 object FirstRunWords {
     // ---- welcome --------------------------------------------------------------------------------
@@ -20,7 +19,7 @@ object FirstRunWords {
     // ---- before starting ---------------------------------------------------------------------------
 
     const val beforeTitle = "Before you start"
-    const val beforeText = "About 10 minutes. You'll need this phone, a pen, and the phone or tablet for your till, if you use one."
+    const val beforeText = "About 10 minutes. You'll need this phone and a pen."
     const val beforeResume = "You can stop at any step and carry on later."
     const val beforeGo = "Start"
 
@@ -65,91 +64,6 @@ object FirstRunWords {
     const val moneyBitcoinNote = "Prices are set in sats, and the books count in sats. No exchange rate is used."
     const val moneyTabsSpoken = "Your money: {tab} chosen. Double tap the other tab to switch."
     const val shopNext = "Next"
-
-    // ---- how you take payments now ------------------------------------------------------------------
-
-    const val tillTitle = "How do you take payments now?"
-    const val tillText = "Bitcoin is added to your till as one more way to pay. Nothing else about your till changes."
-    const val tillReads = "OpenBMT only reads your till's orders, to match each bitcoin payment to its sale. It never changes them, and your till never sees a bitcoin address."
-    const val tillSearch = "Search tills"
-    const val tillNone = "No till. I write sales down or use a cash box."
-    const val tillOther = "Another till"
-    const val tillNext = "Next"
-
-    // ---- till steps ---------------------------------------------------------------------------------
-
-    const val tillStepsTitle = "Add Bitcoin to {till}"
-    const val tillStepsIntro = "Do this once, on the computer or tablet where you manage {till}. It takes about two minutes."
-    const val tillStepsCashier = "At the till, the cashier rings up the sale in {till} as usual, takes the bitcoin on the counter, " +
-        "then picks Bitcoin as the payment in {till}."
-    const val tillStepsNoFee = "{till} does not move the money, so it charges no fee for this payment type."
-    const val tillStepsChecked = "Steps read on {till}'s own help pages on 11 November 2026. " +
-        "Menus change; if yours looks different, look for \"payment types\"."
-    const val tillStepsDone = "Done"
-
-    const val tillNoneText = "The counter keeps every sale with its time, amount and who took it. Your books come from there."
-    const val tillOtherText = "Most tills let you add your own payment type. In your till's settings, look for " +
-        "\"payment types\" or \"payment methods\", add one called Bitcoin, and turn it on for your registers."
-    const val tillOtherAsk = "If your till has no such setting, the counter still keeps every sale for your books."
-
-    /** The names and the steps of the seven tills, in the order they are listed. */
-    const val tillSquare = "Square"
-    val tillSquareSteps = listOf(
-        "In Square Dashboard, open Settings, then Payments, then Payment methods.",
-        "Open Custom payment methods and tap Add payment method.",
-        "Name it OpenBMT, not Bitcoin: Square's own Bitcoin method pays into Square's wallet.",
-        "Turn on Activate on Point of Sale, then tap Add.",
-        "To keep all bitcoin in the shop's wallet, turn off Square's own: in the Square app, Settings, Checkout, Payment, then the X by Bitcoin.",
-    )
-    const val tillSquareCashier = "Cashier: Charge, then More, then Custom payment methods, then OpenBMT."
-    const val tillSquareReports = "Reports: bitcoin sales are under Other in the sales summary."
-
-    const val tillToast = "Toast"
-    val tillToastSteps = listOf(
-        "In Toast Web, open the payment settings and find Other payment options.",
-        "Tap Add and name it Bitcoin.",
-        "Set Show on POS to Yes, then Save and publish.",
-    )
-    const val tillToastCashier = "Cashier: Pay, then Other payments, then Bitcoin."
-
-    const val tillShopify = "Shopify POS"
-    val tillShopifySteps = listOf(
-        "In the Shopify POS app, open Settings, then Payment settings.",
-        "Open Custom payment types and tap Add custom payment type.",
-        "Name it Bitcoin, save, and turn it on.",
-    )
-    const val tillShopifyNote = "It is on for every POS device unless you turn it off on one."
-
-    const val tillLoyverse = "Loyverse"
-    val tillLoyverseSteps = listOf(
-        "In Loyverse Back Office, open Settings, then Payment types.",
-        "Tap Add payment type, pick Other, and name it Bitcoin.",
-        "Choose the stores that take it, then Save.",
-    )
-    const val tillLoyverseReports = "Reports: Sales by payment type shows bitcoin on its own line."
-
-    const val tillOdoo = "Odoo"
-    val tillOdooSteps = listOf(
-        "In Odoo, open Point of Sale, then Configuration, then Payment Methods.",
-        "Tap New and name it Bitcoin.",
-        "Pick a journal of its own for it, leave Integration as None, and choose the points of sale that take it. Save.",
-    )
-
-    const val tillHike = "Hike"
-    val tillHikeSteps = listOf(
-        "In Hike, open Setup, then Payment Types.",
-        "Tap Add Payment Type, name it Bitcoin, choose Custom, and save.",
-        "Under Register Availability, choose the registers that take it.",
-    )
-
-    const val tillStoreHub = "StoreHub"
-    val tillStoreHubSteps = listOf(
-        "In StoreHub BackOffice, open Settings, then Payment Options.",
-        "Tap Add Payment Option, name it Bitcoin, and choose Custom.",
-        "Choose the stores and registers, then Save.",
-        "On each register, open the menu and tap Sync, twice.",
-    )
-    const val tillStoreHubCashier = "Cashier: if Bitcoin is not shown at charge, tap Others."
 
     // ---- where the money goes -----------------------------------------------------------------------
 
@@ -300,15 +214,8 @@ object FirstRunWords {
     const val cardPrint = "Print"
     const val cardTitle = "Taking bitcoin"
     const val cardTitleShop = "Taking bitcoin at {shop}"
-    const val cardRingUp = "Ring up the sale in {till} as usual."
-    const val cardRingUpOther = "Ring up the sale in your till as usual."
     const val cardCounter = "Type the amount on the counter and show the customer the code."
     const val cardPaid = "Hand over the goods when the counter shows Paid. A bigger payment can take about ten minutes."
-    const val cardTillSquare = "Then, in Square: Charge, then More, then Custom payment methods, then OpenBMT."
-    const val cardTillToast = "Then, in Toast: Pay, then Other payments, then Bitcoin."
-    const val cardTillStoreHub = "Then pick Bitcoin as the payment in StoreHub. If it is not shown, tap Others."
-    const val cardTillPick = "Then pick Bitcoin as the payment in {till}."
-    const val cardTillPickOther = "Then pick Bitcoin as the payment in your till."
     const val cardDoubt = "Anything other than Paid: keep the goods and ask the owner."
     const val cardPrintFailed = "The card could not be printed. Try again, or choose Save as PDF on the print screen."
 
@@ -316,9 +223,6 @@ object FirstRunWords {
 
     const val howThisWorks = "How this works"
     const val details = "Details"
-
-    /** The line of a till's name for [t] inside [text]: every `{till}` becomes [t]. */
-    fun with(text: String, t: String): String = text.replace("{till}", t)
 
     /** The spoken description of the money tabs with the chosen tab [tab] named. */
     fun count(n: Int, total: Int): String = realCount.replace("{n}", n.toString()).replace("{total}", total.toString())
@@ -349,19 +253,6 @@ object FirstRunWords {
         add("moneyTabLocal", moneyTabLocal); add("moneyTabBitcoin", moneyTabBitcoin)
         add("moneyBitcoinTitle", moneyBitcoinTitle); add("moneyBitcoinNote", moneyBitcoinNote)
         add("moneyTabsSpoken", moneyTabsSpoken); add("shopNext", shopNext)
-        add("tillTitle", tillTitle); add("tillText", tillText); add("tillReads", tillReads); add("tillSearch", tillSearch)
-        add("tillNone", tillNone); add("tillOther", tillOther); add("tillNext", tillNext)
-        add("tillStepsTitle", tillStepsTitle); add("tillStepsIntro", tillStepsIntro)
-        add("tillStepsCashier", tillStepsCashier); add("tillStepsNoFee", tillStepsNoFee)
-        add("tillStepsChecked", tillStepsChecked); add("tillStepsDone", tillStepsDone)
-        for (t in Till.listed) {
-            add(t.wordsKey, t.title)
-            t.steps.forEachIndexed { i, s -> add("${t.wordsKey}Step${i + 1}", s) }
-            t.cashier?.let { add("${t.wordsKey}Cashier", it) }
-            t.reports?.let { add("${t.wordsKey}Reports", it) }
-            t.note?.let { add("${t.wordsKey}Note", it) }
-        }
-        add("tillNoneText", tillNoneText); add("tillOtherText", tillOtherText); add("tillOtherAsk", tillOtherAsk)
         add("moneyTitle", moneyTitle); add("moneyText", moneyText); add("moneyPlan", moneyPlan)
         add("moneyPlanToday", moneyPlanToday); add("moneyPlanLater", moneyPlanLater); add("moneyOwn", moneyOwn)
         add("moneyOwnNote", moneyOwnNote); add("moneyOther", moneyOther); add("moneyMake", moneyMake); add("moneyMakeNote", moneyMakeNote)
@@ -392,9 +283,7 @@ object FirstRunWords {
         add("checklistCopy", checklistCopy); add("checklistCueCard", checklistCueCard)
         add("cardScreenTitle", cardScreenTitle); add("cardOpen", cardOpen); add("cardScreenText", cardScreenText)
         add("cardPrint", cardPrint); add("cardTitle", cardTitle); add("cardTitleShop", cardTitleShop)
-        add("cardRingUp", cardRingUp); add("cardRingUpOther", cardRingUpOther); add("cardCounter", cardCounter)
-        add("cardPaid", cardPaid); add("cardTillSquare", cardTillSquare); add("cardTillToast", cardTillToast)
-        add("cardTillStoreHub", cardTillStoreHub); add("cardTillPick", cardTillPick); add("cardTillPickOther", cardTillPickOther)
+        add("cardCounter", cardCounter); add("cardPaid", cardPaid)
         add("cardDoubt", cardDoubt); add("cardPrintFailed", cardPrintFailed)
         add("howThisWorks", howThisWorks); add("details", details)
         out.addAll(KeyGuideWords.all())

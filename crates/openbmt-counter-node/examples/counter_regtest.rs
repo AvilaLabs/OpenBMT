@@ -32,9 +32,7 @@
 //!
 //! `--box-key <hex>` makes the relay a Box (BX-20): the Box is added to the
 //! signed settings as a device and a Box, to the courier's table as a Box,
-//! and the owner of the link is the owner `box_pair` paired the Box with;
-//! the counter sends it paid notices (BX-40) and takes its POS notices
-//! (CR-266). `scripts/till-e2e-core.sh` uses it for a sale from the till.
+//! and the owner of the link is the owner `box_pair` paired the Box with.
 //! `--box-owner-fixed` keeps the fixed key of `owner_regtest` as the owner of
 //! the link when there is a Box, for a Box that an own-wallet shop paired with
 //! that key (`scripts/own-box-e2e-core.sh`).
@@ -127,13 +125,6 @@
 //! - `switch-kept`: the app keeps that record in `own-record.bin`, and says
 //!   so: `switch kept` (CR-261, steps three and four)
 //! - `switch-different`: `switch different` (CR-260)
-//! - `till-waiting`: the requests the home screen shows, one line each
-//!   `till sale=<hex> amount=<minor> reference=<text> minutes_left=<n>`,
-//!   then `till waiting=<n>` (CR-267)
-//! - `till-start <sale hex> <rate>`: Start (CR-268); `opened ...` or `refused ...`
-//! - `till-not-now <sale hex>`: `till not-now ok` or `till not-now none`
-//! - `till-of <index>`: `till-of index=<i> sale=<hex|none> cancelled=<bool>`
-//!   (CR-269)
 //! - `limits`: the signed limits of the two checks
 //! - `settings <hex>`: signed settings the owner sent, taken as the link
 //!   takes them (CR-160 to CR-162): `settings taken version=<n>
@@ -1067,58 +1058,6 @@ fn command<P: DriverPort>(
                 Err(e) => say(format!("settings refused {e}")),
             }
         }
-        Some("till-waiting") => {
-            let now = now_secs();
-            let waiting = node.till_waiting();
-            for r in &waiting {
-                say(format!(
-                    "till sale={} amount={} reference={} minutes_left={}",
-                    hex(&r.sale),
-                    r.amount.0,
-                    r.reference,
-                    r.minutes_left(now)
-                ));
-            }
-            say(format!("till waiting={}", waiting.len()));
-        }
-        Some("till-start") => {
-            let sale: [u8; 16] = unhex(words.next())?
-                .try_into()
-                .map_err(|_| "the sale is not 16 bytes".to_string())?;
-            let rate: u64 = number(words.next(), "the rate")?;
-            let rate = Rate::new(rate).ok_or("the rate is zero")?;
-            let source = RateSource::new("regtest-fixed", now_secs()).map_err(|e| e.to_string())?;
-            match node.till_start(&sale, rate, &source, None) {
-                Ok(opened) => {
-                    let address = Address::from_script(&opened.script, Network::Regtest)
-                        .map_err(|e| e.to_string())?;
-                    say(format!(
-                        "opened index={} address={address} sats={}",
-                        opened.index, opened.needs_sats
-                    ));
-                }
-                Err(e) => say(format!("refused {e:?}")),
-            }
-        }
-        Some("till-not-now") => {
-            let sale: [u8; 16] = unhex(words.next())?
-                .try_into()
-                .map_err(|_| "the sale is not 16 bytes".to_string())?;
-            say(if node.till_not_now(&sale) {
-                "till not-now ok"
-            } else {
-                "till not-now none"
-            });
-        }
-        Some("till-of") => {
-            let index: u32 = number(words.next(), "the index")?;
-            say(format!(
-                "till-of index={index} sale={} cancelled={}",
-                node.sale_till(index)
-                    .map_or("none".to_string(), |s| hex(&s)),
-                node.till_cancelled(index)
-            ));
-        }
         Some("hbstate") => {
             let now = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
@@ -1527,10 +1466,6 @@ fn serve<P: DriverPort>(
         (Some(addr), Some(key)) => Some(start_link(dir, addr, key)?),
         _ => None,
     };
-    if let (Some(link), Some(_)) = (link.as_mut(), BOX_KEY.get()) {
-        link.enable_notices(identity(&COUNTER_SECRET)?, dir, &node)
-            .map_err(|e| format!("the notices: {e}"))?;
-    }
 
     let (lines, input) = channel();
     std::thread::spawn(move || {

@@ -46,10 +46,10 @@ Tests are named after the rule (`gv_01_...`).
   the books and on the owner phone, as a sale is: unconfirmed until it
   confirms, and taken back if it does not.
 - **GV-13. Shop-only steps.** At a place of giving, the first run and the
-  home screens do not offer tips, the POS connector (`docs/POS-RULES.md`),
-  the till of the Box or the cashier list. Each stays in the settings, for a
-  place that also sells, such as a café or a bookshop, and works there as in
-  a shop when it is turned on. Tips stay off until they are.
+  home screens do not offer tips, the staff card or the cashier list. Each
+  stays in the settings, for a place that also sells, such as a café or a
+  bookshop, and works there as in a shop when it is turned on. Tips stay off
+  until they are.
 - **GV-14. Left unattended.** A giving point is often left where people
   pass. It shows only the amount screen and the gift in progress; every
   setting, the gift list and the day's totals need the manager's PIN, and

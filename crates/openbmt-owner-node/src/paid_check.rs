@@ -36,14 +36,13 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use openbmt_core::identity::DeviceId;
-use openbmt_core::records::{Chain, DeviceList, Record, RecordKind};
+use openbmt_core::records::{Chain, ChainError, DeviceList, Record, RecordKind};
 use openbmt_core::settings::{Settings, MAX_DEVICES};
 use openbmt_core::wire::{self, DecodeError, Reader};
 use openbmt_counter::money::tolerance;
 use openbmt_counter::Event;
 use openbmt_courier::Post;
 use openbmt_owner::{SaleFacts, SaleKey};
-use openbmt_pos::FactsError;
 
 use crate::facts::FactsRefused;
 use crate::link::OwnerLink;
@@ -220,6 +219,13 @@ pub struct Fold {
     pub passed_over: bool,
 }
 
+/// Why a counter's copy of its records could not be folded (OC-61).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FactsError {
+    /// The copy does not verify.
+    Chain(ChainError),
+}
+
 /// OC-60: the paid sales of one counter, folded from a copy of its records
 /// that verifies, ordered by sale index. A sale stays in the list once it has
 /// had a Paid: a reopening or a replacement, a later record of less, or a
@@ -282,9 +288,6 @@ fn fold_records(records: &[Record], counter: &DeviceId) -> Fold {
                     quoted: *needs_sats,
                 },
             );
-            continue;
-        }
-        if let Event::TillSale { .. } = event {
             continue;
         }
         let Some(acc) = sales.get_mut(&event.index()) else {

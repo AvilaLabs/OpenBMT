@@ -21,7 +21,6 @@
 
 #[cfg(target_arch = "wasm32")]
 pub mod abi;
-pub mod register;
 pub mod shop;
 pub mod world;
 

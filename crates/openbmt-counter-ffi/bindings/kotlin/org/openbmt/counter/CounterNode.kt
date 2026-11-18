@@ -102,9 +102,7 @@ private const val OP_PAIR_ADDRESS_SAME = 69
 private const val OP_PAIR_ADDRESS_DIFFERENT = 70
 private const val OP_PENDING_CHANGE = 71
 private const val OP_CONFIRM_CHANGE = 72
-private const val OP_ADD_REFERENCE = 73
 private const val OP_OPEN_BILL = 74
-private const val OP_ADD_BILL_REFERENCE = 75
 private const val OP_JOIN_SALE = 76
 private const val OP_OPEN_BILL_PART = 77
 private const val OP_ADD_OTHER_PART = 78
@@ -114,10 +112,6 @@ private const val OP_FINISH_TAB = 81
 private const val OP_CLOSE_SHORT = 82
 private const val OP_CANCEL_BILL = 83
 private const val OP_BILLS = 84
-private const val OP_TILL_WAITING = 85
-private const val OP_TILL_START = 86
-private const val OP_TILL_NOT_NOW = 87
-private const val OP_TILL_OF_SALE = 88
 private const val OP_TAP_ANSWER = 89
 private const val OP_SHOP_LIGHTNING_SEED = 90
 private const val OP_SHOP_LIGHTNING = 91
@@ -372,8 +366,6 @@ class SaleInfo(
     val requestDays: Int,
     val expiresAt: Long,
     val cashRefundOnly: Boolean,
-    /** The till's reference of the sale (CR-245), for the Paid screen (CR-254). */
-    val reference: String?,
     /** The number of the bill the sale is a part of (CR-248), for the Paid screen (CR-254). */
     val billNumber: Long?,
     /** The currency the sale was opened in (CR-196), the one its refunds are in; `SAT` for Bitcoin Standard. */
@@ -397,7 +389,6 @@ class Bill(
     val number: Long,
     val kind: BillKind,
     val amountMinor: Long,
-    val reference: String?,
     val openedAt: Long,
     val state: BillState,
     val endedAt: Long,
@@ -409,23 +400,6 @@ class Bill(
     val parts: List<BillPart>,
     val words: Words,
 )
-
-/**
- * One request from the till that waits for the cashier (CR-267): the till's [sale] (16 bytes), the amount in minor
- * units, the reference the till sent (empty when none), when it lapses and the whole minutes left. The [words] are the
- * library's card; they are placeholders until written (CR-271).
- */
-class TillRequest(
-    val sale: ByteArray,
-    val amountMinor: Long,
-    val reference: String,
-    val lapsesAt: Long,
-    val minutesLeft: Long,
-    val words: Words,
-)
-
-/** What a sale carries of the till (CR-268, CR-269): its [sale] when it came from the till, and whether the till cancelled it. */
-class TillOfSale(val sale: ByteArray?, val cancelled: Boolean, val words: Words?)
 
 /** One open request to send, for the list on Home (CR-215). */
 class OpenRequest(
@@ -974,7 +948,7 @@ private fun Reader.pendingChange(): PendingChange =
 internal fun Reader.changeState(): ChangeState = ChangeState(option { pendingChange() }, option { words() })
 
 internal fun Reader.saleInfo(): SaleInfo =
-    SaleInfo(option { string() }, u8(), u64(), bool(), option { string() }, option { u32() }, string())
+    SaleInfo(option { string() }, u8(), u64(), bool(), option { u32() }, string())
 
 private fun Reader.billKind(): BillKind =
     when (u8()) {
@@ -1021,13 +995,10 @@ private fun Reader.billPart(): BillPart = BillPart(option { u32() }, u64(), opti
 
 internal fun Reader.bill(): Bill =
     Bill(
-        u32(), billKind(), u64(), option { string() }, u64(), billState(), u64(), u64(), u64(), u64(), u32(), u64(),
+        u32(), billKind(), u64(), u64(), billState(), u64(), u64(), u64(), u64(), u32(), u64(),
         list { billPart() }, words(),
     )
 
-internal fun Reader.tillRequest(): TillRequest = TillRequest(bytes(), u64(), string(), u64(), u64(), words())
-
-internal fun Reader.tillOfSale(): TillOfSale = TillOfSale(option { bytes() }, bool(), option { words() })
 
 internal fun Reader.openRequest(): OpenRequest =
     OpenRequest(u32(), option { string() }, u64(), u64(), u64(), u64())
@@ -1499,22 +1470,10 @@ class CounterNode private constructor(private val handle: Long) : AutoCloseable 
         return r.string().also { r.end() }
     }
 
-    /** CR-245: give a sale the till's reference. A reference the library refuses is a [CounterException] with its words. */
-    fun addReference(now: Long, index: Long, reference: String) {
-        val r = call(OP_ADD_REFERENCE, handle) { it.u64(now).u32(index).string(reference) }
-        r.end()
-    }
-
     /** CR-246: open a bill or a tab for [amountMinor] of the shop's currency; returns its number. */
-    fun openBill(now: Long, kind: BillKind, amountMinor: Long, reference: String? = null): Long {
-        val r = call(OP_OPEN_BILL, handle) { it.u64(now).billKind(kind).u64(amountMinor).option(reference) { x -> it.string(x) } }
+    fun openBill(now: Long, kind: BillKind, amountMinor: Long): Long {
+        val r = call(OP_OPEN_BILL, handle) { it.u64(now).billKind(kind).u64(amountMinor) }
         return r.u32().also { r.end() }
-    }
-
-    /** CR-245: give a bill that has none the till's reference. */
-    fun addBillReference(now: Long, number: Long, reference: String) {
-        val r = call(OP_ADD_BILL_REFERENCE, handle) { it.u64(now).u32(number).string(reference) }
-        r.end()
     }
 
     /** CR-248: a sale that is open or already paid, such as a paid request to send, becomes a part of a bill. */
@@ -1533,13 +1492,12 @@ class CounterNode private constructor(private val handle: Long) : AutoCloseable 
         sourceLabel: String,
         sourceFetchedAt: Long,
         actor: Actor? = null,
-        reference: String? = null,
         note: String? = null,
     ): Opened {
         val r =
             call(OP_OPEN_BILL_PART, handle) {
                 it.u64(now).u32(number).u64(amountMinor).u64(tipMinor).u64(rate).string(sourceLabel)
-                    .u64(sourceFetchedAt).option(actor) { a -> it.actor(a) }.option(reference) { x -> it.string(x) }
+                    .u64(sourceFetchedAt).option(actor) { a -> it.actor(a) }
                     .option(note) { x -> it.string(x) }
             }
         return r.opened().also { r.end() }
@@ -1588,44 +1546,6 @@ class CounterNode private constructor(private val handle: Long) : AutoCloseable 
     fun bills(now: Long): List<Bill> {
         val r = call(OP_BILLS, handle) { it.u64(now) }
         return r.list { r.bill() }.also { r.end() }
-    }
-
-    /** CR-267: the requests from the till that wait, oldest first, not lapsed and not hidden by Not now. */
-    fun tillWaiting(now: Long): List<TillRequest> {
-        val r = call(OP_TILL_WAITING, handle) { it.u64(now) }
-        return r.list { r.tillRequest() }.also { r.end() }
-    }
-
-    /**
-     * CR-268: Start. Opens the sale for the request's amount at the counter's own rate; the payment is what the
-     * customer scans. A refusal is a [CounterException] with its words and the request stays.
-     */
-    fun tillStart(
-        now: Long,
-        sale: ByteArray,
-        rate: Long,
-        sourceLabel: String,
-        sourceFetchedAt: Long,
-        actor: Actor? = null,
-    ): Opened {
-        val r =
-            call(OP_TILL_START, handle) {
-                it.u64(now).bytes(sale).u64(rate).string(sourceLabel).u64(sourceFetchedAt)
-                    .option(actor) { a -> it.actor(a) }
-            }
-        return r.opened().also { r.end() }
-    }
-
-    /** CR-267: Not now. The request is hidden and nothing is sent. */
-    fun tillNotNow(now: Long, sale: ByteArray) {
-        val r = call(OP_TILL_NOT_NOW, handle) { it.u64(now).bytes(sale) }
-        r.end()
-    }
-
-    /** CR-268, CR-269: whether a sale came from the till and whether the till cancelled it. */
-    fun tillOfSale(index: Long): TillOfSale {
-        val r = call(OP_TILL_OF_SALE, handle) { it.u32(index) }
-        return r.tillOfSale().also { r.end() }
     }
 
     /** Work out the state of a sale now. */

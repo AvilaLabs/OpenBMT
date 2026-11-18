@@ -11,7 +11,6 @@
 use std::collections::BTreeMap;
 use std::fs::{self, File};
 use std::io::{self, Write};
-use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
 /// The operations the Box's state needs from its storage.
@@ -23,9 +22,6 @@ pub trait BoxFiles {
     fn write(&mut self, name: &str, bytes: &[u8]) -> io::Result<()>;
     /// Remove the file; no error if it is not there.
     fn remove(&mut self, name: &str) -> io::Result<()>;
-    /// The permission bits of the file (the lowest nine), or `None` if there
-    /// is none (BX-41).
-    fn mode(&self, name: &str) -> io::Result<Option<u32>>;
 }
 
 /// The files of a data directory.
@@ -76,14 +72,6 @@ impl BoxFiles for DirFiles {
             Err(e) => Err(e),
         }
     }
-
-    fn mode(&self, name: &str) -> io::Result<Option<u32>> {
-        match fs::metadata(self.dir.join(name)) {
-            Ok(meta) => Ok(Some(meta.permissions().mode() & 0o777)),
-            Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(None),
-            Err(e) => Err(e),
-        }
-    }
 }
 
 /// Files in memory, for tests.
@@ -93,7 +81,6 @@ pub struct MemFiles {
     writes: usize,
     fail_from: Option<usize>,
     fail_removes: bool,
-    modes: BTreeMap<String, u32>,
 }
 
 impl MemFiles {
@@ -125,12 +112,6 @@ impl MemFiles {
         self.files.keys().cloned().collect()
     }
 
-    /// Give a file other permission bits than the 0600 every file is made
-    /// with, as someone with a shell could.
-    pub fn set_mode(&mut self, name: &str, mode: u32) {
-        self.modes.insert(name.to_string(), mode);
-    }
-
     /// Put bytes in a file directly, as damage would.
     pub fn put(&mut self, name: &str, bytes: &[u8]) {
         self.files.insert(name.to_string(), bytes.to_vec());
@@ -148,7 +129,6 @@ impl BoxFiles for MemFiles {
             return Err(io::Error::other("no space left on device"));
         }
         self.files.insert(name.to_string(), bytes.to_vec());
-        self.modes.remove(name);
         Ok(())
     }
 
@@ -157,14 +137,6 @@ impl BoxFiles for MemFiles {
             return Err(io::Error::other("cannot remove"));
         }
         self.files.remove(name);
-        self.modes.remove(name);
         Ok(())
-    }
-
-    fn mode(&self, name: &str) -> io::Result<Option<u32>> {
-        Ok(self
-            .files
-            .contains_key(name)
-            .then(|| self.modes.get(name).copied().unwrap_or(0o600)))
     }
 }

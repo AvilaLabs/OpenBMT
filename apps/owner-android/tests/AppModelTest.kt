@@ -60,16 +60,6 @@ import org.openbmt.owner.Limit
 import org.openbmt.owner.LightningAction
 import org.openbmt.owner.SwapAction
 import org.openbmt.owner.RequestAsk
-import org.openbmt.owner.WebCall
-import org.openbmt.owner.WebCallKind
-import org.openbmt.owner.WebOutcome
-import org.openbmt.owner.WebPair
-import org.openbmt.owner.WebPairing
-import org.openbmt.owner.WebAmountOff
-import org.openbmt.owner.WebRefused
-import org.openbmt.owner.WebState
-import org.openbmt.owner.WebStep
-import org.openbmt.owner.WebStepKind
 import org.openbmt.owner.LinkState
 import org.openbmt.owner.Lsps1Offer
 import org.openbmt.owner.OrderState
@@ -88,15 +78,6 @@ import org.openbmt.owner.OwnWalletView
 import org.openbmt.owner.OwnerException
 import org.openbmt.owner.OwnerNetwork
 import org.openbmt.owner.PairView
-import org.openbmt.owner.PosAlert
-import org.openbmt.owner.PosAlertKey
-import org.openbmt.owner.PosAlertKind
-import org.openbmt.owner.PosMethod
-import org.openbmt.owner.PosReply
-import org.openbmt.owner.PosRequest
-import org.openbmt.owner.PosState
-import org.openbmt.owner.PosSubject
-import org.openbmt.owner.PosVendor
 import org.openbmt.owner.PriceReply
 import org.openbmt.owner.PriceSource
 import org.openbmt.owner.Quoted
@@ -232,7 +213,7 @@ object AppModelTest {
         ok(dirty.detail == "bad text", "a system text is cleaned in the details: ${dirty.detail}")
         ok(SayCheck.problem(dirty) == null, "words with a cleaned detail pass")
         val text = AppWords.screensMarkdown()
-        ok(text.lines().filter { it.startsWith("| ") }.size == all.size + 1 + FirstRunWords.all().size + 1 + ConnectWords.all().size + 1 + OwnPairWords.all().size + 1 + AppWords.keyMapAll().size + 1 + StarterWords.all().size + 1 + RequestWords.all().size + 1 + WebOrderWords.all().size + 1 + ShopLightningWords.all().size + 1 + WalletSigWords.all().size + 1 + PaidCheckWords.all().size + 1 + GivingWords.all().size + 1, "one row for each words and the header, and for each of the first run's, of Connect your wallet's, of the key map's, of the starter wallet's and of the payment requests'")
+        ok(text.lines().filter { it.startsWith("| ") }.size == all.size + 1 + FirstRunWords.all().size + 1 + ConnectWords.all().size + 1 + OwnPairWords.all().size + 1 + AppWords.keyMapAll().size + 1 + StarterWords.all().size + 1 + RequestWords.all().size + 1 + ShopLightningWords.all().size + 1 + WalletSigWords.all().size + 1 + PaidCheckWords.all().size + 1 + GivingWords.all().size + 1, "one row for each words and the header, and for each of the first run's, of Connect your wallet's, of the key map's, of the starter wallet's and of the payment requests'")
         ok(text.lines().filter { !it.startsWith("|") }.all { it.length <= 80 }, "lines are at most 80 characters")
         if (screensMd != null) {
             if (System.getenv("OPENBMT_WRITE_SCREENS") != null) screensMd.writeText(text)
@@ -732,7 +713,7 @@ object AppModelTest {
         ok(source("src/android/Lock.kt").contains("OwnerSetup.parse(String(text, Charsets.UTF_8))"), "the setup is parsed at every start (OA-60)")
     }
 
-    private fun oa_12_four_threads_touch_the_node() {
+    private fun oa_12_three_threads_touch_the_node() {
         val controller = source("src/android/Controller.kt")
         ok(Regex("n\\.pump\\(").findAll(controller).count() == 1, "one place pumps")
         ok(Regex("n\\.linkStep\\(").findAll(controller).count() == 1 && Regex("n\\.deliver\\(").findAll(controller).count() == 1, "one place takes the link's turns")
@@ -740,15 +721,13 @@ object AppModelTest {
         ok(pump.contains("n.pump(nowSecs(), 250)"), "the pump waits at most 250 ms")
         val link = controller.substringAfter("val link = Thread {").substringBefore("link.isDaemon")
         ok(link.contains("n.linkStep(now)") && link.contains("n.deliver(now)") && link.contains("LINK_EVERY_MS"), "the link thread takes its turns every few seconds")
-        ok(controller.contains("if (setup?.link != null)"), "and only when there is a link")
+        ok(controller.contains("if (setup?.link != null || ownLinkId != null) {\n            val link = Thread {"), "and only when there is a link")
         ok(Controller_LINK_EVERY_MS_is_5_seconds(controller), "every 5 seconds")
-        for (name in listOf("src/android/Screens.kt", "src/android/Approval.kt", "src/android/PosScreen.kt")) {
+        for (name in listOf("src/android/Screens.kt", "src/android/Approval.kt")) {
             val src = source(name)
             ok(!src.contains(".pump(") && !src.contains(".linkStep(") && !src.contains(".deliver(") && !src.contains("Thread"), "$name makes no call of the other threads and starts no thread")
         }
         ok(controller.contains("synchronized(startLock)"), "starts do not overlap")
-        ok(Regex("n\\.posRequest\\(").findAll(controller).count() == 1 && Regex("n\\.posReply\\(").findAll(controller).count() == 1, "one place makes the two calls of a read of the till")
-        ok(controller.contains("val till = Thread {"), "the till has a thread of its own")
     }
 
     private fun Controller_LINK_EVERY_MS_is_5_seconds(controller: String) = controller.contains("LINK_EVERY_MS = 5_000L")
@@ -791,8 +770,8 @@ object AppModelTest {
         ok(AppWords.noSettingsYet.who == Who.OWNER && SayCheck.problem(AppWords.noSettingsYet) == null, "no settings yet has words")
     }
 
-    private fun oa_15_the_app_opens_no_connection_of_its_own_but_the_proxys_and_the_tills() {
-        for (name in listOf("src/android/Controller.kt", "src/android/Screens.kt", "src/android/Approval.kt", "src/android/OwnerUi.kt", "src/android/MainActivity.kt", "src/model/SetupText.kt", "src/model/AppConfig.kt", "src/model/ApprovalText.kt", "src/model/OwnerModel.kt", "src/model/AppWords.kt", "src/android/PosScreen.kt", "src/model/PosModel.kt")) {
+    private fun oa_15_the_app_opens_no_connection_of_its_own_but_the_proxys() {
+        for (name in listOf("src/android/Controller.kt", "src/android/Screens.kt", "src/android/Approval.kt", "src/android/OwnerUi.kt", "src/android/MainActivity.kt", "src/model/SetupText.kt", "src/model/AppConfig.kt", "src/model/ApprovalText.kt", "src/model/OwnerModel.kt", "src/model/AppWords.kt")) {
             val src = source(name)
             for (bad in listOf("HttpURLConnection", "HttpsURLConnection", "java.net.URL", "URLConnection", "OkHttp", "Socket(", "DatagramSocket", "InetAddress", "WebView", "DownloadManager")) {
                 ok(!src.contains(bad), "$name does not use $bad")
@@ -802,10 +781,7 @@ object AppModelTest {
         val probe = source("src/model/Socks5Probe.kt")
         ok(Regex("Socket\\(").findAll(probe).count() == 1 && probe.contains("write(byteArrayOf(5, 1, 0))"), "the one socket is the greeting to the proxy")
         ok(!gate.contains("Socket(") && !gate.contains("URL") && !probe.contains("URL"), "no other socket and no URL in the gate")
-        // The till's fetcher is the one other place, and it opens one connection through the proxy of OA-05.
-        val fetcher = source("src/android/HttpsPosFetcher.kt")
-        ok(Regex("openConnection\\(").findAll(fetcher).count() == 1 && fetcher.contains("Proxy.Type.SOCKS"), "the fetcher opens one connection, through the proxy")
-        // So is the price's fetcher (OA-101): one connection, through the same proxy.
+        // The price's fetcher (OA-101) is the one other place: one connection, through the proxy of OA-05.
         val rates = source("src/android/HttpsRateFetcher.kt")
         ok(Regex("openConnection\\(").findAll(rates).count() == 1 && rates.contains("Proxy.Type.SOCKS") && rates.contains("!gate.available()"), "the price's fetcher opens one connection, through the proxy, and asks the gate first")
         for (name in listOf("src/android/Controller.kt", "src/android/Screens.kt", "src/android/Approval.kt", "src/android/MainActivity.kt", "src/android/PriceFetch.kt", "src/model/PriceModel.kt")) {
@@ -813,7 +789,7 @@ object AppModelTest {
         }
     }
 
-    // ---- the till (OA-16 to OA-19) --------------------------------------------------------------------------
+    // ---- a sealer for the files under test --------------------------------------------------------------------------
 
     private fun testSealer(): Sealer {
         val key = ByteArray(32).also { SecureRandom().nextBytes(it) }
@@ -836,213 +812,6 @@ object AppModelTest {
                     throw IOException("does not decrypt", e)
                 }
             }
-        }
-    }
-
-    private fun posRequest(url: String = "https://connect.squareup.com/v2/orders/search") = PosRequest(PosMethod.Post, url, ByteArray(0))
-
-    private fun posAlert() = PosAlert(PosAlertKey(PosAlertKind.BitcoinTip, PosSubject.Tender("O", "T")), 5, words())
-
-    private fun posReply(again: Boolean, alerts: Int = 0, moreLeft: Boolean = false) =
-        PosReply(again, moreLeft, 1, 100, 0, List(alerts) { posAlert() }, 0, 0)
-
-    /** A link that answers from a script, and remembers what it was asked. */
-    private class ScriptedLink(private val replies: ArrayDeque<Any>) : PosLink {
-        var requests = 0
-        val answers = ArrayList<Triple<Long, Long, Int>>()
-
-        override fun request(now: Long): PosRequest {
-            requests++
-            return PosRequest(PosMethod.Post, "https://connect.squareup.com/v2/orders/search", ByteArray(0))
-        }
-
-        override fun reply(now: Long, status: Long, body: ByteArray): PosReply {
-            answers.add(Triple(now, status, body.size))
-            return when (val next = replies.removeFirst()) {
-                is OwnerException -> throw next
-                is PosReply -> next
-                else -> throw IllegalStateException("a script of replies")
-            }
-        }
-    }
-
-    private fun oa_16_the_till_token_is_sealed_in_its_own_file_and_never_shown() {
-        ok(PosToken.clean("  EAAAabc-DEF_123.~+/=  ") == "EAAAabc-DEF_123.~+/=", "a token is trimmed")
-        ok(PosToken.clean("") == null && PosToken.clean("   ") == null, "an empty token is refused")
-        ok(PosToken.clean("two words") == null && PosToken.clean("tab\tin") == null && PosToken.clean("new\nline") == null, "a token with a space or a control character is refused")
-        ok(PosToken.clean("a".repeat(512)) != null && PosToken.clean("a".repeat(513)) == null, "at most 512 characters")
-        ok(PosToken.clean("café") == null, "and printable ASCII only")
-        ok((PosForms.token("x y") as? Form.Refused)?.words == AppWords.posTokenNotAccepted, "the form says why")
-        val dir = tempDir()
-        val store = PosTokenStore(dir, testSealer())
-        ok(!store.exists() && store.load() == null, "a phone with no till holds no token")
-        store.save("SECRET-token-123")
-        val onDisk = String(File(dir, AppFiles.POS_TOKEN_FILE).readBytes(), Charsets.ISO_8859_1)
-        ok(!onDisk.contains("SECRET"), "the token is not on the disk in the clear")
-        ok(dir.listFiles()!!.map { it.name } == listOf(AppFiles.POS_TOKEN_FILE), "one file and no temporary file")
-        ok(store.exists() && store.load() == "SECRET-token-123", "it reads back")
-        store.remove()
-        ok(!store.exists() && store.load() == null && dir.listFiles()!!.isEmpty(), "taking the till off removes the file")
-        store.remove()
-        clean(dir)
-        ok(AppFiles.POS_KEY_ALIAS != AppFiles.KEY_ALIAS && AppFiles.POS_TOKEN_FILE != AppFiles.SETUP_FILE, "its own key and its own file")
-        val controller = source("src/android/Controller.kt")
-        ok(controller.contains("PosTokenStore(dir, KeystoreSealer(AppFiles.POS_KEY_ALIAS))") && controller.contains("private val dir: File = act.noBackupFilesDir"), "sealed under its own Keystore key, in the folder that is not backed up")
-        // Read for one read only, by the one place that reads, and never put on a screen or in a log.
-        for (name in listOf("src/android/Screens.kt", "src/android/Approval.kt", "src/android/PosScreen.kt", "src/android/MainActivity.kt", "src/android/OwnerUi.kt")) {
-            ok(!source(name).contains("posTokens.load("), "$name does not read the token")
-        }
-        ok(Regex("posTokens\\.load\\(").findAll(controller).count() == 1, "one place reads the token")
-        val screen = source("src/android/PosScreen.kt")
-        ok(Regex("secretField\\(").findAll(screen).count() == 2 && !screen.contains("ui.field(\"Read-only") && !screen.contains("ui.field(\"New read-only"), "both token fields hide what is typed")
-        ok(source("src/android/OwnerUi.kt").contains("TYPE_TEXT_VARIATION_PASSWORD"), "a secret field is a password field")
-        ok(Regex("forget\\(token\\)").findAll(screen).count() == 2 && screen.contains("clearPrimaryClip()"), "the field and the clipboard are wiped once the token is taken")
-        for (name in listOf("src/android/PosScreen.kt", "src/android/HttpsPosFetcher.kt", "src/model/PosModel.kt", "src/android/Controller.kt")) {
-            val src = source(name)
-            for (bad in listOf("SharedPreferences", "writeText", "writeBytes", "FileOutputStream", "android.util.Log", "Log.d(", "Log.i(", "Log.e(", "println(", "printStackTrace")) {
-                ok(!src.contains(bad), "$name does not use $bad")
-            }
-        }
-        ok(!Regex("ui\\.text\\([^)]*token", RegexOption.IGNORE_CASE).containsMatchIn(screen), "no text on the till screen holds the token")
-        ok(AppWords.posConnected.what.contains("not shown again"), "the words say it is not shown again")
-    }
-
-    private fun oa_17_the_till_is_read_through_tor_from_two_known_systems() {
-        for (good in listOf("https://connect.squareup.com/v2/orders/search", "https://api.clover.com/v3/merchants/ABC123/orders?limit=100&expand=payments", "https://connect.squareup.com/v2/payments?begin_time=2026-11-10T00:00:00Z&location_id=LOC1&sort_order=ASC&limit=100&cursor=PAY%3D%3D")) {
-            ok(PosUrl.allowed(good), "allowed: $good")
-        }
-        for (bad in listOf(
-            "http://connect.squareup.com/v2/orders/search", "https://connect.squareup.com", "https://connect.squareup.com?x=1",
-            "https://connect.squareup.com:444/v2", "https://connect.squareup.com@evil.example/v2", "https://evil.example/v2",
-            "https://connect.squareup.com.evil.example/v2", "https://user:pw@api.clover.com/v3", "https://api.clover.com/v3 x",
-            "https://api.clover.com/v3\n", "https://api.clover.com/é", "ftp://api.clover.com/v3", "", "//api.clover.com/v3",
-        )) {
-            ok(!PosUrl.allowed(bad), "refused: ${bad.take(40)}")
-        }
-        ok(PosLimits.HOSTS == setOf("connect.squareup.com", "api.clover.com"), "two systems and no other")
-        ok(PosLimits.MAX_PAGE_BYTES == 8 * 1024 * 1024, "a page is at most 8 MiB")
-        ok(PosLimits.TIMEOUT_MS == 20_000 && PosLimits.DEADLINE_MS == 60_000L, "the timeouts")
-        ok(readCapped(java.io.ByteArrayInputStream(ByteArray(10)), 10)!!.size == 10, "a page of exactly the most is read")
-        ok(readCapped(java.io.ByteArrayInputStream(ByteArray(11)), 10) == null, "a page of one byte more is refused whole")
-        ok(readCapped(java.io.ByteArrayInputStream(ByteArray(0)), 10)!!.isEmpty(), "an empty page")
-        throws("a page that takes too long") { readCapped(java.io.ByteArrayInputStream(ByteArray(5)), 10) { true } }
-        // The loop of one read, with the library and the network scripted.
-        val fetched = ArrayList<Pair<String, String>>()
-        val link = ScriptedLink(ArrayDeque(listOf(posReply(again = true, alerts = 1), posReply(again = false, alerts = 2))))
-        val done = PosPoll.readOnce(link, { r, t -> fetched.add(r.url to t); PosFetch.Reply(200, ByteArray(7)) }, "TOK", { 42L })
-        ok(done is PosOutcome.Done && done.newAlerts == 3 && !done.moreLeft && link.requests == 2, "two pages, the alerts of both counted")
-        ok(fetched.size == 2 && fetched.all { it.second == "TOK" } && link.answers == listOf(Triple(42L, 200L, 7), Triple(42L, 200L, 7)), "each answer is handed back with its status and its bytes")
-        // A Square page with orders is followed by its payments, each a GET with no body that is fetched like the rest.
-        val payLink = object : PosLink {
-            val sent = ArrayList<PosRequest>()
-            var step = 0
-
-            override fun request(now: Long): PosRequest {
-                val r = if (step == 1) PosRequest(PosMethod.Get, "https://connect.squareup.com/v2/payments?location_id=LOC1&limit=100", ByteArray(0)) else posRequest()
-                sent.add(r)
-                return r
-            }
-
-            override fun reply(now: Long, status: Long, body: ByteArray): PosReply = posReply(again = ++step < 2)
-        }
-        val paid = PosPoll.readOnce(payLink, { _, _ -> PosFetch.Reply(200, ByteArray(3)) }, "TOK", { 42L })
-        ok(paid is PosOutcome.Done && payLink.sent.map { it.method } == listOf(PosMethod.Post, PosMethod.Get) && payLink.sent[1].body.isEmpty(), "the orders, then the payments, both fetched")
-        fun failed(fetch: PosFetch): SayWords? = (PosPoll.readOnce(ScriptedLink(ArrayDeque(listOf(posReply(false)))), { _, _ -> fetch }, "T", { 1L }) as? PosOutcome.Failed)?.words
-        ok(failed(PosFetch.TorMissing) == AppWords.orbotNotRunning, "no Orbot: nothing is read, and it says so")
-        ok(failed(PosFetch.TooLong) == AppWords.posPageTooLong, "a page that is too long")
-        ok(failed(PosFetch.NotReached("SocketTimeoutException")) == AppWords.posNotReached("SocketTimeoutException"), "a till that does not answer")
-        // A refusal of the library, with its own words, ends the read.
-        val refusing = ScriptedLink(ArrayDeque(listOf(OwnerException("OC-33", "the sign-in was refused", 1, words(Tones.STOP)))))
-        val refused = PosPoll.readOnce(refusing, { _, _ -> PosFetch.Reply(401, ByteArray(0)) }, "T", { 1L })
-        ok(refused is PosOutcome.Failed && refused.words.heading == "Heading", "a 401 is shown with the library's words")
-        // An address that is not a till's is never fetched.
-        var asked = false
-        val strange = object : PosLink {
-            override fun request(now: Long) = posRequest("https://evil.example/x")
-
-            override fun reply(now: Long, status: Long, body: ByteArray): PosReply = posReply(false)
-        }
-        val blocked = PosPoll.readOnce(strange, { _, _ -> asked = true; PosFetch.Reply(200, ByteArray(0)) }, "T", { 1L })
-        ok(!asked && blocked is PosOutcome.Failed && blocked.words == AppWords.posAddressRefused, "an address the library should not give is refused")
-        // A library that always wants more is stopped.
-        val endless = object : PosLink {
-            var n = 0
-
-            override fun request(now: Long): PosRequest {
-                n++
-                return posRequest()
-            }
-
-            override fun reply(now: Long, status: Long, body: ByteArray): PosReply = posReply(true)
-        }
-        val cut = PosPoll.readOnce(endless, { _, _ -> PosFetch.Reply(200, ByteArray(0)) }, "T", { 1L })
-        ok(cut is PosOutcome.Failed && cut.words == AppWords.posReadCutOff && endless.n == PosLimits.MAX_STEPS, "a read ends after the most pages")
-        val fetcher = source("src/android/HttpsPosFetcher.kt")
-        ok(fetcher.indexOf("PosUrl.allowed(request.url)") in 1 until fetcher.indexOf("gate.available()") && fetcher.indexOf("gate.available()") in 1 until fetcher.indexOf("openConnection(proxy)"), "the address is checked, then Orbot, before anything is opened")
-        ok(fetcher.contains("Proxy(Proxy.Type.SOCKS, InetSocketAddress(hp.first, hp.second))") && !fetcher.contains("Proxy.NO_PROXY"), "through the SOCKS proxy of Orbot and never around it")
-        ok(Regex("openConnection\\(").findAll(fetcher).count() == 1, "one connection")
-        ok(fetcher.contains("instanceFollowRedirects = false") && fetcher.contains("useCaches = false") && fetcher.contains("\"Accept-Encoding\", \"identity\""), "no redirect, no cache, no compression")
-        ok(fetcher.contains("connectTimeout = PosLimits.TIMEOUT_MS") && fetcher.contains("readTimeout = PosLimits.TIMEOUT_MS") && fetcher.contains("PosLimits.DEADLINE_MS") && fetcher.contains("PosLimits.MAX_PAGE_BYTES"), "timeouts and the cap of a page")
-        ok(fetcher.contains("setRequestProperty(\"Authorization\", \"Bearer \$token\")") && Regex("\\\$token").findAll(fetcher).count() == 1, "the sign-in is set as a header here and used nowhere else")
-        ok(fetcher.contains("e.javaClass.simpleName") && !fetcher.contains("e.message"), "a failure says its kind and never its message")
-        ok(fetcher.contains("if (code == 200)"), "only an answer of 200 has its body read")
-        ok(fetcher.contains("conn.requestMethod = if (request.method == PosMethod.Post) \"POST\" else \"GET\""), "only the method the library asked for")
-        for (name in listOf("src/android/Controller.kt", "src/android/Screens.kt", "src/android/Approval.kt", "src/android/PosScreen.kt", "src/model/PosModel.kt")) {
-            ok(!source(name).contains("Authorization"), "$name sets no header")
-        }
-        val screen = source("src/android/PosScreen.kt")
-        ok(!screen.contains("n.queue") && !screen.contains("n.cashOut") && !screen.contains("n.queueRefund"), "the till screen reads orders and queues no payment and no refund")
-    }
-
-    private fun oa_18_the_till_is_read_while_visible_at_most_once_a_minute() {
-        ok(PosLimits.MIN_POLL_MS == 60_000L, "a minute")
-        ok(PosSchedule.waitMs(null, 5_000) == 0L, "a first read may start at once")
-        ok(PosSchedule.waitMs(1_000, 1_000 + 59_999) == 1L && PosSchedule.waitMs(1_000, 1_000 + 60_000) == 0L && PosSchedule.waitMs(1_000, 500_000) == 0L, "a minute after the start of the last")
-        ok(PosSchedule.waitMs(100_000, 10_000) == 60_000L, "a clock that went back waits no more than a minute")
-        val controller = source("src/android/Controller.kt")
-        ok(Regex("n\\.posRequest\\(").findAll(controller).count() == 1 && Regex("n\\.posReply\\(").findAll(controller).count() == 1, "one place makes the two calls of a read")
-        val till = controller.substringAfter("val till = Thread {").substringBefore("till.isDaemon")
-        ok(till.contains("PosSchedule.waitMs(lastStart, System.currentTimeMillis())") && till.indexOf("PosSchedule.waitMs(") < till.indexOf("readTill(link, TorGate(proxyNow()))"), "the pace is worked out before every read")
-        ok(till.contains("lastStart = System.currentTimeMillis()") && till.contains("posWake.poll(") && till.contains("continue"), "a call for a read now waits out the rest of the minute")
-        ok(till.contains("!posConnected"), "nothing is read when no till is connected")
-        val adopt = controller.substringAfter("private fun adopt(").substringBefore("private fun readTill(")
-        ok(adopt.contains("if (setup?.link != null)") && adopt.contains("posThread = till"), "the thread runs only with a link, and only while the node runs")
-        val stop = controller.substringAfter("private fun stopNode()").substringBefore("// ---- pages")
-        ok(stop.contains("posThread?.interrupt()") && stop.indexOf("posThread?.interrupt()") < stop.indexOf("it.stop()"), "it is ended before the node is stopped")
-        ok(stop.contains("posThread = null"), "and let go of")
-        ok(controller.contains("PosPoll.readOnce(link, HttpsPosFetcher(gate), token)") && controller.contains("readTill(link, TorGate(proxyNow()))"), "through the proxy in use: Orbot's address or the built-in Tor's port")
-        for (name in listOf("src/android/Screens.kt", "src/android/Approval.kt", "src/android/PosScreen.kt")) {
-            val src = source(name)
-            ok(!src.contains(".posRequest(") && !src.contains(".posReply(") && !src.contains("Thread"), "$name makes no call of the till thread and starts no thread")
-        }
-        ok(source("src/android/PosScreen.kt").contains("readTillNow()") && controller.contains("posWake.offer(true)"), "a button asks, and the thread decides")
-        ok(controller.contains("POS_IDLE_MS = 5_000L"), "an idle thread looks again every 5 seconds")
-    }
-
-    private fun oa_19_the_till_screen_shows_what_the_library_says_and_acknowledges_on_the_phone() {
-        val setup = PosForms.setup(1, " MERCH1 ", "Bitcoin\n Lightning ,Bitcoin", "usd EUR, gbp")
-        ok(setup.vendor == PosVendor.Clover && setup.location == "MERCH1", "the vendor and the location as typed, trimmed")
-        ok(setup.tenderNames == listOf("Bitcoin", "Lightning", "Bitcoin") && setup.currencies == listOf("usd", "EUR", "gbp"), "the lists are split and nothing is judged here")
-        ok(PosForms.setup(0, "L", "x", "USD").vendor == PosVendor.Square, "Square is the first choice")
-        ok(PosForms.list(" , \n ").isEmpty(), "empty entries are left out")
-        val state = PosState(setup, 100, listOf(posAlert()), 1, 4, 3, 1, 0)
-        ok(PosLines.lastRead(160, 100) == "Last read 60 seconds ago.", "the time of the last read: ${PosLines.lastRead(160, 100)}")
-        ok(PosLines.lastRead(160, null) == "Not read yet since the app was opened.", "or that there was none")
-        ok(PosLines.counts(state) == "3 sales matched. 1 of them by order of time, not exactly. 1 alert.", "the matches count and the alerts: ${PosLines.counts(state)}")
-        ok(PosLines.counts(PosState(setup, null, emptyList(), 0, 0, 1, 0, 0)) == "1 sale matched. No alerts.", "one match, none by order")
-        ok(PosLines.till(setup) == "Clover, MERCH1. Bitcoin tender: Bitcoin, Lightning, Bitcoin. Currencies: usd, EUR, gbp.", "the till in a line")
-        val screen = source("src/android/PosScreen.kt")
-        ok(screen.contains("n.posState()") && screen.contains("a.words.say()"), "the alerts are shown with the library's words")
-        ok(screen.contains("PosLines.lastRead(nowSecs(), s.lastPollAt)") && screen.contains("PosLines.counts(s)"), "the last read and the matches count")
-        ok(screen.contains("\"Acknowledge this alert\"") && screen.contains("n.posAcknowledge(nowSecs(), a.key)"), "an alert can be acknowledged")
-        ok(!screen.contains("queueSettings") && !screen.contains("signBatch") && !screen.contains("n.clearAlert("), "acknowledging sends no signed command")
-        ok(AppWords.posAcknowledged.what.contains("on this phone only") && AppWords.posAcknowledged.what.contains("do not learn"), "and says that it stays on the phone")
-        ok(screen.contains("n.posSetup(args)") && screen.indexOf("n.posSetup(args)") < screen.indexOf("sealToken(t, n, rollback = true)"), "the library judges the till before the token is sealed")
-        ok(screen.contains("rollback") && screen.contains("n.posRemove()"), "a token that cannot be sealed takes the till off again")
-        ok(source("src/android/Screens.kt").contains("RowItem(\"Till\") { showTill() }"), "a group page of home has the row")
-        ok(source("src/android/Screens.kt").contains("It has not been tried against a real till account yet."), "the About screen says it has not been tried")
-        for (w in listOf(AppWords.posNotConnected, AppWords.posNeedsLink, AppWords.posTokenNotAccepted, AppWords.posConnected, AppWords.posRemoved, AppWords.posAcknowledged, AppWords.posTokenMissing, AppWords.posAddressRefused, AppWords.posPageTooLong, AppWords.posReadCutOff, AppWords.posNotReached("x"))) {
-            ok(SayCheck.problem(w) == null && (w.tone != Tones.STOP || w.who != Who.NOBODY), "every till state has words that pass the checks: ${w.heading}")
         }
     }
 
@@ -2323,7 +2092,7 @@ object AppModelTest {
         store.remove()
         ok(!store.enabled() && !store.hasKey() && dir.listFiles()!!.isEmpty(), "removing leaves nothing")
         clean(dir)
-        ok(AppFiles.WATCH_KEY_ALIAS == "openbmt-owner-watch-v1" && AppFiles.WATCH_KEY_ALIAS != AppFiles.KEY_ALIAS && AppFiles.WATCH_KEY_ALIAS != AppFiles.POS_KEY_ALIAS, "a Keystore key of its own")
+        ok(AppFiles.WATCH_KEY_ALIAS == "openbmt-owner-watch-v1" && AppFiles.WATCH_KEY_ALIAS != AppFiles.KEY_ALIAS, "a Keystore key of its own")
         val model = source("src/model/WatchModel.kt")
         ok(model.contains("SecureRandom") && model.contains("random.nextBytes(secret)"), "drawn from the random source")
         for (bad in listOf("digest", "Mac.", "pbkdf", "SETUP_FILE", "KEY_ALIAS,", "ownerSecret", "key1")) ok(!model.contains(bad), "the watch key is derived from nothing: no $bad")
@@ -2447,7 +2216,7 @@ object AppModelTest {
     private fun oa_91_every_screen_is_a_page_of_the_shared_look_and_adds_no_word_but_the_group_titles() {
         val screens = listOf(
             "Screens.kt", "Controller.kt", "Lock.kt", "Ceremony.kt", "Approval.kt", "Hardware.kt", "AddCounter.kt", "ConnectBox.kt",
-            "SettingsEdit.kt", "WatchScreen.kt", "PosScreen.kt",
+            "SettingsEdit.kt", "WatchScreen.kt",
         )
         for (name in screens) {
             val src = source("src/android/$name")
@@ -2510,49 +2279,6 @@ object AppModelTest {
         ok(OwnerLook.capital("light check") == "Light check" && OwnerLook.capital("") == "", "the first letter")
         val page = source("src/android/Screens.kt").substringAfter("internal fun Controller.showSettings()").substringBefore("internal fun Controller.showAbout()")
         ok(page.contains("instantCard(table)") && page.contains("foldedCard(folded)") && page.contains("ui.primary(\"Change settings\")"), "the page has the card, the folds and the footer's primary")
-    }
-
-    // ---- the till's token queue (OA-94) -------------------------------------------------------------------------
-
-    private fun oa_94_the_till_token_file_has_one_queue_and_a_stale_callback_draws_nothing() {
-        val dir = tempDir()
-        val posted = java.util.concurrent.LinkedBlockingQueue<() -> Unit>()
-        val queue = PosTokenQueue(PosTokenStore(dir, testSealer())) { posted.put(it) }
-        ok(!queue.exists() && queue.load() == null, "no token at first")
-        // A remove asked, then a save: the order asked is the order done, so the new token stays.
-        val results = ArrayList<String>()
-        queue.save("OLD-token") { }
-        queue.remove { results.add("removed") }
-        queue.save("NEW-token") { results.add("saved") }
-        ok(queue.isRemoving(), "a removal in flight is known to the screen")
-        ok(queue.load() == "NEW-token" && queue.exists(), "a remove then a save leaves the token")
-        repeat(3) { posted.take()() }
-        ok(results == listOf("removed", "saved") && !queue.isRemoving(), "the callbacks come in the order asked: $results")
-        ok(dir.listFiles()!!.map { it.name } == listOf(AppFiles.POS_TOKEN_FILE), "one file")
-        queue.remove { }
-        posted.take()()
-        ok(!queue.exists() && queue.load() == null, "a lone remove removes it")
-        // Many from many threads still run one at a time, and each load sees the last save asked before it.
-        val q = PosTokenQueue(PosTokenStore(dir, testSealer())) { posted.put(it) }
-        for (i in 0 until 20) {
-            q.save("t$i") { }
-            ok(q.load() == "t$i", "load $i follows its save")
-        }
-        repeat(20) { posted.take()() }
-        clean(dir)
-        // A callback draws only under the number it started with.
-        val epoch = TillEpoch()
-        val first = epoch.current()
-        var drawn = 0
-        ok(epoch.draw(first) { drawn++ } && drawn == 1, "a current callback draws")
-        val after = epoch.advance()
-        ok(!epoch.draw(first) { drawn++ } && drawn == 1, "a stale callback does nothing")
-        ok(epoch.draw(after) { drawn++ } && drawn == 2 && after > first, "and the new number draws")
-        val pos = source("src/android/PosScreen.kt")
-        ok(pos.contains("posTokens.remove { r ->") && pos.contains("posTokens.save(token) { r ->") && !pos.contains("async("), "the screen goes through the queue")
-        ok(pos.contains("tillEpoch.advance()") && occurs(pos, "tillEpoch.draw(started)") == 2, "the number goes up and both callbacks are guarded")
-        ok(pos.contains("posTokens.isRemoving()") && source("src/android/Controller.kt").contains("PosTokenQueue(PosTokenStore(dir"), "no actions while the removal runs")
-        ok(source("src/android/Controller.kt").contains("posTokens.load()") && !source("src/android/Controller.kt").contains("PosTokenStore.load"), "the till thread reads through the queue")
     }
 
     private fun oa_95_the_currency_is_the_first_group_and_a_new_currency_asks_for_every_limit_again() {
@@ -2755,7 +2481,6 @@ object AppModelTest {
         ok(c.contains("torBlocked = AppWords.torFailed") && c.contains("\"Try again\" else \"Check again\""), "a failure shows its words and the button Try again")
         ok(c.indexOf("torBlocked = AppWords.torFailed") in 1 until c.indexOf("OwnerNode.start("), "the failure comes before the node is started")
         ok(c.contains("const val TOR_WAIT_MS = 90_000L"), "it waits 90 seconds for a circuit")
-        ok(c.contains("outcome.words === AppWords.orbotNotRunning") && c.contains("PosOutcome.Failed(AppWords.torFailed)"), "a till read that finds no Tor says so in the built-in Tor's words")
         ok(c.contains("fun proxyNow()") && c.contains("return \"\"") && c.contains("\"127.0.0.1:\$port\""), "with no Tor up there is no proxy address for a fetch to use")
         val runner = torSource("src/android/TorRunner.kt")
         ok(runner.contains("catch (e: LinkageError)") && runner.contains("class TorStartException"), "a library that does not load is a failure to start, with the same words")
@@ -3577,7 +3302,7 @@ object AppModelTest {
 
         // The first run: Connect follows the advice, Checked's Next goes to the notice, Back at every step.
         val r = FirstRun(ShopPrefs(), "DE")
-        r.next(); r.next(); r.next(); r.next(); r.next(); r.choose(MoneyChoice.Diy); ok(r.step == FirstRunStep.OwnAdvice, "the advice on a signer the owner builds")
+        r.next(); r.next(); r.next(); r.next(); r.choose(MoneyChoice.Diy); ok(r.step == FirstRunStep.OwnAdvice, "the advice on a signer the owner builds")
         r.next(); ok(r.step == FirstRunStep.Connect && r.connect.step == ConnectStep.Intro, "Continue with my wallet: Connect your wallet")
         r.next(); ok(r.step == FirstRunStep.Connect, "Next is nothing before the wallet is checked")
         r.connect.paste(); r.back(); ok(r.step == FirstRunStep.Connect && r.connect.step == ConnectStep.Intro, "Back from the paste: the intro")
@@ -3623,12 +3348,9 @@ object AppModelTest {
         r.place = Place.Giving; r.next()
         ok(r.step == FirstRunStep.Shop, "GV-03: the answer goes on")
         r.next()
-        ok(r.step == FirstRunStep.Money, "GV-13: a place of giving is not asked for a till")
+        ok(r.step == FirstRunStep.Money, "GV-03: the shop is followed by the money")
         r.back(); r.back()
         ok(r.step == FirstRunStep.Place, "GV-03: back from the shop is the question")
-        val shop = FirstRun(ShopPrefs(), "DE")
-        shop.next(); shop.next(); shop.next(); shop.next()
-        ok(shop.step == FirstRunStep.Till, "a shop is still asked its till")
         // The answer is kept in the shop file, and a shop's file is the file every earlier build wrote.
         val plain = String(ShopPrefs("Cafe").encode())
         ok(!plain.contains("place:") && ShopPrefs.decode(plain.toByteArray()).place == Place.Shop, "GV-01: a shop's file has no place line")
@@ -3641,10 +3363,9 @@ object AppModelTest {
             val text = String(ShopPrefs("Cafe").encode()) + bad
             ok(try { ShopPrefs.decode(text.toByteArray()); false } catch (_: ConfigFormatException) { true }, "a place line that is not giving is refused: ${bad.trim()}")
         }
-        // The home screens (GV-13) and the checklist.
-        ok(Giving.homeOffersShopSteps(false) && !Giving.homeOffersShopSteps(true) && Giving.settingsCarriesTill(true) && !Giving.settingsCarriesTill(false), "GV-13: home hides the shop steps at a place of giving, and Settings carries the till")
+        // Who the settings in force say is giving, and the checklist.
         ok(Giving.isGiving(null, giving) && !Giving.isGiving(null, ShopPrefs("Cafe")) && !Giving.isGiving(sampleSettings(), giving) && Giving.isGiving(sampleSettings(place = Place.Giving), ShopPrefs("Cafe")), "the settings in force decide when there are any, the first answer before")
-        ok(Checklist.cardDue(ShopPrefs("Cafe", till = Till.entries.first())) == true && !Checklist.cardDue(ShopPrefs("Chapel", till = Till.entries.first(), place = Place.Giving)), "GV-13: a place of giving is not asked for a staff card")
+        ok(Checklist.cardDue(ShopPrefs("Cafe")) && !Checklist.cardDue(ShopPrefs("Chapel", place = Place.Giving)), "GV-13: a place of giving is not asked for a staff card")
         // The settings editor: the place is a switch, sent only when touched.
         val f = SettingsEditModel.place.fields.single()
         ok(f.id == "place" && f.kind == FieldKind.Switch && SettingsEditModel.groups.contains(SettingsEditModel.place), "GV-02: the editor has the place")
@@ -3670,8 +3391,8 @@ object AppModelTest {
         /** A first run at Money, with the number of model actions it took. */
         fun toMoney(): Pair<FirstRun, Int> {
             val r = FirstRun(ShopPrefs(), "DE")
-            r.next(); r.next(); r.next(); r.next(); r.next()
-            return r to 5
+            r.next(); r.next(); r.next(); r.next()
+            return r to 4
         }
         fun connectChecked(r: FirstRun) {
             r.connect.paste(); r.connect.read(WL06_ONE.toByteArray(Charsets.UTF_8), reader); r.connect.same()
@@ -3681,7 +3402,7 @@ object AppModelTest {
         val order = ArrayList<FirstRunStep>()
         val plan = FirstRun(ShopPrefs(), "DE")
         order.add(plan.step)
-        repeat(5) { plan.next(); order.add(plan.step) }
+        repeat(4) { plan.next(); order.add(plan.step) }
         plan.choose(MoneyChoice.Plan); order.add(plan.step)
         plan.next(); order.add(plan.step)
         plan.next(); order.add(plan.step)
@@ -3690,10 +3411,10 @@ object AppModelTest {
         plan.next(); order.add(plan.step)
         ok(
             order == listOf(
-                FirstRunStep.Welcome, FirstRunStep.Before, FirstRunStep.Place, FirstRunStep.Shop, FirstRunStep.Till, FirstRunStep.Money, FirstRunStep.Hardware,
+                FirstRunStep.Welcome, FirstRunStep.Before, FirstRunStep.Place, FirstRunStep.Shop, FirstRunStep.Money, FirstRunStep.Hardware,
                 FirstRunStep.Starter, FirstRunStep.OwnCounter, FirstRunStep.Instant, FirstRunStep.FirstSale, FirstRunStep.Ready,
             ),
-            "the plan path: before, the kind of place, shop, till, money, the buying guide, the starter wallet, the counter, the limit, the first sale, ready",
+            "the plan path: before, the kind of place, shop, money, the buying guide, the starter wallet, the counter, the limit, the first sale, ready",
         )
         val own = toMoney().first
         own.choose(MoneyChoice.Own); ok(own.step == FirstRunStep.Connect, "I already have a wallet goes straight to connecting it")
@@ -3737,10 +3458,10 @@ object AppModelTest {
         // The step after the wallet is pinned is kept in the shop file, and a first run is rebuilt from it.
         run {
             fun bad(text: String) = try { ShopPrefs.decode(text.toByteArray()); false } catch (_: ConfigFormatException) { true }
-            val base = "name: Cafe\ncurrency: EUR\ntill: \nsteps-shown: no\ncard-printed: no\n"
+            val base = "name: Cafe\ncurrency: EUR\ncard-printed: no\n"
             ok(String(ShopPrefs("Cafe", step = FirstRunStep.Instant).encode()).endsWith("card-printed: no\nstep: Instant\n") && !String(ShopPrefs("Cafe").encode()).contains("step:"), "step line: written only with a step")
             for (st in FirstRunStep.PERSISTED) ok(ShopPrefs.decode(ShopPrefs("Cafe", step = st).encode()).step == st, "step line: ${st.name} reads back")
-            ok(ShopPrefs.decode(base.toByteArray()).step == null && ShopPrefs.decode("name: Cafe\ncurrency: \ntill: \nsteps-shown: no\n".toByteArray()).step == null, "step line: an old file reads as none")
+            ok(ShopPrefs.decode(base.toByteArray()).step == null && ShopPrefs.decode("name: Cafe\ncurrency: \n".toByteArray()).step == null, "step line: an old file reads as none")
             ok(bad(base + "step: Money\n") && bad(base + "step: Nonsense\n") && bad(base + "step: \n") && bad(base + "step: Instant\nmore: x\n") && bad(base + "other: Instant\n"), "step line: an unknown name or line is refused")
             val held = ShopPrefs("Cafe", cardPrinted = true, step = FirstRunStep.Ready)
             ok(held.with(name = "Bar").step == FirstRunStep.Ready && held.withStep(null).step == null && held.withStep(null).cardPrinted, "step line: other saves keep it, withStep clears it")
@@ -3753,12 +3474,12 @@ object AppModelTest {
             ok(hand.take(rebuilt), "restore: the hand-off shows it when the node is up")
             ok(FirstRunRestore.rebuild(at, "DE", FirstRunStep.Money).step == FirstRunStep.Welcome, "restore: a step the file does not keep is not taken")
             val cfile = source("src/android/FirstRun.kt")
-            ok(cfile.contains("private fun Controller.keepStep") && cfile.substringAfter("private fun Controller.endFirstRun").substringBefore("afterFirstCounter()").contains("forgetStep()") && source("src/android/Lock.kt").substringAfter("internal fun Controller.wipe()").contains("forgetStep()") && source("src/android/Controller.kt").contains("if (firstRun == null) restoreFirstRun()"), "restore: the step is kept on entry, and cleared at the end and on a wipe")
+            ok(cfile.contains("private fun Controller.keepStep") && cfile.substringAfter("private fun Controller.endFirstRun").substringBefore("/** The shop's paid sales as the books count them").contains("forgetStep()") && source("src/android/Lock.kt").substringAfter("internal fun Controller.wipe()").contains("forgetStep()") && source("src/android/Controller.kt").contains("if (firstRun == null) restoreFirstRun()"), "restore: the step is kept on entry, and cleared at the end and on a wipe")
         }
 
         // Back on every new step.
         val b = toMoney().first
-        b.back(); b.back(); b.back(); b.back(); b.back(); ok(b.step == FirstRunStep.Welcome, "back from Shop goes through the kind of place and Before to Welcome")
+        b.back(); b.back(); b.back(); b.back(); ok(b.step == FirstRunStep.Welcome, "back from Shop goes through the kind of place and Before to Welcome")
         b.next(); b.back(); ok(b.step == FirstRunStep.Welcome, "back from Before: Welcome")
         val h = toMoney().first
         h.choose(MoneyChoice.Plan); h.back(); ok(h.step == FirstRunStep.Money, "back from the buying guide: the money")
@@ -3833,41 +3554,31 @@ object AppModelTest {
         ok(Checklist.items(false, true, true).map { it.text } == listOf(FirstRunWords.checklistSale, FirstRunWords.checklistCopy, FirstRunWords.checklistCueCard), "the cue card is the last item when due")
         ok(Checklist.items(true, false, true).map { it.text } == listOf(FirstRunWords.checklistCueCard) && Checklist.items(true, false, true)[0].cueCard && Checklist.items(true, false, true)[0].note == null, "the cue card alone, marked to open the card")
         ok(Checklist.items(false, true, false).none { it.cueCard }, "no cue card item when it is not due")
-        ok(Checklist.cardDue(ShopPrefs(till = Till.None)) && Checklist.cardDue(ShopPrefs(till = Till.Other)) && Checklist.cardDue(ShopPrefs(till = Till.Square)), "the card is due for any chosen till")
-        ok(!Checklist.cardDue(ShopPrefs()) && !Checklist.cardDue(ShopPrefs(till = Till.Square, cardPrinted = true)), "no card without a till, none once printed")
+        ok(Checklist.cardDue(ShopPrefs()), "the card is due for a shop")
+        ok(!Checklist.cardDue(ShopPrefs(cardPrinted = true)), "none once printed")
 
         // The cue card.
-        ok(CueCard.of(Till.Square, "Cafe Anna").title == "Taking bitcoin at Cafe Anna", "the card's title names the shop")
-        ok(CueCard.of(Till.Square, null).title == FirstRunWords.cardTitle && CueCard.of(Till.Square, "").title == FirstRunWords.cardTitle && CueCard.of(Till.Square, "   ").title == FirstRunWords.cardTitle, "no name or a blank one: the plain title")
-        ok(CueCard.of(Till.Square, " Cafe ").title == "Taking bitcoin at Cafe", "the name is trimmed")
-        ok(CueCard.of(Till.Square, null).lines == listOf(
-            "Ring up the sale in Square as usual.", FirstRunWords.cardCounter, FirstRunWords.cardPaid, FirstRunWords.cardTillSquare, FirstRunWords.cardDoubt,
-        ), "Square's card")
-        ok(CueCard.of(Till.Toast, null).lines[3] == FirstRunWords.cardTillToast, "Toast's own last line")
-        ok(CueCard.of(Till.StoreHub, null).lines == listOf(
-            "Ring up the sale in StoreHub as usual.", FirstRunWords.cardCounter, FirstRunWords.cardPaid, FirstRunWords.cardTillStoreHub, FirstRunWords.cardDoubt,
-        ), "StoreHub's card")
-        ok(CueCard.of(Till.Shopify, "x").lines[0] == "Ring up the sale in ${Till.Shopify.title} as usual." && CueCard.of(Till.Shopify, "x").lines[3] == "Then pick Bitcoin as the payment in ${Till.Shopify.title}.", "Shopify's card names the till twice")
-        for (t in Till.listed) ok(CueCard.of(t, null).lines.size == 5 && CueCard.of(t, null).lines.last() == FirstRunWords.cardDoubt && CueCard.of(t, null).lines.none { it.contains("{") }, "a listed till's card has five lines and no placeholder left")
-        ok(CueCard.of(Till.Other, null).lines == listOf(FirstRunWords.cardRingUpOther, FirstRunWords.cardCounter, FirstRunWords.cardPaid, FirstRunWords.cardTillPickOther, FirstRunWords.cardDoubt), "Another till's card")
-        ok(CueCard.of(Till.None, "Cafe").lines == listOf(FirstRunWords.cardCounter, FirstRunWords.cardPaid, FirstRunWords.cardDoubt), "No till's card has no till lines")
+        ok(CueCard.of("Cafe Anna").title == "Taking bitcoin at Cafe Anna", "the card's title names the shop")
+        ok(CueCard.of(null).title == FirstRunWords.cardTitle && CueCard.of("").title == FirstRunWords.cardTitle && CueCard.of("   ").title == FirstRunWords.cardTitle, "no name or a blank one: the plain title")
+        ok(CueCard.of(" Cafe ").title == "Taking bitcoin at Cafe", "the name is trimmed")
+        ok(CueCard.of("Cafe").lines == listOf(FirstRunWords.cardCounter, FirstRunWords.cardPaid, FirstRunWords.cardDoubt), "the card's lines")
 
         // The taps: model actions from Welcome to the first counter. These numbers may only go down.
         var taps = 0
         val tp = FirstRun(ShopPrefs(), "DE")
-        tp.next(); taps++; tp.next(); taps++; tp.next(); taps++; tp.next(); taps++; tp.next(); taps++; tp.choose(MoneyChoice.Plan); taps++; tp.next(); taps++; tp.next(); taps++
+        tp.next(); taps++; tp.next(); taps++; tp.next(); taps++; tp.next(); taps++; tp.choose(MoneyChoice.Plan); taps++; tp.next(); taps++; tp.next(); taps++
         ok(tp.step == FirstRunStep.OwnCounter, "the plan path reaches the counter")
-        ok(taps <= 8, "the plan path takes at most 8 actions (7 before the kind-of-place question of GV-03) from Welcome to the counter (took $taps)")
+        ok(taps <= 7, "the plan path takes at most 7 actions from Welcome to the counter (took $taps)")
         var ownTaps = 0
         val to = FirstRun(ShopPrefs(), "DE")
-        to.next(); ownTaps++; to.next(); ownTaps++; to.next(); ownTaps++; to.next(); ownTaps++; to.next(); ownTaps++; to.choose(MoneyChoice.Own); ownTaps++
+        to.next(); ownTaps++; to.next(); ownTaps++; to.next(); ownTaps++; to.next(); ownTaps++; to.choose(MoneyChoice.Own); ownTaps++
         to.connect.paste(); ownTaps++; to.connect.read(WL06_ONE.toByteArray(Charsets.UTF_8), reader); ownTaps++; to.connect.same(); ownTaps++; to.next(); ownTaps++
         ok(to.step == FirstRunStep.OwnCounter, "the own path reaches the counter")
-        ok(ownTaps <= 10, "the own path takes at most 10 actions (9 before the kind-of-place question of GV-03) from Welcome to the counter (took $ownTaps)")
+        ok(ownTaps <= 9, "the own path takes at most 9 actions from Welcome to the counter (took $ownTaps)")
 
         // The screens: every word from FirstRunWords, the home asks for the checklist once.
         val run = source("src/android/FirstRun.kt")
-        ok(run.contains("FirstRunWords.welcomeLine") && run.contains("FirstRunWords.welcomeNew") && run.contains("FirstRunWords.tillReads") && run.contains("FirstRunWords.beforeGo"), "the welcome, the till and the before screens show the new lines")
+        ok(run.contains("FirstRunWords.welcomeLine") && run.contains("FirstRunWords.welcomeNew") && run.contains("FirstRunWords.beforeGo"), "the welcome and the before screens show the new lines")
         ok(run.contains("showHardware(r)") && run.contains("showInstant(r)") && run.contains("showFirstSale(r)") && run.contains("FirstRunWords.hwNext"), "every new step has a screen")
         ok(source("src/android/Screens.kt").split("homeChecklist(n)").size == 2, "the home screen has one call for the checklist")
         ok(run.contains("n.previewSettings(InstantStep.edit(v))") && run.contains("n.queueSettings(p.settings)"), "the limit is written as the settings screen writes one")
@@ -3885,14 +3596,13 @@ object AppModelTest {
         ok(ScreenModel.pick(null, done, null, true) is Screen.Home, "after setup, running: home")
         ok(ScreenModel.pick(null, none, null, false, resuming = true) !is Screen.Welcome, "a ceremony to resume skips the welcome")
 
-        // The first run: Welcome, Shop, Till, Money, then Why for the cold wallet only, then the notice.
+        // The first run: Welcome, Shop, Money, then Why for the cold wallet only, then the notice.
         val r = FirstRun(ShopPrefs(), "DE")
         ok(r.step == FirstRunStep.Welcome && r.currency == ShopCurrency.Eur, "the money is guessed from the locale")
         r.next(); ok(r.step == FirstRunStep.Before, "before starting")
         r.next(); ok(r.step == FirstRunStep.Place, "the kind of place (GV-03)")
         r.next(); ok(r.step == FirstRunStep.Shop, "shop")
-        r.name = "Cafe Anna"; r.currency = ShopCurrency.Gbp; r.next(); ok(r.step == FirstRunStep.Till, "till")
-        r.till = Till.Toast; r.query = "to"; r.next(); ok(r.step == FirstRunStep.Money, "money")
+        r.name = "Cafe Anna"; r.currency = ShopCurrency.Gbp; r.next(); ok(r.step == FirstRunStep.Money, "money")
         r.choose(MoneyChoice.Make); ok(r.step == FirstRunStep.Why, "the cold wallet shows the why first")
         r.next(); ok(r.step == FirstRunStep.Guide && r.guide.step == GuideStep.Need, "then the key maker guide, at its first step")
         r.back(); ok(r.step == FirstRunStep.Why, "back from the first step of the guide to the why")
@@ -3936,10 +3646,8 @@ object AppModelTest {
         r.next(); ok(r.step == FirstRunStep.NotYet, "Done leads to the notice")
         r.back(); ok(r.step == FirstRunStep.Why, "back from the notice to the why")
         r.back(); ok(r.step == FirstRunStep.Money, "back to the money")
-        r.back(); r.back()
+        r.back()
         ok(r.step == FirstRunStep.Shop && r.name == "Cafe Anna" && r.currency == ShopCurrency.Gbp, "back to the shop keeps what was entered")
-        r.next()
-        ok(r.till == Till.Toast && r.query == "to", "back to the till keeps the choice and the search")
         r.next(); r.choose(MoneyChoice.Diy); ok(r.step == FirstRunStep.OwnAdvice, "a signer the owner builds: the advice first")
         r.back(); ok(r.step == FirstRunStep.Money && r.money == MoneyChoice.Diy, "back from the advice to the money, the choice kept")
         r.choose(MoneyChoice.Diy); r.next(); ok(r.step == FirstRunStep.Connect, "Continue with my wallet goes to Connect your wallet")
@@ -4021,55 +3729,25 @@ object AppModelTest {
         val shopSrc = source("src/android/FirstRun.kt")
         ok(shopSrc.contains("moneyPicker(r.moneyTabs)") && source("src/android/OwnerUi.kt").contains("ui.tabs("), "the shop screen shows the tabs")
 
-        // The till search.
-        ok(Till.listed.map { it.title } == listOf("Square", "Toast", "Shopify POS", "Loyverse", "Odoo", "Hike", "StoreHub"), "the seven tills, in order")
-        ok(Till.search("").map { it.key } == Till.listed.map { it.key } + "none" + "other", "no search: all seven, then no till and another till")
-        ok(Till.search("SHOP").map { it.title } == listOf("Shopify POS", FirstRunWords.tillNone, FirstRunWords.tillOther), "a search matches in any case, and None and Other stay")
-        ok(Till.search("zzz").size == 2, "a search with no match still lists No till and Another till")
-        ok(Till.search("o").map { it.title }.containsAll(listOf("Toast", "Loyverse", "Odoo", "StoreHub", "Shopify POS")), "a search matches inside a name")
-
-        // The steps screen, for each of the nine choices.
-        for (t in Till.values()) {
-            val page = TillStepsPage.of(t)
-            ok(page.showsDone && page.lines.isNotEmpty(), "${t.key}: a page with a Done and lines")
-            ok(page.lines.none { it.text.contains("{till}") } && page.title.none { it == '{' }, "${t.key}: every {till} is replaced")
-        }
-        val sq = TillStepsPage.of(Till.Square)
-        ok(sq.title == "Add Bitcoin to Square", "Square's title")
-        ok(sq.lines.first().text == "Do this once, on the computer or tablet where you manage Square. It takes about two minutes.", "Square's intro")
-        ok(sq.lines.filter { it.kind == TillStepsPage.Kind.Step }.map { it.text } == Till.Square.steps.mapIndexed { i, s -> "${i + 1}. $s" } && Till.Square.steps.size == 5, "Square's five numbered steps")
-        ok(sq.lines.any { it.text == FirstRunWords.tillSquareCashier } && sq.lines.any { it.text == FirstRunWords.tillSquareReports }, "Square's cashier and report lines")
-        ok(sq.lines.last().kind == TillStepsPage.Kind.Small && sq.lines.last().text.startsWith("Steps read on Square's own help pages on 11 November 2026."), "the checked line is last and small")
-        ok(sq.lines.any { it.text == "Square does not move the money, so it charges no fee for this payment type." }, "the no-fee line")
-        ok(TillStepsPage.of(Till.StoreHub).lines.count { it.kind == TillStepsPage.Kind.Step } == 4, "StoreHub: four steps")
-        ok(TillStepsPage.of(Till.Toast).lines.count { it.kind == TillStepsPage.Kind.Step } == 3, "Toast: three steps")
-        ok(TillStepsPage.of(Till.Shopify).lines.any { it.text == FirstRunWords.tillShopifyNote }, "Shopify's note")
-        ok(TillStepsPage.of(Till.Loyverse).lines.any { it.text == FirstRunWords.tillLoyverseReports }, "Loyverse's report line")
-        ok(TillStepsPage.of(Till.None).lines.map { it.text } == listOf(FirstRunWords.tillNoneText), "No till shows its own text")
-        ok(TillStepsPage.of(Till.Other).lines.map { it.text } == listOf(FirstRunWords.tillOtherText, FirstRunWords.tillOtherAsk), "Another till shows its own text")
-
         // What is kept, and where.
         val dir = tempDir()
         try {
             val f = ShopFile(dir)
-            ok(f.load().name == "" && f.load().till == null && !f.load().stepsShown, "nothing kept: an empty shop")
-            f.save(ShopPrefs("Cafe Anna", ShopCurrency.Sats, Till.Hike, false))
+            ok(f.load().name == "" && !f.load().cardPrinted, "nothing kept: an empty shop")
+            f.save(ShopPrefs("Cafe Anna", ShopCurrency.Sats))
             val back = f.load()
-            ok(back.name == "Cafe Anna" && back.currency == ShopCurrency.Sats && back.till == Till.Hike && !back.stepsShown, "name, money and till come back")
-            f.save(back.with(stepsShown = true))
-            ok(f.load().stepsShown && f.load().till == Till.Hike, "the steps are marked shown")
-            ok(String(f.load().encode()) == "name: Cafe Anna\ncurrency: SAT\ntill: hike\nsteps-shown: yes\ncard-printed: no\n", "the file's form")
-            ok(!f.load().cardPrinted, "the card is not printed at first")
+            ok(back.name == "Cafe Anna" && back.currency == ShopCurrency.Sats && !back.cardPrinted, "name and money come back")
+            ok(String(f.load().encode()) == "name: Cafe Anna\ncurrency: SAT\ncard-printed: no\n", "the file's form")
             f.save(f.load().with(cardPrinted = true))
-            ok(f.load().cardPrinted && f.load().stepsShown && f.load().till == Till.Hike, "the card flag is kept beside the others")
-            ok(ShopPrefs.decode("name: a\ncurrency: \ntill: hike\nsteps-shown: yes\n".toByteArray()).let { it.stepsShown && !it.cardPrinted && it.till == Till.Hike }, "an old file without the flag reads as not printed")
-            throws("a card flag that is not yes or no") { ShopPrefs.decode("name: a\ncurrency: \ntill: \nsteps-shown: no\ncard-printed: maybe\n".toByteArray()) }
-            throws("a sixth line") { ShopPrefs.decode("name: a\ncurrency: \ntill: \nsteps-shown: no\ncard-printed: no\nx: y\n".toByteArray()) }
+            ok(f.load().cardPrinted, "the card flag is kept")
+            ok(!ShopPrefs.decode("name: a\ncurrency: \n".toByteArray()).cardPrinted, "a file without the flag reads as not printed")
+            throws("a card flag that is not yes or no") { ShopPrefs.decode("name: a\ncurrency: \ncard-printed: maybe\n".toByteArray()) }
+            throws("a fourth line") { ShopPrefs.decode("name: a\ncurrency: \ncard-printed: no\nx: y\n".toByteArray()) }
             ok(ShopPrefs.clean("a\nb\u0007c") == "abc", "a name is one clean line")
             ok(ShopPrefs.clean("x".repeat(100)).length == ShopPrefs.MAX_NAME, "a name is cut at its length")
             File(dir, AppFiles.SHOP_FILE).writeText("garbage")
-            ok(ShopFile(dir).load().till == null, "a file that is not the shop file is an empty shop")
-            for (bad in listOf("name: a\ncurrency: XXX\ntill: \nsteps-shown: no\n", "name: a\ncurrency: \ntill: nope\nsteps-shown: no\n", "name: a\ncurrency: \ntill: \nsteps-shown: maybe\n")) {
+            ok(ShopFile(dir).load().name == "", "a file that is not the shop file is an empty shop")
+            for (bad in listOf("name: a\ncurrency: XXX\n", "name: a\ncurrency: \ncard-printed: maybe\n")) {
                 throws("a shop file with a value the app does not have") { ShopPrefs.decode(bad.toByteArray()) }
             }
         } finally {
@@ -4114,20 +3792,19 @@ object AppModelTest {
         }
         val screens = source("src/android/FirstRun.kt")
         val practiceScreens = screens.substringAfter("// ---- the practice shop").substringBefore("// ---- your shop")
-        for (bad in listOf("shopFile\\.save", "File\\(", "\\bnode\\b", "\\bn\\.", "withNode", "async", "posTokens", "\\bsetup\\b", "OwnerNode", "ceremony", "writeText", "FileOutputStream", "SharedPreferences")) {
+        for (bad in listOf("shopFile\\.save", "File\\(", "\\bnode\\b", "\\bn\\.", "withNode", "async", "\\bsetup\\b", "OwnerNode", "ceremony", "writeText", "FileOutputStream", "SharedPreferences")) {
             ok(!Regex(bad).containsMatchIn(practiceScreens), "the practice screens write and call nothing: $bad")
         }
         ok(practiceScreens.contains("FirstRunWords.practiceBanner") && practiceScreens.contains("Practice.QR_TEXT"), "every practice page carries the banner, and the code is the practice line")
         ok(screens.substringAfter("private fun Controller.practicePage").substringBefore("private fun Controller.showPractice").contains("tone = ui.pal.warn"), "the banner is the tinted bar")
         ok(source("src/android/Controller.kt").contains("ScreenModel.pick(fault, status, torBlocked, node != null, ceremonyPending())") && source("src/android/Controller.kt").contains("return showEntry()"), "the app opens on the welcome when nothing is saved")
         ok(source("src/android/MainActivity.kt").contains("controller.systemBack()") && source("src/android/MainActivity.kt").contains("controller.firstRunBack = null"), "the system's Back does what the arrow does on a first-run screen, and a screen of any other kind clears it")
-        ok(source("src/android/AddCounter.kt").contains("afterFirstCounter()") && source("src/android/Screens.kt").contains("tillStepsRow"), "the steps follow the first counter and are in Settings")
 
         // The key maker guide: nothing from it reaches a file, the node or the ceremony, and it never asks for words.
         val guideScreens = source("src/android/KeyGuide.kt")
         val guideModel = source("src/model/FirstRunModel.kt").substringAfter("class KeyGuide").substringBefore("/** The screens of the practice shop")
         for ((name, text) in listOf("screens" to guideScreens, "model" to guideModel)) {
-            for (bad in listOf("shopFile", "File\\(", "\\bnode\\b", "withNode", "async", "posTokens", "\\bsetup\\b", "OwnerNode", "OwnerCeremony", "ceremony", "writeText", "writeBytes", "FileOutputStream", "SharedPreferences", "DurableFile", "KeystoreSealer", "SealedFile", "\\.save\\(", "mnemonic", "seed")) {
+            for (bad in listOf("shopFile", "File\\(", "\\bnode\\b", "withNode", "async", "\\bsetup\\b", "OwnerNode", "OwnerCeremony", "ceremony", "writeText", "writeBytes", "FileOutputStream", "SharedPreferences", "DurableFile", "KeystoreSealer", "SealedFile", "\\.save\\(", "mnemonic", "seed")) {
                 ok(!Regex(bad).containsMatchIn(text), "the guide $name reach nothing outside memory: $bad")
             }
         }
@@ -4139,7 +3816,6 @@ object AppModelTest {
         ok(shown["ownAdviceTitle"] == FirstRunWords.ownAdviceTitle && shown["ownAdviceText"] == FirstRunWords.ownAdviceText && shown["ownAdviceHot"] == FirstRunWords.ownAdviceHot &&
             shown["ownAdviceMake"] == FirstRunWords.ownAdviceMake && shown["ownAdviceGo"] == "Continue with my wallet" && shown["moneyMakeNote"] == FirstRunWords.moneyMakeNote, "the advice words are the ones of the words file")
         ok(FirstRunWords.moneyNotYet == "Next, the shop's wallet is made with the Key app on a second phone.", "the notice, exactly")
-        ok(FirstRunWords.with(FirstRunWords.tillStepsTitle, "Odoo") == "Add Bitcoin to Odoo", "{till} is the till's name")
     }
 
     private fun pictureTests() {
@@ -4204,7 +3880,7 @@ object AppModelTest {
 
         // The first run: the plan leads to the hardware wallet's guide, then to the setup, then to the first counter as Connect does.
         val r = FirstRun(ShopPrefs(), "DE")
-        r.next(); r.next(); r.next(); r.next(); r.next()
+        r.next(); r.next(); r.next(); r.next()
         r.choose(MoneyChoice.Plan); ok(r.step == FirstRunStep.Hardware, "the plan on the money page goes to the buying guide")
         r.next(); ok(r.step == FirstRunStep.Starter, "the guide goes to the starter setup")
         r.back(); ok(r.step == FirstRunStep.Hardware && r.money == MoneyChoice.Plan, "back from the setup: the buying guide")
@@ -4670,7 +4346,7 @@ object AppModelTest {
         ok(keys.contains("BiometricManager.Authenticators.DEVICE_CREDENTIAL") && keys.contains("createConfirmDeviceCredentialIntent") && keys.contains("BiometricPrompt.CryptoObject(cipher)"), "the final move asks for the PIN alone, and the prompt wraps the cipher")
         ok(keys.contains("import android.hardware.biometrics.BiometricPrompt") && !keys.contains("androidx"), "the platform's prompt, no library")
         ok(!keys.contains("setKeyPurposes") && !keys.contains(".encoded") && !keys.contains("getEncoded") && !keys.contains("toString(") && !keys.contains("String(") && !keys.contains("Log."), "the key is never read out, and no secret becomes a string")
-        ok(StarterStore.KEY_ALIAS == "openbmt-owner-starter-v1" && AppFiles.KEY_ALIAS != StarterStore.KEY_ALIAS && AppFiles.WATCH_KEY_ALIAS != StarterStore.KEY_ALIAS && AppFiles.POS_KEY_ALIAS != StarterStore.KEY_ALIAS && AppFiles.OWN_KEY_ALIAS != StarterStore.KEY_ALIAS, "its own alias")
+        ok(StarterStore.KEY_ALIAS == "openbmt-owner-starter-v1" && AppFiles.KEY_ALIAS != StarterStore.KEY_ALIAS && AppFiles.WATCH_KEY_ALIAS != StarterStore.KEY_ALIAS && AppFiles.OWN_KEY_ALIAS != StarterStore.KEY_ALIAS, "its own alias")
         ok(source("src/model/StarterModel.kt").contains("const val DIR = \"starter\"") && source("src/android/Controller.kt").contains("StarterRuntime(dir)") && source("src/android/Controller.kt").contains("private val dir: File = act.noBackupFilesDir"), "the files are in the no-backup folder")
         ok(keys.contains("dataKey.fill(0)") && keys.contains("key.fill(0)") && source("src/android/StarterUse.kt").contains("n.starterPay(") && source("src/android/StarterUse.kt").contains("n.starterMoveSwitched("), "the data key is overwritten after each use, and the app signs through the core")
         for (f in listOf("StarterKeys", "StarterUse", "StarterScreens")) ok(!Regex("dataKey\\.toString|String\\(key|key\\.joinToString|dataKey\\.joinToString|Base64|toHexString").containsMatchIn(source("src/android/$f.kt")), "$f: the data key is not made text")
@@ -4741,7 +4417,6 @@ object AppModelTest {
         pickedFileTests()
         paymentScreensAreGuardedTests()
         requestTests()
-        webOrderTests()
         shopLightningTests()
         paidCheckTests()
         ruleTests(rulesMd)
@@ -5344,91 +5019,6 @@ object AppModelTest {
         ok(activity.contains("FLAG_SECURE"), "OA-04: the window that shows the code takes no screenshot or recording")
         // RQ-13: no picture goes to other apps, so the manifest keeps no provider (OA-03, OA-89).
         ok(!source("AndroidManifest.xml").contains("<provider") && !screens.contains("ACTION_SEND\").setType(\"image"), "the manifest is as OA-03 and OA-89 say, and no picture is shared")
-    }
-
-    private fun webState(
-        pairing: WebPairing = WebPairing.Paired,
-        off: Words? = null,
-        left: Long? = 100,
-        refused: List<WebRefused> = emptyList(),
-        lastVisit: Long? = 5,
-        amountOff: List<WebAmountOff> = emptyList(),
-    ) = WebState(off, pairing, "Shop", "https://shop.example", "abcd-1234-abcd-1234", null, lastVisit, null, null, left, 100, null, 1, 1, 0, 0, refused, amountOff)
-
-    private class FakeWebPort(val steps: MutableList<WebStep>) : WebPort {
-        val forces = ArrayList<Boolean>()
-        val replies = ArrayList<Triple<WebOutcome, Long, Int>>()
-        var state = WebState(null, WebPairing.None, "", "", "", null, null, null, null, null, 0, null, 0, 0, 0, 0, emptyList(), emptyList())
-
-        override fun pairStart(ask: RequestAsk, url: String, shopName: String) = WebPair("CODE", "abcd-1234-abcd-1234", shopName, url)
-        override fun pairConfirm(ask: RequestAsk) = state
-        override fun unpair(ask: RequestAsk) = state
-        override fun state(ask: RequestAsk) = state
-        override fun step(ask: RequestAsk, force: Boolean): WebStep {
-            forces.add(force)
-            return if (steps.isEmpty()) WebStep(WebStepKind.Idle, null) else steps.removeAt(0)
-        }
-        override fun reply(ask: RequestAsk, outcome: WebOutcome, status: Long, body: ByteArray): WebState {
-            replies.add(Triple(outcome, status, body.size))
-            return state
-        }
-    }
-
-    private fun webCall(kind: WebCallKind) = WebCall(kind, "https://shop.example/wp-json/openbmt/v1/orders", listOf("X-OBM-Mac" to "00"), "application/json", "{}".toByteArray())
-
-    private fun webOrderTests() {
-        // The words: every text is written, and none is used twice.
-        val all = WebOrderWords.all()
-        ok(all.map { it.first }.toSet().size == all.size && all.map { it.second }.toSet().size == all.size, "each web store text is written once")
-        ok(all.none { (_, text) -> text.contains("WORDS_NEEDED") || text.isBlank() }, "no web store text is left as a placeholder")
-        val screens = source("src/android/WebStore.kt")
-        val literals = Regex("\"([^\"\\\\]*)\"").findAll(screens.lines().filter { !it.trimStart().startsWith("//") && !it.trimStart().startsWith("import") }.joinToString("\n")).map { it.groupValues[1] }.toList()
-        ok(literals.all { it.isEmpty() || it.startsWith("\$") }, "the web store screens write no text of their own: $literals")
-        ok(source("src/android/Screens.kt").contains("webRow()"), "the web store is a row under Settings and this phone")
-        // The pairing code holds a secret: it is marked sensitive and leaves the clipboard after 60 seconds.
-        val controllerSrc = source("src/android/Controller.kt")
-        ok(screens.contains("copySensitive(code)") && !screens.contains("setPrimaryClip"), "the pairing code is copied as a sensitive clip")
-        ok(controllerSrc.contains("ClipDescription.EXTRA_IS_SENSITIVE") && controllerSrc.contains("\"android.content.extra.IS_SENSITIVE\"") && controllerSrc.contains("SDK_INT >= 33"), "the clip is marked sensitive, by the key of the platform on 33 and above and by its name below")
-        ok(controllerSrc.contains("const val SENSITIVE_CLIP_MS = 60_000L") && controllerSrc.contains("main.postDelayed(clearSensitiveClip, SENSITIVE_CLIP_MS)") && controllerSrc.contains("board.primaryClip?.getItemAt(0)?.text?.toString() == held"), "it is taken off after 60 seconds when it is still the clip there")
-
-        // The page.
-        ok(WebModel.page(webState(WebPairing.None)) == WebModel.Page.NoStore, "no store")
-        ok(WebModel.page(webState(WebPairing.Waiting)) == WebModel.Page.Waiting, "a code that waits")
-        ok(WebModel.page(webState()) == WebModel.Page.Paired, "a store that is paired")
-        ok(WebModel.fieldsReady("https://shop.example", "Shop") && !WebModel.fieldsReady(" ", "Shop") && !WebModel.fieldsReady("https://shop.example", ""), "both fields are needed")
-        ok(WebModel.runningLow(webState(left = 19)) && !WebModel.runningLow(webState(left = 20)) && !WebModel.runningLow(webState(left = null)), "the store is low below 20 addresses (WO-11)")
-        ok(WebModel.canVisit(webState()) && !WebModel.canVisit(webState(WebPairing.Waiting)) && !WebModel.canVisit(webState(off = words())), "a visit is asked for only of a paired store that is on")
-        ok(WebModel.shownKey(webState()) != WebModel.shownKey(webState(lastVisit = 6)) && WebModel.shownKey(webState()) == WebModel.shownKey(webState()), "the page is made again when a visit changed it")
-        val marked = webState(amountOff = listOf(WebAmountOff(9, 150_000, words())))
-        ok(WebModel.shownKey(webState()) != WebModel.shownKey(marked), "WO-22: the page is made again when an order is marked for its amount")
-        ok(screens.contains("state.amountOff") && screens.contains("a.words.say()"), "WO-22: each marked order is shown with its words")
-
-        // A visit: each call is sent as it is and its answer handed back; the owner's force holds for the first step only.
-        val calls = mutableListOf(WebStep(WebStepKind.Call, webCall(WebCallKind.Orders)), WebStep(WebStepKind.Call, webCall(WebCallKind.Notice)), WebStep(WebStepKind.Idle, null))
-        val port = FakeWebPort(calls)
-        val sent = ArrayList<WebCall>()
-        val fetcher = WebFetcher { call -> sent.add(call); WebFetch.Answer(200, "{}".toByteArray()) }
-        val n = WebVisit.run(port, fetcher, { RequestAsk(1, 0) }, true)
-        ok(n == 2 && sent.size == 2 && sent[0].kind == WebCallKind.Orders, "a visit sends each call the node gives")
-        ok(port.forces == listOf(true, false, false), "a visit the owner asked for waits for nothing, and only the first step says so: ${port.forces}")
-        ok(port.replies == listOf(Triple(WebOutcome.Answered, 200L, 2), Triple(WebOutcome.Answered, 200L, 2)), "each answer is handed back")
-        // A call with no answer ends the visit and says why.
-        for ((fetch, outcome) in listOf(WebFetch.NotReached to WebOutcome.NotReached, WebFetch.TorMissing to WebOutcome.TorMissing, WebFetch.TooLong to WebOutcome.TooLong)) {
-            val p = FakeWebPort(mutableListOf(WebStep(WebStepKind.Call, webCall(WebCallKind.Orders)), WebStep(WebStepKind.Call, webCall(WebCallKind.Orders))))
-            val sentOne = WebVisit.run(p, { fetch }, { RequestAsk(1, 0) }, false)
-            ok(sentOne == 1 && p.replies == listOf(Triple(outcome, 0L, 0)), "a call that got no answer ($outcome) ends the visit")
-        }
-        // The sender that is not built reaches no one, and says so.
-        val none = FakeWebPort(mutableListOf(WebStep(WebStepKind.Call, webCall(WebCallKind.Orders))))
-        WebVisit.run(none, NoWebFetcher, { RequestAsk(1, 0) }, false)
-        ok(none.replies.single().first == WebOutcome.NotReached, "no sender is built yet: the visit says the store was not reached")
-        // A step that is busy or idle sends nothing, and a node that never stops is cut off.
-        val busy = FakeWebPort(mutableListOf(WebStep(WebStepKind.Busy, null)))
-        ok(WebVisit.run(busy, fetcher, { RequestAsk(1, 0) }, false) == 0, "a call in the air is waited for")
-        val endless = object : WebPort by FakeWebPort(mutableListOf()) {
-            override fun step(ask: RequestAsk, force: Boolean) = WebStep(WebStepKind.Call, webCall(WebCallKind.Orders))
-        }
-        ok(WebVisit.run(endless, fetcher, { RequestAsk(1, 0) }, false) == WebVisit.MAX_CALLS, "a visit is at most ${WebVisit.MAX_CALLS} calls")
     }
 
     private fun shopLightningHeld(cap: Long = 5_000_000, fee: Long = 20_000) =

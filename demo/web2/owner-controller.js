@@ -23,29 +23,29 @@
   /** The four groups of home, as Screens.kt lists them: the icon (or the gear) of each. */
   const GROUPS = [{ icon: "Money", gear: false }, { icon: "Devices", gear: false }, { icon: "Bell", gear: false }, { icon: null, gear: true }];
 
-  /** Controller.kt:57 Controller(act): the controller of the owner's phone. */
+  /** Controller.kt:52 Controller(act): the controller of the owner's phone. */
   function Controller(host) {
     const flow = host.flow;
     let tick = null;
 
-    /** Controller.kt:463 startNode(): the node starts on the demo shop's wallet, the one the counter takes its payments into, with the Key app's keys. */
+    /** Controller.kt:440 startNode(): the node starts on the demo shop's wallet, the one the counter takes its payments into, with the Key app's keys. */
     function startNode() {
       const shop = host.chain.shop();
       flow.start(DIR, host.clock.now(), shop.wallet, shop.approverRoot, shop.key1Account);
     }
 
-    /** Controller.kt:689 onPump(reported): the open screen is made again from the node's state when it changed. */
+    /** Controller.kt:576 onPump(reported): the open screen is made again from the node's state when it changed. */
     function onPump(reported) {
       if (reported && tick) tick();
     }
 
-    /** Controller.kt:698 stopNode(): the node lets go of its folder. */
+    /** Controller.kt:585 stopNode(): the node lets go of its folder. */
     function stopNode() {
       tick = null;
       try { flow.stop(); } catch (e) { /* already stopped */ }
     }
 
-    /** Controller.kt:385 render(): the screen the state calls for; with the node started, home. */
+    /** Controller.kt:365 render(): the screen the state calls for; with the node started, home. */
     function render() {
       showHome();
     }

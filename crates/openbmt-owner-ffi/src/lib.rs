@@ -70,7 +70,6 @@ mod own;
 mod own_settings;
 mod own_spend_views;
 mod paid_check_views;
-mod pos_views;
 mod price;
 mod requests;
 mod say;
@@ -81,7 +80,6 @@ mod signer_views;
 mod starter;
 mod views;
 pub mod watch;
-mod web_orders;
 
 #[cfg(test)]
 mod tests;
@@ -123,10 +121,6 @@ pub use paid_check_views::{
     PaidAlarmView, PaidArrivedView, PaidCheckView, PaidClearArgs, PaidDayArgs, PaidDayView,
     PaidSaleLineView,
 };
-pub use pos_views::{
-    PosAckArgs, PosAlertKey, PosAlertKind, PosAlertView, PosMethodView, PosReplyArgs, PosReplyView,
-    PosRequestView, PosSetupView, PosStateView, PosSubjectView, PosVendorView,
-};
 pub use price::{AgreedPriceView, PriceArgs, PriceReplyView, PriceSourceView};
 pub use requests::{
     read as read_request, ConfirmView, DayView, PaymentAfterView, PaymentView, QuoteView,
@@ -163,9 +157,4 @@ pub use views::{
     QueuedRefund, ReceiptsKind, ReceiptsView, RefundArgs, RefundNoteView, RefundRow, RouteView,
     SendKind, SendRow, SettingsHeldView, SettingsQueuedView, ShopCurrencyView, SkippedView,
     StageKind, StageView, StartConfig, StatusView, SwapHeldView, TakenView, ViewKind, WordsView,
-};
-pub use web_orders::{
-    WebAmountOffView, WebCallKindView, WebCallView, WebCodeView, WebHeaderView, WebOutcome,
-    WebPairArgs, WebPairView, WebPairingKind, WebRefusedView, WebReplyArgs, WebStateView,
-    WebStepArgs, WebStepKind, WebStepView,
 };

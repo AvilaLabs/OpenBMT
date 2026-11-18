@@ -7,8 +7,8 @@
 //! happened, "Next: " and what to do, then "Details: " with the rule and the
 //! detail, then "When: " with a time and a line for text that came from
 //! elsewhere. Values a script needs keep their own stable lines
-//! (`state: `, `members: `, `member: `, `pos: `, `note: `,
-//! `invitation: `), printed after the words.
+//! (`state: `, `members: `, `member: `, `note: `, `invitation: `), printed
+//! after the words.
 //!
 //! The Box's reader is the Box keeper, who knows how to type a command.
 
@@ -21,19 +21,9 @@ use openbmt_core::say::{Quoted, Tone, Who, Words};
 use openbmt_core::settings::SettingsError;
 use openbmt_courier::StartError;
 use openbmt_net_io::env::LockError;
-use openbmt_pos::SettingsError as PosSettingsError;
 
-use crate::https::{HttpsKind, TIMEOUT_SECS};
-use crate::pos::{PosOpenError, PosState, Reading};
-use crate::pos_config::{PosConfig, PosConfigError, POS_CONFIG_FILE};
-use crate::runner::{PosView, StartFailure};
-use crate::state::{
-    BoxError, BoxStatus, INVITE_SECS, MAX_MEMBERS, MAX_TOKEN_BYTES, POS_TOKEN_FILE,
-};
-use crate::till::{MAX_NONCES, MAX_WAITING};
-
-// The words of `TillAnswer::Flood` name the number.
-const _: () = assert!(MAX_NONCES == 8_192);
+use crate::runner::StartFailure;
+use crate::state::{BoxError, BoxStatus, INVITE_SECS, MAX_MEMBERS};
 
 /// The text of a `Details` line may hold no control character.
 fn plain(text: &str) -> String {
@@ -228,61 +218,6 @@ fn turned_off() -> Words {
     .code("BX-23")
 }
 
-/// The words for a POS token that is empty, too long, not one line or not
-/// text (BX-41).
-fn token_words(fault: TokenFault) -> Words {
-    match fault {
-        TokenFault::Empty => stop(
-            "POS token is empty",
-            "The POS token is empty.".into(),
-            Who::BoxKeeper,
-            "Type pos-token, then type the token on the next line.",
-        ),
-        TokenFault::TooLong => stop(
-            "POS token is too long",
-            format!("The POS token is longer than the {MAX_TOKEN_BYTES} bytes the Box keeps."),
-            Who::BoxKeeper,
-            "Copy only the token from the till system, then use pos-token again.",
-        ),
-        TokenFault::NotOneLine => stop(
-            "POS token not one line",
-            "The POS token has more than one line or a character that cannot be shown.".into(),
-            Who::BoxKeeper,
-            "Paste only the token, on one line, after the pos-token command.",
-        ),
-        TokenFault::NotText => stop(
-            "POS token file not text",
-            format!("The file {POS_TOKEN_FILE} is not plain text."),
-            Who::BoxKeeper,
-            "Enter the token again with the pos-token command, which replaces the file.",
-        ),
-    }
-    .code("BX-41")
-}
-
-/// How a POS token was found wanting.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum TokenFault {
-    Empty,
-    TooLong,
-    NotOneLine,
-    NotText,
-}
-
-impl TokenFault {
-    /// The fault for a reason the Box gives (`BoxError::BadToken`). A reason
-    /// not known is the fault that covers the rest: not one line of plain
-    /// text.
-    fn of(why: &str) -> Self {
-        match why {
-            "empty" => Self::Empty,
-            "too long" => Self::TooLong,
-            "not text" => Self::NotText,
-            _ => Self::NotOneLine,
-        }
-    }
-}
-
 impl BoxError {
     /// What a person is told about this refusal.
     pub fn words(&self) -> Words {
@@ -381,15 +316,6 @@ impl BoxError {
             )
             .code("BX-21"),
             Self::TurnedOff => turned_off(),
-            Self::TokenMode { mode } => stop(
-                "POS token file too open",
-                format!("The file {POS_TOKEN_FILE} can be read by other users, so the Box does not read the POS."),
-                Who::BoxKeeper,
-                format!("Type chmod 600 {POS_TOKEN_FILE} in the Box's data folder; the Box then reads it by itself."),
-            )
-            .code("BX-41")
-            .detail(format!("mode {mode:04o}")),
-            Self::BadToken(why) => token_words(TokenFault::of(why)),
         }
     }
 }
@@ -476,398 +402,6 @@ fn settings_break_a_rule() -> Words {
     )
 }
 
-/// What a person is told about POS settings that are not valid.
-fn pos_settings_words(e: &PosSettingsError) -> Words {
-    let detail = e.to_string();
-    let (what, code) = match e {
-        PosSettingsError::TenderNames => (
-            "The till link is switched off because the POS settings have no usable name for bitcoin payments.",
-            Some("PS-10"),
-        ),
-        PosSettingsError::Currencies => (
-            "The till link is switched off because the POS settings list no currency, too many, or one twice.",
-            Some("PS-13"),
-        ),
-        PosSettingsError::Locations => (
-            "The till link is switched off because a till location is listed twice or a counter is in two places.",
-            Some("PS-14"),
-        ),
-        PosSettingsError::Timing => (
-            "The till link is switched off because a timing setting for the till link is zero or out of order.",
-            None,
-        ),
-    };
-    let words = stop(
-        "Till link off: settings",
-        what.into(),
-        Who::BoxKeeper,
-        "Ask whoever set up the till link to correct this, then start the Box again.",
-    )
-    .detail(detail);
-    match code {
-        Some(code) => words.code(code),
-        None => words,
-    }
-}
-
-impl PosOpenError {
-    /// What a person is told when the POS side could not be opened. The
-    /// relay runs on.
-    pub fn words(&self) -> Words {
-        match self {
-            Self::Damaged { file, why } => stop(
-                "Till link off: file damaged",
-                format!("The till link is switched off because {file} is damaged, and the Box did not replace it."),
-                Who::BoxKeeper,
-                "Restore the file from a copy, or erase the data folder and pair the Box again.",
-            )
-            .code("BX-51")
-            .detail(plain(why)),
-            Self::Io { file, kind } => stop(
-                "Till link off: file unread",
-                format!("The till link is switched off because the Box could not read the file {file}."),
-                Who::BoxKeeper,
-                "Check that the disk works and this user may read the file, then start the Box again.",
-            )
-            .code("BX-50")
-            .detail(format!("{kind}")),
-            Self::Settings(e) => pos_settings_words(e),
-            Self::Config(e) => e.words(),
-        }
-    }
-}
-
-impl PosConfigError {
-    /// What a person is told about a till setup that was not taken, or a
-    /// stored one that does not read back (BX-49).
-    pub fn words(&self) -> Words {
-        match self {
-            Self::BadWord(word) => stop(
-                "Setup word not known",
-                "The Box does not know one of the words in the setup line.".into(),
-                Who::BoxKeeper,
-                "Give words as key=value separated by |: vendor, location, currency, tenders, and if needed curl, socks, host.",
-            )
-            .code("BX-49")
-            .quoted(Quoted::new("You typed", word)),
-            Self::Missing(key) => stop(
-                "Setup word missing",
-                "The setup line leaves out a word the Box needs.".into(),
-                Who::BoxKeeper,
-                "Add vendor, location, currency and tenders, each as key=value, and type pos-setup again.",
-            )
-            .code("BX-49")
-            .detail(format!("missing: {key}")),
-            Self::UnknownVendor(vendor) => stop(
-                "Vendor not known",
-                "The Box reads Square and Clover, and the vendor you typed is neither.".into(),
-                Who::BoxKeeper,
-                "Type vendor=square or vendor=clover in the setup line.",
-            )
-            .code("BX-49")
-            .quoted(Quoted::new("You typed", vendor)),
-            Self::BadValue(key) => stop(
-                "Setup value not valid",
-                "One value in the setup line is not valid.".into(),
-                Who::BoxKeeper,
-                "Check the value named under Details and type pos-setup again.",
-            )
-            .code("BX-49")
-            .detail(format!("not valid: {key}")),
-            Self::Damaged(why) => stop(
-                "Till link off: setup damaged",
-                format!("The till link is switched off because the file {POS_CONFIG_FILE} is damaged, and the Box did not replace it."),
-                Who::BoxKeeper,
-                "Type pos-setup again to make a new one, then start the Box again.",
-            )
-            .code("BX-49")
-            .detail(plain(why)),
-            Self::Settings(e) => pos_settings_words(e),
-            Self::Io(kind) => stop(
-                "Setup not saved",
-                "The Box could not save the till setup, so it keeps the old one.".into(),
-                Who::BoxKeeper,
-                "Check that the disk has room and the data folder can be written, then type pos-setup again.",
-            )
-            .code("BX-50")
-            .detail(format!("{kind}")),
-        }
-    }
-}
-
-impl HttpsKind {
-    /// What a person is told when the Box could not reach the till system
-    /// or could not use its answer (BX-44 to BX-49). `detail` is the text
-    /// the note carried.
-    pub fn words(self, detail: &str) -> Words {
-        let detail = plain(detail);
-        let words = match self {
-            Self::CurlMissing => stop(
-                "curl is not installed",
-                "The Box cannot reach the till system because curl is not installed on this Box.".into(),
-                Who::BoxKeeper,
-                "Install curl with the system's package manager, or give its path to pos-setup, then start the Box again.",
-            ),
-            Self::CurlNotRun => stop(
-                "curl could not start",
-                "The Box found curl but the system would not run it, so it did not reach the till system.".into(),
-                Who::BoxKeeper,
-                "Check that this user may run the file named under Details, then start the Box again.",
-            ),
-            Self::BadRequest => stop(
-                "Request not made",
-                "The Box did not send its request to the till system because something in it was not valid.".into(),
-                Who::BoxKeeper,
-                "Check the till setup with pos-setup, and keep the text under Details for whoever looks after this Box.",
-            ),
-            Self::Timeout => stop(
-                "Till system too slow",
-                format!("The till system did not answer within {TIMEOUT_SECS} seconds."),
-                Who::BoxKeeper,
-                "Check the Box's internet connection; the Box tries again by itself.",
-            ),
-            Self::Unreachable => stop(
-                "Till system not reached",
-                "The Box could not reach the till system, or the connection broke.".into(),
-                Who::BoxKeeper,
-                "Check the Box's internet connection; the Box tries again by itself.",
-            ),
-            Self::Tls => stop(
-                "Encrypted connection failed",
-                "The Box could not establish an encrypted connection to the till system, so it read nothing.".into(),
-                Who::BoxKeeper,
-                "Check the Box's clock and its list of trusted certificates; the Box tries again by itself.",
-            ),
-            Self::ReplyTooLarge => stop(
-                "Till reply too large",
-                "The till system's reply was larger than the Box accepts, so it read nothing from it.".into(),
-                Who::BoxKeeper,
-                "Keep the text under Details for whoever looks after this Box; the Box tries again by itself.",
-            ),
-            Self::CurlFailed => stop(
-                "curl failed",
-                "The program curl stopped with an error the Box has no plain words for, so it read nothing.".into(),
-                Who::BoxKeeper,
-                "Keep the text under Details for whoever looks after this Box; the Box tries again by itself.",
-            ),
-            Self::BadOutput => stop(
-                "curl gave no status",
-                "The program curl finished but did not say how the till system answered, so the Box read nothing.".into(),
-                Who::BoxKeeper,
-                "Check that the curl on this Box is a normal one; the Box tries again by itself.",
-            ),
-            Self::ProxyUnreachable => stop(
-                "Tor proxy not usable",
-                "The Box is set to use Tor and could not use its proxy, so it did not go to the till system without it.".into(),
-                Who::BoxKeeper,
-                "Start Tor on this Box or correct the proxy address in pos-setup; the Box tries again by itself.",
-            ),
-            Self::TokenRefused => stop(
-                "Till refused the token",
-                "The till system refused the Box's POS token, so the Box reads nothing from it.".into(),
-                Who::BoxKeeper,
-                "Make a new read-only token at the till system, then type pos-token and the new token on the next line.",
-            ),
-            Self::RateLimited => Words::new(
-                Tone::Info,
-                "Till asks to wait",
-                "The till system asked the Box to call less often, so the Box is waiting.",
-                Who::Nobody,
-                "Nothing to do. The Box waits and asks again by itself.",
-            ),
-            Self::Redirected => stop(
-                "Till system redirected",
-                "The till system answered with a redirect, which the Box does not follow.".into(),
-                Who::BoxKeeper,
-                "Check the host in pos-setup, and keep the text under Details for whoever looks after this Box.",
-            ),
-            Self::Status => stop(
-                "Till system error",
-                "The till system answered with an error status, so the Box read nothing.".into(),
-                Who::BoxKeeper,
-                "Check the till system's own status page; the Box tries again by itself.",
-            ),
-            Self::Unreadable => stop(
-                "Till reply not readable",
-                "The reader could not make orders of the till system's reply, so the Box read nothing from it.".into(),
-                Who::BoxKeeper,
-                "Keep the text under Details for whoever looks after this Box; the Box tries again by itself.",
-            ),
-        };
-        words.code(self.code()).detail(detail)
-    }
-}
-
-impl Reading {
-    /// What a person is told about the reading of the POS. `status` says
-    /// why a Box that is `Stopped` is stopped: unpaired, turned off, or
-    /// paired and not started yet.
-    pub fn words(&self, status: BoxStatus) -> Words {
-        match self {
-            Self::Stopped => match status {
-                BoxStatus::Unpaired | BoxStatus::InvitationOpen => Words::new(
-                    Tone::Info,
-                    "Till not read: not paired",
-                    "The Box does not read the till system because it is not paired with a shop.",
-                    Who::BoxKeeper,
-                    "Pair the Box from the owner's phone first; the state command shows how far it is.",
-                )
-                .code("BX-03"),
-                BoxStatus::TurnedOff => stop(
-                    "Till not read: turned off",
-                    "The Box does not read the till system because the owner's settings turned it off."
-                        .into(),
-                    Who::BoxKeeper,
-                    "Erase the data folder and pair the Box again from the owner's phone.",
-                )
-                .code("BX-23"),
-                BoxStatus::Paired => Words::new(
-                    Tone::Info,
-                    "Till link not started yet",
-                    "The Box is paired but its till link has not started reading yet.",
-                    Who::Nobody,
-                    "Nothing to do. Run pos again in a few seconds.",
-                )
-                .code("BX-40"),
-            },
-            Self::NoToken => Words::new(
-                Tone::Info,
-                "No POS token yet",
-                "The Box has no token for the till system, so it does not read it.",
-                Who::BoxKeeper,
-                "Type pos-token, then type the token on the next line.",
-            )
-            .code("BX-41"),
-            Self::TokenRefused(why) => token_refused_words(why),
-            Self::Reading => Words::new(
-                Tone::Info,
-                "Reading the till system",
-                "The Box has its token and reads the till system on its timer.",
-                Who::Nobody,
-                "Nothing to do. Run pos to see how the last reading went.",
-            )
-            .code("BX-40"),
-        }
-    }
-}
-
-/// The words for a token the Box refused, from the text the Box gave. A
-/// reason that is known has the words of the refusal itself, so that one
-/// fault reads one way; any other reason is shown under Details.
-fn token_refused_words(why: &str) -> Words {
-    let known = [
-        BoxError::BadToken("empty"),
-        BoxError::BadToken("too long"),
-        BoxError::BadToken("not text"),
-        BoxError::BadToken("more than one line or holds a control character"),
-    ];
-    if let Some(e) = known.iter().find(|e| e.to_string() == why) {
-        return e.words();
-    }
-    let mode_prefix =
-        format!("BX-41: {POS_TOKEN_FILE} can be read by its group or by others (mode ");
-    if let Some(mode) = why
-        .strip_prefix(&mode_prefix)
-        .and_then(|rest| rest.split_once(')'))
-        .and_then(|(mode, _)| u32::from_str_radix(mode, 8).ok())
-    {
-        return BoxError::TokenMode { mode }.words();
-    }
-    stop(
-        "POS token not usable",
-        format!(
-            "The Box could not use the file {POS_TOKEN_FILE}, so it does not read the till system."
-        ),
-        Who::BoxKeeper,
-        "Check the file, or enter the token again with the pos-token command.",
-    )
-    .code("BX-41")
-    .detail(plain(why))
-}
-
-impl PosState {
-    /// What a person is told about the POS side: how it is reading, when it
-    /// last read, and the till system's own text if the last reading failed.
-    pub fn words(&self, status: BoxStatus) -> Words {
-        let base = self.reading.words(status);
-        let words = match (&self.reading, &self.last_error, self.last_poll_at) {
-            (Reading::Reading, Some(error), _)
-                if matches!(NoteKind::of(error).0, NoteKind::PosNotReached(_)) =>
-            {
-                note_words(error)
-            }
-            (Reading::Reading, Some(error), _) => Words::new(
-                Tone::Stop,
-                "Till reading failed",
-                "The Box tried to read the till system and could not.",
-                Who::BoxKeeper,
-                "Check that the till system works and the Box can reach it; the Box tries again by itself.",
-            )
-            .code("BX-40")
-            .quoted(Quoted::new("The Box noted", error)),
-            (Reading::Reading, None, None) => Words::new(
-                Tone::Info,
-                "Waiting to read the till",
-                "The Box has its token and has not read the till system yet.",
-                Who::Nobody,
-                "Nothing to do. It reads within a minute.",
-            )
-            .code("BX-40"),
-            _ => base,
-        };
-        match self.last_poll_at {
-            Some(at) => words.at(at),
-            None => words,
-        }
-    }
-
-    /// The stable lines `pos` prints for scripts, one fact on each, without
-    /// the token: the same as `Display`, except that a stopped Box says
-    /// which of the three conditions it is in.
-    pub fn console_lines(&self, status: BoxStatus) -> Vec<String> {
-        let text = self.to_string();
-        let mut lines: Vec<String> = text.lines().map(str::to_string).collect();
-        if self.reading == Reading::Stopped {
-            let why = match status {
-                BoxStatus::Unpaired | BoxStatus::InvitationOpen => "not paired",
-                BoxStatus::TurnedOff => "turned off",
-                BoxStatus::Paired => "not started",
-            };
-            if let Some(first) = lines.first_mut() {
-                *first = format!("reading: no ({why})");
-            }
-        }
-        lines
-    }
-}
-
-impl PosView {
-    /// What a person is told about the POS side of the Box.
-    pub fn words(&self, status: BoxStatus) -> Words {
-        match self {
-            Self::NotInstalled => Words::new(
-                Tone::Info,
-                "No till system set up",
-                "This Box has no till system set up, so it reads none.",
-                Who::BoxKeeper,
-                "Type pos-setup and the setup line to choose Square or Clover, then start the Box again.",
-            ),
-            Self::Disabled(e) => e.words(),
-            Self::State(state) => state.words(status),
-        }
-    }
-
-    /// The stable lines `pos` prints for scripts.
-    pub fn console_lines(&self, status: BoxStatus) -> Vec<String> {
-        match self {
-            Self::NotInstalled | Self::Disabled(_) => {
-                self.to_string().lines().map(str::to_string).collect()
-            }
-            Self::State(state) => state.console_lines(status),
-        }
-    }
-}
-
 impl StartFailure {
     /// What a person is told when the Box did not start. The Box did not
     /// run, so nothing is listening.
@@ -943,10 +477,6 @@ fn courier_words(e: &StartError) -> Words {
 pub enum ConsoleAnswer {
     /// `invite` or the invitation file was taken.
     InvitationTaken,
-    /// `pos-token` stored the token.
-    PosTokenStored,
-    /// `pos-setup` stored the setup; the vendor's word.
-    PosSetupStored(String),
     /// `members`: how many devices the Box serves.
     Members(usize),
     /// `notes` when the Box has kept none.
@@ -982,22 +512,6 @@ impl ConsoleAnswer {
                 "Finish pairing from the owner's phone before the time is up.",
             )
             .code("BX-12"),
-            Self::PosTokenStored => Words::new(
-                Tone::Good,
-                "POS token stored",
-                "The Box stored the POS token and will not print it.",
-                Who::Nobody,
-                "Nothing to do. Run pos to see whether the Box reads the till system.",
-            )
-            .code("BX-41"),
-            Self::PosSetupStored(vendor) => Words::new(
-                Tone::Good,
-                "Till setup stored",
-                format!("The Box stored the setup for {vendor} and uses it from its next start."),
-                Who::BoxKeeper,
-                "Start the Box again, then type pos-token and the token on the next line.",
-            )
-            .code("BX-49"),
             Self::Members(0) => Words::new(
                 Tone::Info,
                 "No devices served",
@@ -1029,7 +543,7 @@ impl ConsoleAnswer {
                 "Command not known",
                 "The Box does not know that command.",
                 Who::BoxKeeper,
-                "Type one of invite, state, pos-setup, pos-token, till-key, pos, members, notes or quit.",
+                "Type one of invite, state, members, notes or quit.",
             )
             .quoted(Quoted::new("You typed", word)),
             Self::InvitationFileUnreadable { path, kind } => stop(
@@ -1042,9 +556,9 @@ impl ConsoleAnswer {
             .detail(plain(&format!("{path}: {kind}"))),
             Self::BadArguments => stop(
                 "Wrong arguments",
-                "The Box needs a data folder and an address to listen on, and may take a till address and other options.".into(),
+                "The Box needs a data folder and an address to listen on, and may take other options.".into(),
                 Who::BoxKeeper,
-                "Type the data folder and the address, then add --invitation-file, --status-page, --till-listen or --no-console as needed.",
+                "Type the data folder and the address, then add --invitation-file, --status-page or --no-console as needed.",
             ),
             Self::BadAddress(text) => stop(
                 "Address not understood",
@@ -1057,334 +571,6 @@ impl ConsoleAnswer {
     }
 }
 
-/// What the till is told, and what the Box keeper is told when a till key is
-/// made (BX-71 to BX-75). The words are the ones the till shows, and
-/// they stay as they are in `words-till-request`.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum TillAnswer {
-    /// The till's key is not the Box's till key.
-    KeyWrong,
-    /// The till key file is of the form before BX-80: a new key is needed.
-    KeyOld,
-    /// The time in the request is more than five minutes from the Box's.
-    Clock,
-    /// The Box has seen this request before.
-    Replay,
-    /// The Box was started without its till listener.
-    Off,
-    /// The Box has not joined the shop.
-    NotPaired,
-    /// No counter has the code the till gave; the code.
-    UnknownCounter(String),
-    /// The sale is in another money than the shop's.
-    WrongMoney {
-        /// The shop's currency, as the owner app shows it.
-        shop: String,
-        /// The currency the till asked in.
-        asked: String,
-    },
-    /// The amount cannot be taken.
-    BadAmount,
-    /// Nobody started the sale on the counter in time.
-    Expired,
-    /// Too many sales are waiting for a counter.
-    Busy,
-    /// Far more requests came from the till than sales need (BX-80).
-    Flood,
-    /// The Box does not know the sale: it was restarted.
-    Lost,
-    /// The counter's sale ended without being paid.
-    Unpaid,
-    /// The till cancelled the sale.
-    Cancelled,
-    /// A new till key was made.
-    KeyMade,
-}
-
-/// What the till shows while the sale waits for the counter.
-pub const TILL_WAITING: &str = "Waiting for the counter. Press Start on the counter.";
-/// What the till shows once the counter has opened the sale.
-pub const TILL_OPENED: &str = "The customer can pay now.";
-/// What the till shows once the sale is paid.
-pub const TILL_PAID: &str = "Paid in bitcoin.";
-
-impl TillAnswer {
-    /// The key the till reads the answer by (BX-75).
-    pub fn key(&self) -> &'static str {
-        match self {
-            Self::KeyWrong => "tillKeyWrong",
-            Self::KeyOld => "tillKeyOld",
-            Self::Clock => "tillClock",
-            Self::Replay => "tillReplay",
-            Self::Off => "tillOff",
-            Self::NotPaired => "tillNotPaired",
-            Self::UnknownCounter(_) => "tillUnknownCounter",
-            Self::WrongMoney { .. } => "tillWrongMoney",
-            Self::BadAmount => "tillBadAmount",
-            Self::Expired => "tillExpired",
-            Self::Busy => "tillBusy",
-            Self::Flood => "tillFlood",
-            Self::Lost => "tillLost",
-            Self::Unpaid => "tillUnpaid",
-            Self::Cancelled => "tillCancelled",
-            Self::KeyMade => "tillKeyMade",
-        }
-    }
-
-    /// What a person is told.
-    pub fn words(&self) -> Words {
-        match self {
-            Self::KeyWrong => stop(
-                "Wrong till key",
-                "The key in this payment method is not the Box's till key.".into(),
-                Who::BoxKeeper,
-                "Copy the till key from the Box again into this payment method.",
-            )
-            .code("BX-71"),
-            Self::KeyOld => stop(
-                "Till key too old",
-                "The Box's till key was made by an earlier version of the Box, \
-                 which did not sign its answers to the till."
-                    .into(),
-                Who::BoxKeeper,
-                "Make a new till key on the Box with openbmt-box till-key and copy it \
-                 into this payment method.",
-            )
-            .code("BX-80"),
-            Self::Clock => stop(
-                "Clocks differ",
-                "The till's server and the Box disagree on the time by more than five minutes.".into(),
-                Who::BoxKeeper,
-                "Set the time on both to the network time, then try again.",
-            )
-            .code("BX-80"),
-            Self::Replay => stop(
-                "Request sent twice",
-                "The Box has seen this request before, so it did not act on it again.".into(),
-                Who::BoxKeeper,
-                "Try again from the till.",
-            )
-            .code("BX-80"),
-            Self::Off => stop(
-                "Till listener is off",
-                "The Box was started without its till listener.".into(),
-                Who::BoxKeeper,
-                "Start the Box with the till listener on. The handbook shows how.",
-            )
-            .code("BX-70"),
-            Self::NotPaired => stop(
-                "The Box is not set up yet",
-                "The Box has not joined the shop, so it cannot reach a counter.".into(),
-                Who::Owner,
-                "Finish setting up the Box from the owner app.",
-            )
-            .code("BX-72"),
-            Self::UnknownCounter(code) => stop(
-                "Counter not found",
-                format!("The shop has no counter with the code {}.", plain(code)),
-                Who::BoxKeeper,
-                "Check the counter code in this payment method. The owner app shows it after the word Counter.",
-            )
-            .code("BX-72"),
-            Self::WrongMoney { shop, asked } => stop(
-                "Wrong currency",
-                format!(
-                    "This sale is in {}, and the shop's counters take {}.",
-                    plain(asked),
-                    plain(shop)
-                ),
-                Who::Cashier,
-                "Take this payment on the counter by hand.",
-            )
-            .code("BX-72"),
-            Self::BadAmount => stop(
-                "This amount cannot be taken",
-                "The amount is zero, below zero, or has more decimals than the money has.".into(),
-                Who::Cashier,
-                "Check the sale in the till.",
-            )
-            .code("BX-72"),
-            Self::Expired => Words::new(
-                Tone::Ended,
-                "Sale not started",
-                "Nobody pressed Start on the counter within 5 minutes.",
-                Who::Cashier,
-                "Try again, or take the payment on the counter and pick Bitcoin by hand.",
-            )
-            .code("BX-76"),
-            Self::Busy => stop(
-                "Too many sales are waiting",
-                format!(
-                    "{MAX_WAITING} sales from the till are waiting for a counter."
-                ),
-                Who::Cashier,
-                "Finish or cancel some of them, then try again.",
-            )
-            .code("BX-76"),
-            Self::Flood => stop(
-                "Too many requests",
-                "The Box took 8,192 requests from the till in ten minutes, far more than sales need. Something may be sending them on purpose.".into(),
-                Who::Cashier,
-                "Wait a few minutes, then try again. If it happens again, tell the owner.",
-            )
-            .code("BX-80"),
-            Self::Lost => stop(
-                "The Box restarted",
-                "The Box no longer knows this sale. If the customer paid, the counter shows the sale as paid.".into(),
-                Who::Cashier,
-                "Check the counter. If it was paid, pick Bitcoin by hand in the till.",
-            )
-            .code("BX-76"),
-            Self::Unpaid => stop(
-                "The payment did not arrive",
-                "The counter's sale ended without being paid.".into(),
-                Who::Cashier,
-                "Ask the customer to try again, or pick another way to pay.",
-            )
-            .code("BX-78"),
-            Self::Cancelled => Words::new(
-                Tone::Ended,
-                "Sale cancelled",
-                "The till cancelled this sale before it was paid.",
-                Who::Nobody,
-                "Nothing to do.",
-            )
-            .code("BX-74"),
-            Self::KeyMade => Words::new(
-                Tone::Good,
-                "New till key",
-                "Put this key in the till's payment method. The old key no longer works.",
-                Who::BoxKeeper,
-                "Keep it out of sight. Anyone with it can ask a counter to start a sale, but cannot move money.",
-            )
-            .code("BX-71"),
-        }
-    }
-}
-
-/// The answer to `till-key`: the words, then the stable line `till key: ` with
-/// the key. The key is shown only here, once (BX-71).
-pub fn till_key_lines(key_hex: &str) -> Vec<String> {
-    let mut lines = lines_of(&TillAnswer::KeyMade.words());
-    lines.push(format!("till key: {key_hex}"));
-    lines
-}
-
-/// The answer to `till-key` when the key could not be made or stored.
-pub fn till_key_failed_lines(e: &BoxError) -> Vec<String> {
-    lines_of(&e.words())
-}
-
-/// How a paid notice was refused (BX-40), as the Box's note says it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum NoticeWhy {
-    /// The notice did not read.
-    DoesNotRead,
-    /// It names another counter than the one that sent it.
-    OtherCounter,
-    /// The key is not a counter in the settings.
-    NotACounter,
-    /// The signature does not check.
-    BadSignature,
-    /// The number is not above the last one.
-    NumberNotAbove,
-    /// The Box keeps numbers for too many counters.
-    TooManyCounters,
-    /// It disagrees with earlier notices about the sale.
-    DoesNotAgree,
-    /// The Box holds as many sales as it can.
-    SalesFull,
-    /// Any other reason.
-    Other,
-}
-
-impl NoticeWhy {
-    /// The reason a note gives.
-    pub fn of(why: &str) -> Self {
-        if why.starts_with("it does not read") {
-            Self::DoesNotRead
-        } else if why.starts_with("it names another counter") {
-            Self::OtherCounter
-        } else if why.starts_with("its key is not a counter") {
-            Self::NotACounter
-        } else if why.starts_with("its signature does not check") {
-            Self::BadSignature
-        } else if why.starts_with("its number ") {
-            Self::NumberNotAbove
-        } else if why.starts_with("the Box keeps numbers for too many") {
-            Self::TooManyCounters
-        } else if why.starts_with("BX-40: the notice gives the sale") {
-            Self::DoesNotAgree
-        } else if why.starts_with("PS-72: the Box holds") {
-            Self::SalesFull
-        } else {
-            Self::Other
-        }
-    }
-
-    fn words(self, detail: String) -> Words {
-        let (what, who, next) = match self {
-            Self::DoesNotRead => (
-                "A counter's paid notice did not read, so the Box ignored it.",
-                Who::Nobody,
-                "Nothing to do. The counter sends the whole sale again with its next notice.",
-            ),
-            Self::OtherCounter => (
-                "A paid notice named another counter than the one that sent it, so the Box ignored it.",
-                Who::Owner,
-                "Tell the owner: a device sent another counter's notice.",
-            ),
-            Self::NotACounter => (
-                "A paid notice came from a device that is not a counter in the settings, so the Box ignored it.",
-                Who::Owner,
-                "If that device is a counter, tell the owner to add it to the settings.",
-            ),
-            Self::BadSignature => (
-                "A paid notice carried a signature that does not check, so the Box ignored it.",
-                Who::Owner,
-                "Tell the owner if it keeps happening.",
-            ),
-            Self::NumberNotAbove => (
-                "A paid notice repeated or went back in its numbering, so the Box ignored it.",
-                Who::Nobody,
-                "Nothing to do. An old or repeated notice changes nothing.",
-            ),
-            Self::TooManyCounters => (
-                "The Box keeps numbers for as many counters as it can and ignored a notice from one more.",
-                Who::Owner,
-                "Tell the owner to remove counters the shop no longer uses.",
-            ),
-            Self::DoesNotAgree => (
-                "A paid notice gave a sale another amount, currency or time than earlier notices, so it was ignored.",
-                Who::Owner,
-                "Tell the owner: a counter's records of one sale disagree.",
-            ),
-            Self::SalesFull => (
-                "The Box holds as many sales as it can and could not make room for a new one.",
-                Who::Owner,
-                "Tell the owner: this Box is full of sales that are too recent to drop.",
-            ),
-            Self::Other => (
-                "A paid notice was refused for a reason this Box has no plain words for.",
-                Who::Owner,
-                "Tell the owner what is under Details.",
-            ),
-        };
-        // A notice that needs nobody ended with nothing received: not a stop.
-        let tone = if who == Who::Nobody {
-            Tone::Ended
-        } else {
-            Tone::Stop
-        };
-        let words = Words::new(tone, "Paid notice refused", what, who, next).code("BX-40");
-        if detail.is_empty() {
-            words
-        } else {
-            words.detail(detail)
-        }
-    }
-}
-
 /// The kind of a note the Box kept. A note is one line of text; what is
 /// stored does not change, and the words are made when it is shown.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1393,131 +579,39 @@ pub enum NoteKind {
     MemberListNotReplaced,
     /// The Box's link files could not be used.
     LinkFiles,
-    /// Paid notices arrived and the Box has no POS.
-    PaidNoticesNoPos,
-    /// The reports for the owner were not stored.
-    ReportsNotStored,
-    /// A report could not be sent to the owner.
-    PosNoticeNotSent,
     /// A message of a kind the Box does not handle.
     MessageNotHandled,
     /// Settings from the owner were refused.
     SettingsRefused,
-    /// A paid notice was refused.
-    PaidNoticeRefused(NoticeWhy),
-    /// The paid notices were not stored.
-    PaidNoticesNotStored,
-    /// The POS was not read.
-    PosNotRead,
-    /// The Box could not reach the POS or use its answer (BX-44 to BX-49).
-    PosNotReached(HttpsKind),
-    /// The counters on the device list were not taken for the till link.
-    CountersNotTaken,
-    /// The POS named no order to close.
-    NoOrderToClose,
-    /// A close was refused for a sale not paid now.
-    CloseRefused,
-    /// The order was already closed.
-    OrderAlreadyClosed,
-    /// The order was not closed.
-    OrderNotClosed,
-    /// The close attempt could not be saved, so the Box did not call the till.
-    CloseAttemptNotSaved,
-    /// The till closed the order, but the Box could not save that result.
-    CloseResultNotSaved,
-    /// Reports were dropped for room.
-    ReportsDropped,
-    /// The POS token could not be erased.
-    TokenNotErased,
     /// The Box was turned off.
     TurnedOff,
-    /// The POS side was left off at the start.
-    PosSideOff,
-    /// Too many closes are recorded.
-    TooManyCloses,
     /// A note with no kind of its own, such as a message of the link.
     Other,
 }
 
 impl NoteKind {
     /// The kind of a stored note, and what follows the fixed part of its
-    /// text. The notes are written by the runner and the POS side; each
-    /// kind is the start of the text its writer gives.
+    /// text. The notes are written by the runner; each kind is the start of
+    /// the text its writer gives.
     pub fn of(line: &str) -> (Self, &str) {
         let after = |prefix: &str| line.strip_prefix(prefix);
         if let Some(rest) = after("the member list was not replaced: ") {
             (Self::MemberListNotReplaced, rest)
         } else if let Some(rest) = after("the Box's link files: ") {
             (Self::LinkFiles, rest)
-        } else if line.ends_with(" paid notices arrived and this Box has no POS: dropped") {
-            (Self::PaidNoticesNoPos, line)
-        } else if let Some(rest) = after("BX-50: the reports were not stored: ") {
-            (Self::ReportsNotStored, rest)
-        } else if let Some(rest) = after("a POS notice could not be sent to the owner: ") {
-            (Self::PosNoticeNotSent, rest)
         } else if let Some(rest) = after("a message of kind ") {
             (Self::MessageNotHandled, rest)
         } else if let Some(rest) = after("settings from the owner refused: ") {
             (Self::SettingsRefused, rest)
-        } else if let Some(rest) = after("BX-40: a paid notice from ") {
-            let why = rest.split_once(" refused: ").map_or("", |(_, why)| why);
-            (Self::PaidNoticeRefused(NoticeWhy::of(why)), rest)
-        } else if let Some(rest) =
-            after("BX-50: the paid notices were not stored and are dropped: ")
-        {
-            (Self::PaidNoticesNotStored, rest)
-        } else if let Some(rest) = after("the POS was not read: ") {
-            (Self::PosNotRead, rest)
-        } else if let Some(rest) = after("the POS was not reached (") {
-            match rest.split_once("): ") {
-                Some((tag, tail)) => match HttpsKind::from_tag(tag) {
-                    Some(kind) => (
-                        Self::PosNotReached(kind),
-                        tail.split_once(": ").map_or(tail, |(_, detail)| detail),
-                    ),
-                    None => (Self::Other, line),
-                },
-                None => (Self::Other, line),
-            }
-        } else if let Some(rest) = after("BX-49: the counters on the device list were not taken: ")
-        {
-            (Self::CountersNotTaken, rest)
-        } else if let Some(rest) = after("the POS did not name an order to close: ") {
-            (Self::NoOrderToClose, rest)
-        } else if let Some(rest) = after("PS-81: an order is closed only") {
-            (Self::CloseRefused, rest)
-        } else if let Some(rest) = after("BX-43: order ") {
-            if rest.contains(" was already closed for sale ") {
-                (Self::OrderAlreadyClosed, rest)
-            } else if rest.contains(" was not closed for sale ") {
-                (Self::OrderNotClosed, rest)
-            } else {
-                (Self::Other, line)
-            }
-        } else if let Some(rest) = after("BX-50: the close attempt was not saved: ") {
-            (Self::CloseAttemptNotSaved, rest)
-        } else if let Some(rest) =
-            after("BX-50: the close result was not saved after the till closed the order: ")
-        {
-            (Self::CloseResultNotSaved, rest)
-        } else if let Some(rest) = after("BX-42: more than ") {
-            (Self::ReportsDropped, rest)
-        } else if let Some(rest) = after("BX-23: the POS token could not be erased: ") {
-            (Self::TokenNotErased, rest)
         } else if line.starts_with("BX-23: the settings no longer list this Box") {
             (Self::TurnedOff, "")
-        } else if let Some(rest) = after("the POS side is off: ") {
-            (Self::PosSideOff, rest)
-        } else if line.starts_with("PS-72: too many closes are recorded") {
-            (Self::TooManyCloses, "")
         } else {
             (Self::Other, line)
         }
     }
 
     /// What a person is told about a note of this kind. `rest` is what
-    /// [`NoteKind::of`] gave: the stored text after the fixed part. Text the
-    /// till system gave is quoted, not part of the sentences.
+    /// [`NoteKind::of`] gave: the stored text after the fixed part.
     pub fn words(self, rest: &str) -> Words {
         let rest = plain(rest);
         match self {
@@ -1535,40 +629,6 @@ impl NoteKind {
                 "Check the disk; if it keeps happening, erase the data folder and pair the Box again.",
             )
             .detail(rest),
-            Self::PaidNoticesNoPos => {
-                let count = rest
-                    .split_whitespace()
-                    .next()
-                    .and_then(|n| n.parse::<u64>().ok());
-                let what = match count {
-                    Some(1) => "A paid notice arrived and was dropped, because this Box has no till link.".to_string(),
-                    Some(n) => format!("{n} paid notices arrived and were dropped, because this Box has no till link."),
-                    None => "Paid notices arrived and were dropped, because this Box has no till link.".to_string(),
-                };
-                Words::new(
-                    Tone::Ended,
-                    "Paid notices dropped",
-                    what,
-                    Who::Nobody,
-                    "Nothing to do. Use a Box program built with a till connector to keep them.",
-                )
-            }
-            Self::ReportsNotStored => stop(
-                "Reports not saved",
-                "The Box could not save the reports it keeps for the owner.".into(),
-                Who::BoxKeeper,
-                "Check that the disk has room and the data folder can be written.",
-            )
-            .code("BX-50")
-            .detail(rest),
-            Self::PosNoticeNotSent => Words::new(
-                Tone::Info,
-                "Report not sent",
-                "The Box could not send a report about the till to the owner's phone.",
-                Who::Nobody,
-                "Nothing to do now. The Box sends it again by itself.",
-            )
-            .detail(rest),
             Self::MessageNotHandled => Words::new(
                 Tone::Ended,
                 "Message not handled",
@@ -1584,145 +644,7 @@ impl NoteKind {
                 "Tell the owner that the Box refused them, and say what is under Details.",
             )
             .detail(rest),
-            Self::PaidNoticeRefused(why) => {
-                let sender = rest
-                    .strip_prefix("DeviceId(")
-                    .and_then(|r| r.split_once(".."))
-                    .map(|(key, _)| format!("sender key {key}"))
-                    .unwrap_or_default();
-                why.words(sender)
-            }
-            Self::PaidNoticesNotStored => stop(
-                "Paid notices not saved",
-                "The Box could not save the paid notices that arrived, so it dropped them.".into(),
-                Who::BoxKeeper,
-                "Check that the disk has room and the data folder can be written.",
-            )
-            .code("BX-50")
-            .detail(rest),
-            Self::PosNotRead => Words::new(
-                Tone::Stop,
-                "Till system not read",
-                "The Box could not read the till system on its last try.",
-                Who::BoxKeeper,
-                "Check that the till system works; the Box tries again by itself.",
-            )
-            .quoted(Quoted::new("The till system said", &rest)),
-            Self::NoOrderToClose => Words::new(
-                Tone::Info,
-                "Order not named",
-                "The till system did not name an order to close for a paid sale.",
-                Who::Nobody,
-                "Nothing to do. The Box asks again at its next turn.",
-            )
-            .quoted(Quoted::new("The till system said", &rest)),
-            Self::CloseRefused => Words::new(
-                Tone::Ended,
-                "Order not closed",
-                "The Box did not close an order, because the sale is not reported paid now.",
-                Who::Nobody,
-                "Nothing to do. An order is closed only for a sale that is paid.",
-            )
-            .code("PS-81"),
-            Self::OrderAlreadyClosed => {
-                let (order, sale) = rest
-                    .split_once(" was already closed for sale ")
-                    .unwrap_or((rest.as_str(), ""));
-                let words = Words::new(
-                    Tone::Ended,
-                    "Order already closed",
-                    "The till system says an order was already closed, so the Box did not close it again.",
-                    Who::Nobody,
-                    "Nothing to do. The order is closed.",
-                )
-                .code("BX-43")
-                .quoted(Quoted::new("The till system's order", order));
-                if sale.is_empty() {
-                    words
-                } else {
-                    words.detail(format!("sale {sale}"))
-                }
-            }
-            Self::OrderNotClosed => {
-                let (order, tail) = rest
-                    .split_once(" was not closed for sale ")
-                    .unwrap_or((rest.as_str(), ""));
-                let (sale, error) = tail.split_once(": ").unwrap_or((tail, ""));
-                let words = Words::new(
-                    Tone::Stop,
-                    "Order not closed",
-                    "The till system did not close an order for a paid sale.",
-                    Who::BoxKeeper,
-                    "Check that the till system works; the Box asks again by itself.",
-                )
-                .code("BX-43")
-                .quoted(Quoted::new(
-                    "The till system said",
-                    &format!("order {order}: {error}"),
-                ));
-                if sale.is_empty() {
-                    words
-                } else {
-                    words.detail(format!("sale {sale}"))
-                }
-            }
-            Self::CloseAttemptNotSaved => stop(
-                "Close attempt not saved",
-                "The Box could not save its record before asking the till to close the order, so it did not ask the till.".into(),
-                Who::BoxKeeper,
-                "Check that the disk has room and the data folder can be written; the Box tries again by itself.",
-            )
-            .code("BX-50")
-            .detail(rest),
-            Self::CloseResultNotSaved => stop(
-                "Close result not saved",
-                "The till closed the order, but the Box could not save that result.".into(),
-                Who::BoxKeeper,
-                "Free disk space or fix folder access; the Box retries the same request. Check the till before closing by hand.",
-            )
-            .code("BX-50")
-            .detail(rest),
-            Self::ReportsDropped => Words::new(
-                Tone::Stop,
-                "Reports dropped",
-                "More reports were waiting for the owner's phone than the Box keeps, so the oldest were dropped.",
-                Who::Owner,
-                "Check that the owner's phone is on and can reach the Box.",
-            )
-            .code("BX-42"),
-            Self::TokenNotErased => stop(
-                "POS token not erased",
-                "The Box is turned off but could not erase the POS token it stored.".into(),
-                Who::BoxKeeper,
-                format!("Delete the file {POS_TOKEN_FILE} in the Box's data folder."),
-            )
-            .code("BX-23")
-            .detail(rest),
             Self::TurnedOff => turned_off(),
-            Self::PosSideOff => stop(
-                "Till link off",
-                "The Box switched its till link off when it started.".into(),
-                Who::BoxKeeper,
-                "Run pos to see why, then fix that.",
-            )
-            .detail(rest),
-            Self::TooManyCloses => Words::new(
-                Tone::Stop,
-                "Too many closes kept",
-                "The Box keeps as many closed orders as it can and made no new close.",
-                Who::Owner,
-                "Tell the owner: this Box's record of closed orders is full.",
-            )
-            .code("PS-72"),
-            Self::PosNotReached(kind) => kind.words(&rest),
-            Self::CountersNotTaken => stop(
-                "Counter list not taken",
-                "The Box could not use the owner's list of counters for the till link, so it keeps the one it had.".into(),
-                Who::Owner,
-                "Tell the owner: one till location can serve only a few counters.",
-            )
-            .code("BX-49")
-            .detail(rest),
             Self::Other => Words::new(
                 Tone::Info,
                 "Note from the Box",
@@ -1742,7 +664,7 @@ pub fn note_words(line: &str) -> Words {
 }
 
 // Console answers, one function for each command, shared by the program and
-// the example that adds a POS connector. Each gives the lines to print.
+// the examples. Each gives the lines to print.
 
 fn lines_of(words: &Words) -> Vec<String> {
     render(words)
@@ -1764,40 +686,6 @@ pub fn invite_lines(result: &Result<(), BoxError>) -> Vec<String> {
 pub fn state_lines(status: BoxStatus) -> Vec<String> {
     let mut lines = lines_of(&status.words());
     lines.push(format!("state: {}", status.text()));
-    lines
-}
-
-/// The answer to `pos-token`. No line after the command is the fault of an
-/// empty token: `Err(BoxError::BadToken("empty"))`.
-pub fn pos_token_lines(result: Result<(), BoxError>) -> Vec<String> {
-    match result {
-        Ok(()) => lines_of(&ConsoleAnswer::PosTokenStored.words()),
-        Err(e) => lines_of(&e.words()),
-    }
-}
-
-/// The answer to `pos-setup`: the words, then the stable line
-/// `pos-setup: <vendor>` when it was taken.
-pub fn pos_setup_lines(result: &Result<PosConfig, PosConfigError>) -> Vec<String> {
-    match result {
-        Ok(config) => {
-            let mut lines =
-                lines_of(&ConsoleAnswer::PosSetupStored(config.vendor.word().to_string()).words());
-            lines.push(format!("pos-setup: {}", config.vendor.word()));
-            lines
-        }
-        Err(e) => lines_of(&e.words()),
-    }
-}
-
-/// The answer to `pos`: the words, then the stable lines prefixed `pos: `.
-pub fn pos_lines(view: &PosView, status: BoxStatus) -> Vec<String> {
-    let mut lines = lines_of(&view.words(status));
-    lines.extend(
-        view.console_lines(status)
-            .into_iter()
-            .map(|l| format!("pos: {l}")),
-    );
     lines
 }
 
@@ -1835,32 +723,12 @@ pub fn unknown_lines(word: &str) -> Vec<String> {
     lines_of(&ConsoleAnswer::UnknownCommand(word.to_string()).words())
 }
 
-/// A sample state for the list of words: a `Reading` state that has been
-/// read, with a time and nothing wrong.
-fn sample_state(reading: Reading) -> PosState {
-    PosState {
-        reading,
-        can_close: false,
-        last_poll_at: Some(1_700_000_000),
-        last_error: None,
-        sales: 0,
-        notices_taken: 0,
-        notices_refused: 0,
-        orders: 0,
-        matches: 0,
-        open_alerts: 0,
-        closes: 0,
-        reports_waiting: 0,
-    }
-}
-
 /// SC-12: the words of every state and every refusal the Box console can
 /// show, at least one for each variant and for each variant inside it.
 /// A name that holds " and " stands for several states with one sentence
 /// (SC-07: one fault reached two ways is one sentence); a name that holds
 /// ": " says which sample of a variant it is.
 pub fn all_words() -> Vec<(String, Words)> {
-    use crate::pos::{LEDGER_FILE, NOTICES_FILE};
     use crate::state::{KEY_FILE, ROOTS_FILE, SETTINGS_FILE};
     use openbmt_core::wire::DecodeError;
 
@@ -1977,122 +845,6 @@ pub fn all_words() -> Vec<(String, Words)> {
     add("BoxError::NotListed", BoxError::NotListed.words());
     add("BoxError::TooManyMembers", BoxError::TooManyMembers.words());
     add("BoxError::NotPaired", BoxError::NotPaired.words());
-    add(
-        "BoxError::TokenMode",
-        BoxError::TokenMode { mode: 0o644 }.words(),
-    );
-    for (name, why) in [
-        ("empty", "empty"),
-        ("too long", "too long"),
-        (
-            "not one line",
-            "more than one line or holds a control character",
-        ),
-        ("not text", "not text"),
-    ] {
-        add(
-            &format!("BoxError::BadToken: {name}"),
-            BoxError::BadToken(why).words(),
-        );
-    }
-
-    let stopped = [
-        ("unpaired", BoxStatus::Unpaired),
-        ("turned off", BoxStatus::TurnedOff),
-        ("not started", BoxStatus::Paired),
-    ];
-    for (name, status) in stopped {
-        add(
-            &format!("Reading::Stopped: {name}"),
-            Reading::Stopped.words(status),
-        );
-    }
-    add(
-        "Reading::NoToken",
-        Reading::NoToken.words(BoxStatus::Paired),
-    );
-    add(
-        "Reading::TokenRefused",
-        Reading::TokenRefused("BX-50: could not read pos.token: permission denied".into())
-            .words(BoxStatus::Paired),
-    );
-    add(
-        "PosView::State and Reading::Reading and PosState: reading",
-        PosView::State(Box::new(sample_state(Reading::Reading))).words(BoxStatus::Paired),
-    );
-    let mut failing = sample_state(Reading::Reading);
-    failing.last_error = Some("the POS was not read: the POS is not reachable".into());
-    add(
-        "PosState: reading, last reading failed",
-        failing.words(BoxStatus::Paired),
-    );
-    let mut waiting = sample_state(Reading::Reading);
-    waiting.last_poll_at = None;
-    add(
-        "PosState: reading, not read yet",
-        waiting.words(BoxStatus::Paired),
-    );
-    add(
-        "PosView::NotInstalled",
-        PosView::NotInstalled.words(BoxStatus::Paired),
-    );
-
-    add(
-        "PosOpenError::Damaged and PosView::Disabled",
-        PosOpenError::Damaged {
-            file: NOTICES_FILE,
-            why: "message is cut short".into(),
-        }
-        .words(),
-    );
-    add(
-        "PosOpenError::Io",
-        PosOpenError::Io {
-            file: LEDGER_FILE,
-            kind: io::ErrorKind::PermissionDenied,
-        }
-        .words(),
-    );
-    add(
-        "PosOpenError::Config and PosConfigError::Damaged",
-        PosOpenError::Config(PosConfigError::Damaged("message is cut short".into())).words(),
-    );
-    add(
-        "PosConfigError::BadWord",
-        PosConfigError::BadWord("colour=red".into()).words(),
-    );
-    add(
-        "PosConfigError::Missing",
-        PosConfigError::Missing("vendor").words(),
-    );
-    add(
-        "PosConfigError::UnknownVendor",
-        PosConfigError::UnknownVendor("stripe".into()).words(),
-    );
-    add(
-        "PosConfigError::BadValue",
-        PosConfigError::BadValue("tenders").words(),
-    );
-    add(
-        "PosConfigError::Io",
-        PosConfigError::Io(io::ErrorKind::PermissionDenied).words(),
-    );
-    for (name, e) in [
-        ("TenderNames", PosSettingsError::TenderNames),
-        ("Currencies", PosSettingsError::Currencies),
-        ("Locations", PosSettingsError::Locations),
-        ("Timing", PosSettingsError::Timing),
-    ] {
-        let also = if name == "TenderNames" {
-            " and PosConfigError::Settings"
-        } else {
-            ""
-        };
-        add(
-            &format!("PosOpenError::Settings and PosSettingsError::{name}{also}"),
-            PosOpenError::Settings(e).words(),
-        );
-    }
 
     add(
         "StartFailure::Lock and LockError::Busy",
@@ -2133,11 +885,6 @@ pub fn all_words() -> Vec<(String, Words)> {
 
     let answers = [
         ("InvitationTaken", ConsoleAnswer::InvitationTaken),
-        ("PosTokenStored", ConsoleAnswer::PosTokenStored),
-        (
-            "PosSetupStored",
-            ConsoleAnswer::PosSetupStored("square".into()),
-        ),
         ("Members: none", ConsoleAnswer::Members(0)),
         ("Members: some", ConsoleAnswer::Members(3)),
         ("NoNotes", ConsoleAnswer::NoNotes),
@@ -2158,54 +905,16 @@ pub fn all_words() -> Vec<(String, Words)> {
     for (name, answer) in answers {
         add(&format!("ConsoleAnswer::{name}"), answer.words());
     }
-    for answer in till_samples() {
-        add(&format!("TillAnswer::{}", answer.key()), answer.words());
-    }
 
     for (name, line) in SAMPLE_NOTES {
         add(name, note_words(line));
     }
-    for kind in HttpsKind::ALL {
-        add(
-            &format!("NoteKind::PosNotReached: {}", kind.tag()),
-            note_words(&format!(
-                "the POS was not reached ({}): {}: sample detail",
-                kind.tag(),
-                kind.code()
-            )),
-        );
-    }
     all
-}
-
-/// One value of every variant of [`TillAnswer`].
-pub fn till_samples() -> Vec<TillAnswer> {
-    vec![
-        TillAnswer::KeyWrong,
-        TillAnswer::KeyOld,
-        TillAnswer::Clock,
-        TillAnswer::Replay,
-        TillAnswer::Off,
-        TillAnswer::NotPaired,
-        TillAnswer::UnknownCounter("1a2b3c4d".into()),
-        TillAnswer::WrongMoney {
-            shop: "USD".into(),
-            asked: "EUR".into(),
-        },
-        TillAnswer::BadAmount,
-        TillAnswer::Expired,
-        TillAnswer::Busy,
-        TillAnswer::Flood,
-        TillAnswer::Lost,
-        TillAnswer::Unpaid,
-        TillAnswer::Cancelled,
-        TillAnswer::KeyMade,
-    ]
 }
 
 /// One stored note for every kind of note, as its writer words it, with the
 /// name of the entry in [`all_words`].
-const SAMPLE_NOTES: [(&str, &str); 30] = [
+const SAMPLE_NOTES: [(&str, &str); 5] = [
     (
         "NoteKind::MemberListNotReplaced",
         "the member list was not replaced: could not write members: permission denied",
@@ -2215,112 +924,12 @@ const SAMPLE_NOTES: [(&str, &str); 30] = [
         "the Box's link files: LK-53: link-inbox does not read back",
     ),
     (
-        "NoteKind::PaidNoticesNoPos",
-        "2 paid notices arrived and this Box has no POS: dropped",
-    ),
-    (
-        "NoteKind::ReportsNotStored",
-        "BX-50: the reports were not stored: permission denied",
-    ),
-    (
-        "NoteKind::PosNoticeNotSent",
-        "a POS notice could not be sent to the owner: the relay refused",
-    ),
-    (
         "NoteKind::MessageNotHandled",
-        "a message of kind PaidNotice is not handled yet",
+        "a message of kind Records is not handled yet",
     ),
     (
         "NoteKind::SettingsRefused",
         "settings from the owner refused: BX-21: owner signature missing or wrong",
-    ),
-    (
-        "NoteKind::PaidNoticeRefused and NoticeWhy::DoesNotRead",
-        "BX-40: a paid notice from DeviceId(ab12cd34..) refused: it does not read: cut short",
-    ),
-    (
-        "NoteKind::PaidNoticeRefused and NoticeWhy::OtherCounter",
-        "BX-40: a paid notice from DeviceId(ab12cd34..) refused: it names another counter than the one that sent it",
-    ),
-    (
-        "NoteKind::PaidNoticeRefused and NoticeWhy::NotACounter",
-        "BX-40: a paid notice from DeviceId(ab12cd34..) refused: its key is not a counter in the settings in force",
-    ),
-    (
-        "NoteKind::PaidNoticeRefused and NoticeWhy::BadSignature",
-        "BX-40: a paid notice from DeviceId(ab12cd34..) refused: its signature does not check",
-    ),
-    (
-        "NoteKind::PaidNoticeRefused and NoticeWhy::NumberNotAbove",
-        "BX-40: a paid notice from DeviceId(ab12cd34..) refused: its number 4 is not above 5",
-    ),
-    (
-        "NoteKind::PaidNoticeRefused and NoticeWhy::TooManyCounters",
-        "BX-40: a paid notice from DeviceId(ab12cd34..) refused: the Box keeps numbers for too many counters",
-    ),
-    (
-        "NoteKind::PaidNoticeRefused and NoticeWhy::DoesNotAgree",
-        "BX-40: a paid notice from DeviceId(ab12cd34..) refused: BX-40: the notice gives the sale another amount than earlier notices did",
-    ),
-    (
-        "NoteKind::PaidNoticeRefused and NoticeWhy::SalesFull",
-        "BX-40: a paid notice from DeviceId(ab12cd34..) refused: PS-72: the Box holds 16384 sales and none can be dropped",
-    ),
-    (
-        "NoteKind::PaidNoticeRefused and NoticeWhy::Other",
-        "BX-40: a paid notice from DeviceId(ab12cd34..) refused: something new",
-    ),
-    (
-        "NoteKind::PaidNoticesNotStored",
-        "BX-50: the paid notices were not stored and are dropped: permission denied",
-    ),
-    (
-        "NoteKind::PosNotRead",
-        "the POS was not read: the POS is not reachable (0 pages were kept)",
-    ),
-    (
-        "NoteKind::NoOrderToClose",
-        "the POS did not name an order to close: the POS is not reachable",
-    ),
-    (
-        "NoteKind::CloseRefused",
-        "PS-81: an order is closed only for a sale reported paid now (CR-30)",
-    ),
-    (
-        "NoteKind::OrderAlreadyClosed",
-        "BX-43: order o2 was already closed for sale 2",
-    ),
-    (
-        "NoteKind::OrderNotClosed",
-        "BX-43: order o2 was not closed for sale 2: the POS refused the close",
-    ),
-    (
-        "NoteKind::CloseAttemptNotSaved",
-        "BX-50: the close attempt was not saved: permission denied",
-    ),
-    (
-        "NoteKind::CloseResultNotSaved",
-        "BX-50: the close result was not saved after the till closed the order: permission denied",
-    ),
-    (
-        "NoteKind::ReportsDropped",
-        "BX-42: more than 256 reports are waiting for the relay: the oldest were dropped",
-    ),
-    (
-        "NoteKind::TokenNotErased",
-        "BX-23: the POS token could not be erased: permission denied",
-    ),
-    (
-        "NoteKind::PosSideOff",
-        "the POS side is off: BX-51: pos-notices is damaged (message is cut short): the Box does not run the POS",
-    ),
-    (
-        "NoteKind::CountersNotTaken",
-        "BX-49: the counters on the device list were not taken: PS-14: locations are unique, with each counter in at most one place",
-    ),
-    (
-        "NoteKind::TooManyCloses",
-        "PS-72: too many closes are recorded: none is made",
     ),
     ("NoteKind::Other", "the relay did not answer"),
 ];

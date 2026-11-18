@@ -45,11 +45,10 @@ object ProtocolDecoderTest {
         days()
         requestsToSend()
         bills()
-        till()
         starter()
     }
 
-    // ---- bills, tabs and the till's reference (CR-245 to CR-254) ----
+    // ---- bills and tabs (CR-246 to CR-254) ----
 
     private fun wordsBytes(): ByteArray {
         val out = ByteArrayOutputStream()
@@ -58,9 +57,9 @@ object ProtocolDecoderTest {
     }
 
     private fun bills() {
-        // open_bill (74): the time, the kind (1 bill, 2 tab), the amount and the reference.
-        val open = requestFrame(74, 1) { it.u64(7).u8(2).u64(1_200).option("T-14") { x -> it.string(x) } }
-        check(hex(open).endsWith("0700000000000000" + "02" + "b004000000000000" + "01" + "04000000" + "542d3134")) { hex(open) }
+        // open_bill (74): the time, the kind (1 bill, 2 tab) and the amount.
+        val open = requestFrame(74, 1) { it.u64(7).u8(2).u64(1_200) }
+        check(hex(open).endsWith("0700000000000000" + "02" + "b004000000000000")) { hex(open) }
         // add_other_part (78) and close_short (82).
         check(hex(requestFrame(78, 1) { it.u64(9).u32(3).u64(500).u8(2) }).endsWith("0900000000000000" + "03000000" + "f401000000000000" + "02"))
         check(hex(requestFrame(82, 1) { it.u64(9).u32(3).u8(1).string("Ana") }).endsWith("0900000000000000" + "03000000" + "01" + "03000000" + "416e61"))
@@ -68,19 +67,19 @@ object ProtocolDecoderTest {
         check(hex(requestFrame(79, 1) { it.u32(3).u8(4) }).endsWith("03000000" + "04"))
         // bills (84): two bills, one open with a bitcoin part and one closed short.
         val w = Writer().u32(2)
-        w.u32(1).u8(1).u64(1_000).u8(1).string("T-1").u64(100).u8(0).u64(0).u64(0).u64(0).u64(300).u32(1).u64(700)
+        w.u32(1).u8(1).u64(1_000).u64(100).u8(0).u64(0).u64(0).u64(0).u64(300).u32(1).u64(700)
         w.u32(1).u8(1).u32(0).u64(500).u8(0).u8(0)
         w.raw(wordsBytes())
-        w.u32(2).u8(2).u64(900).u8(0).u64(150).u8(2).u64(200).u64(300).u64(0).u64(200).u32(0).u64(400)
+        w.u32(2).u8(2).u64(900).u64(150).u8(2).u64(200).u64(300).u64(0).u64(200).u32(0).u64(400)
         w.u32(1).u8(0).u64(200).u8(1).u8(2).u8(1)
         w.raw(wordsBytes())
         decodeResponse(header(0, w.toByteArray())).let { r ->
             val list = r.list { r.bill() }
             r.end()
-            check(list.size == 2 && list[0].number == 1L && list[0].kind == BillKind.Bill && list[0].reference == "T-1")
+            check(list.size == 2 && list[0].number == 1L && list[0].kind == BillKind.Bill)
             check(list[0].state == BillState.Open && list[0].pending == 1L && list[0].left == 700L)
             check(list[0].parts.size == 1 && list[0].parts[0].sale == 0L && !list[0].parts[0].counts)
-            check(list[1].kind == BillKind.Tab && list[1].reference == null && list[1].state == BillState.ClosedShort)
+            check(list[1].kind == BillKind.Tab && list[1].state == BillState.ClosedShort)
             check(list[1].unpaidMinor == 300L && list[1].endedAt == 200L)
             check(list[1].parts[0].sale == null && list[1].parts[0].way == PartWay.Card && list[1].parts[0].counts)
         }
@@ -88,53 +87,12 @@ object ProtocolDecoderTest {
             decodeResponse(header(0, Writer().u32(1).u32(1).u8(9).toByteArray())).let { r -> r.list { r.bill() } }
         }
         rejects("a state that is not 0 to 3 in a bill") {
-            decodeResponse(header(0, Writer().u32(1).u32(1).u8(1).u64(1).u8(0).u64(0).u8(9).toByteArray())).let { r -> r.list { r.bill() } }
+            decodeResponse(header(0, Writer().u32(1).u32(1).u8(1).u64(1).u64(0).u8(9).toByteArray())).let { r -> r.list { r.bill() } }
         }
         rejects("a way that is not 1 to 3 in a part") {
-            val p = Writer().u32(1).u32(1).u8(1).u64(1).u8(0).u64(0).u8(0).u64(0).u64(0).u64(0).u64(0).u32(0).u64(0)
+            val p = Writer().u32(1).u32(1).u8(1).u64(1).u64(0).u8(0).u64(0).u64(0).u64(0).u64(0).u32(0).u64(0)
             p.u32(1).u8(0).u64(5).u8(1).u8(9).u8(1)
             decodeResponse(header(0, p.toByteArray())).let { r -> r.list { r.bill() } }
-        }
-    }
-
-    // ---- a sale from the till (CR-266 to CR-271) ----
-
-    private fun till() {
-        val sale = ByteArray(16) { 4 }
-        // till_start (86): the time, the till's sale as bytes, the rate, the source, when it was fetched and no person.
-        val start = requestFrame(86, 1) { it.u64(7).bytes(sale).u64(10_000_000).string("test-fixed").u64(5).option(null as Actor?) { } }
-        check(
-            hex(start).endsWith(
-                "0700000000000000" + "10000000" + "04".repeat(16) + "8096980000000000" + "0a000000" + "746573742d6669786564" +
-                    "0500000000000000" + "00",
-            ),
-        ) { hex(start) }
-        // till_not_now (87): the time and the till's sale.
-        check(hex(requestFrame(87, 1) { it.u64(9).bytes(sale) }).endsWith("0900000000000000" + "10000000" + "04".repeat(16)))
-        // till_waiting (85): one request with 5 minutes left.
-        val w = Writer().u32(1).bytes(sale).u64(500).string("POS/0007").u64(1_300).u64(5)
-        w.raw(wordsBytes())
-        decodeResponse(header(0, w.toByteArray())).let { r ->
-            val list = r.list { r.tillRequest() }
-            r.end()
-            check(list.size == 1 && list[0].sale.contentEquals(sale) && list[0].amountMinor == 500L)
-            check(list[0].reference == "POS/0007" && list[0].lapsesAt == 1_300L && list[0].minutesLeft == 5L)
-            check(list[0].words.heading == "WORDS_NEEDED_X")
-        }
-        // till_of_sale (88): a sale the till cancelled, with its line; and a sale that did not come from the till.
-        val cancelled = Writer().u8(1).bytes(sale).u8(1).u8(1).raw(wordsBytes())
-        decodeResponse(header(0, cancelled.toByteArray())).let { r ->
-            val v = r.tillOfSale()
-            r.end()
-            check(v.sale!!.contentEquals(sale) && v.cancelled && v.words?.heading == "WORDS_NEEDED_X")
-        }
-        decodeResponse(header(0, Writer().u8(0).u8(0).u8(0).toByteArray())).let { r ->
-            val v = r.tillOfSale()
-            r.end()
-            check(v.sale == null && !v.cancelled && v.words == null)
-        }
-        rejects("a flag that is not 0 or 1 in a sale of the till") {
-            decodeResponse(header(0, Writer().u8(0).u8(7).u8(0).toByteArray())).let { r -> r.tillOfSale() }
         }
     }
 
@@ -190,17 +148,17 @@ object ProtocolDecoderTest {
         check(hex(requestFrame(62, 1) { it.u64(9).u32(2).string("hi") }).endsWith("0900000000000000" + "02000000" + "02000000" + "6869"))
         check(hex(requestFrame(65, 1) { it.u32(2).string("l") }).endsWith("02000000" + "01000000" + "6c"))
         // sale_info (63): a note and the days, and none.
-        decodeResponse(header(0, Writer().u8(1).string("Tour").u8(7).u64(1_700_604_800).u8(1).u8(1).string("T-7").u8(1).u32(4).string("EUR").toByteArray())).let { r ->
+        decodeResponse(header(0, Writer().u8(1).string("Tour").u8(7).u64(1_700_604_800).u8(1).u8(1).u32(4).string("EUR").toByteArray())).let { r ->
             val info = r.saleInfo()
             r.end()
             check(info.note == "Tour" && info.requestDays == 7 && info.expiresAt == 1_700_604_800L && info.cashRefundOnly)
-            check(info.reference == "T-7" && info.billNumber == 4L && info.currency == "EUR")
+            check(info.billNumber == 4L && info.currency == "EUR")
         }
-        decodeResponse(header(0, Writer().u8(0).u8(0).u64(900).u8(0).u8(0).u8(0).string("USD").toByteArray())).let { r ->
+        decodeResponse(header(0, Writer().u8(0).u8(0).u64(900).u8(0).u8(0).string("USD").toByteArray())).let { r ->
             val info = r.saleInfo()
             r.end()
             check(info.note == null && info.requestDays == 0 && info.expiresAt == 900L && !info.cashRefundOnly)
-            check(info.reference == null && info.billNumber == null && info.currency == "USD")
+            check(info.billNumber == null && info.currency == "USD")
         }
         rejects("a flag that is not 0 or 1 in a sale's info") {
             decodeResponse(header(0, Writer().u8(2).u8(0).u64(900).u8(0).toByteArray())).saleInfo()

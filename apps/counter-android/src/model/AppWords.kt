@@ -666,13 +666,6 @@ object AppWords {
         )
         for ((key, text) in SwitchWords.all()) out.append("| ${cell(key)} | ${cell(text)} |\n")
         out.append(
-            "\n## A sale from the till (CR-266 to CR-271)\n\n" +
-                "The labels of the card on Home and of the line on a started sale.\n\n" +
-                "| Key | Text |\n" +
-                "|---|---|\n",
-        )
-        for ((key, text) in WordsOfTill.all()) out.append("| ${cell(key)} | ${cell(text)} |\n")
-        out.append(
             "\n## The starter line's payments (CR-273, CR-274)\n\n" +
                 "The labels of the cards on Home and of the day's payments on\n" +
                 "Today.\n\n" +

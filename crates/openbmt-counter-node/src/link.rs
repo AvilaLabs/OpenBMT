@@ -19,17 +19,13 @@
 //!   dropped without a word.
 //! - Device lists: noted and dropped. The device list travels inside the
 //!   settings (CR-166).
-//! - POS notices from a Box: a sale request or a cancel from the till is
-//!   given to `Node::take_till_notice` (CR-266, CR-269); what is not taken is
-//!   dropped with a note.
 //!
 //! A refusal by the node, or a content that does not decode, is noted and the
 //! step goes on (LK-63).
 //!
 //! ## What goes out
 //!
-//! The records after the owner's mark (LK-56), a check-in (LK-57) and, when
-//! the link has a Box, the paid notices (BX-40, see [`crate::notices`]). The
+//! The records after the owner's mark (LK-56) and a check-in (LK-57). The
 //! step does nothing before its time: the relay is polled at most every
 //! `poll_secs`, and after a failure not again before `retry_secs`, so a loop
 //! that calls `step` ten times a second neither connects ten times a second
@@ -48,7 +44,7 @@ use std::collections::VecDeque;
 
 use openbmt_core::batch::SignedBatch;
 use openbmt_core::command::SignedCommand;
-use openbmt_core::identity::{DeviceId, Identity};
+use openbmt_core::identity::DeviceId;
 use openbmt_core::pinned_wallet::SignedRange;
 use openbmt_core::records::GENESIS;
 use openbmt_counter::Report;
@@ -59,7 +55,6 @@ use openbmt_link::seal::MAX_CONTENT_LEN;
 use openbmt_link::{ClientError, Kind, Role};
 
 use crate::node::{DriverPort, Node};
-use crate::notices::{NoticeOutbox, NoticeStoreError};
 use crate::settings::{decode_frame, SettingsFrame};
 
 /// Most lines the link's own notes keep; the oldest goes first.
@@ -185,8 +180,6 @@ pub struct CounterLink<R: Post = RelayPost> {
     heartbeats_taken: u64,
     node_refusals: u64,
     notes: VecDeque<String>,
-    notices: Option<NoticeOutbox>,
-    notice_noted: Option<String>,
     /// The last line about a failed read of the records (CR-81), so that a
     /// fault that lasts is noted once, not at each step.
     read_noted: Option<String>,
@@ -216,32 +209,9 @@ impl<R: Post> CounterLink<R> {
             heartbeats_taken: 0,
             node_refusals: 0,
             notes: VecDeque::new(),
-            notices: None,
-            notice_noted: None,
             read_noted: None,
             settings: (0, false, false),
         }
-    }
-
-    /// Send paid notices (BX-40) to each Box in the courier's table, signed
-    /// with `identity`, which must be the counter's own. The numbers and the
-    /// queue are kept in `dir`. With no Box in the table nothing is sent.
-    pub fn enable_notices<P: DriverPort>(
-        &mut self,
-        identity: Identity,
-        dir: impl Into<std::path::PathBuf>,
-        node: &Node<P>,
-    ) -> Result<(), NoticeStoreError> {
-        if identity.device_id() != self.courier.device_id() {
-            return Err(NoticeStoreError::NotThisCounter);
-        }
-        self.notices = Some(NoticeOutbox::open(identity, dir, &node.record_source())?);
-        Ok(())
-    }
-
-    /// The notices, for reading.
-    pub fn notices(&self) -> Option<&NoticeOutbox> {
-        self.notices.as_ref()
     }
 
     /// The courier, for reading.
@@ -362,7 +332,6 @@ impl<R: Post> CounterLink<R> {
         let Some(polled) = polled else {
             return (reports, Outgoing::default());
         };
-        self.queue_notices(node);
         for message in polled.received {
             self.route(node, message, &mut reports);
         }
@@ -391,9 +360,8 @@ impl<R: Post> CounterLink<R> {
         (reports, out)
     }
 
-    /// The third part: send what [`CounterLink::take_step`] decided, then
-    /// the paid notices, and let go of the connection. Does not touch the
-    /// node.
+    /// The third part: send what [`CounterLink::take_step`] decided and let
+    /// go of the connection. Does not touch the node.
     pub fn send_step(&mut self, out: Outgoing, now: u64) {
         if !out.active {
             return;
@@ -401,8 +369,7 @@ impl<R: Post> CounterLink<R> {
         let reached = out.reached
             && self.send_check_in(out.check_in)
             && self.send_lightning_report(out.lightning_report)
-            && self.send_records(out.records_from, out.records, now)
-            && self.send_notices();
+            && self.send_records(out.records_from, out.records, now);
         self.courier.end();
         if !reached {
             self.next_relay_at = now.saturating_add(self.cfg.retry_secs);
@@ -485,12 +452,6 @@ impl<R: Post> CounterLink<R> {
                  dropped"
                     .to_string(),
             ),
-            Kind::PosNotice => {
-                // CR-266, CR-269: a sale request or a cancel from the till.
-                if let Err(e) = node.take_till_notice(&message.from, &message.content) {
-                    self.note(e.to_string());
-                }
-            }
             other => self.note(format!("a {other:?} message: not handled yet")),
         }
     }
@@ -698,37 +659,6 @@ impl<R: Post> CounterLink<R> {
         reached
     }
 
-    /// BX-40: the Boxes in the courier's table.
-    fn boxes(&self) -> Vec<DeviceId> {
-        self.courier
-            .peers()
-            .iter()
-            .filter(|(_, role)| **role == Role::Box)
-            .map(|(d, _)| *d)
-            .collect()
-    }
-
-    /// BX-40: queue the notices the counter's records call for and store
-    /// them, before anything is sent and whether or not the relay can be
-    /// reached. Nothing here changes a sale or fails the step: whatever goes
-    /// wrong is a note.
-    fn queue_notices<P: DriverPort>(&mut self, node: &Node<P>) {
-        if self.boxes().is_empty() {
-            return;
-        }
-        let Some(out) = self.notices.as_mut() else {
-            return;
-        };
-        let line = match out.collect(&node.record_source()) {
-            Ok(0) => return,
-            Ok(dropped) => {
-                format!("BX-40: {dropped} notices were dropped from a queue that was too long")
-            }
-            Err(e) => format!("the notices were not queued: {e}"),
-        };
-        self.note_once(line);
-    }
-
     /// A line about a failed read of the records is noted once, until
     /// another one is.
     fn note_read(&mut self, line: String) {
@@ -736,51 +666,6 @@ impl<R: Post> CounterLink<R> {
             self.read_noted = Some(line.clone());
             self.note(line);
         }
-    }
-
-    /// A line about the notices is noted once, until another one is.
-    fn note_once(&mut self, line: String) {
-        if self.notice_noted.as_deref() != Some(line.as_str()) {
-            self.notice_noted = Some(line.clone());
-            self.note(line);
-        }
-    }
-
-    /// BX-40: send each Box the notices the relay has not taken for it. A
-    /// failure is a note and never an error to the counter. `false` if the
-    /// relay could not be reached.
-    fn send_notices(&mut self) -> bool {
-        let boxes = self.boxes();
-        let Some(out) = self.notices.as_mut() else {
-            return true;
-        };
-        if boxes.is_empty() {
-            return true;
-        }
-        let mut lines = Vec::new();
-        let mut reached = true;
-        'boxes: for to in &boxes {
-            for notice in out.unsent(to) {
-                match self.courier.send(to, Kind::PaidNotice, &notice.to_bytes()) {
-                    Ok(()) => out.mark_sent(to, notice.number),
-                    Err(e) if e.is_retryable() => {
-                        reached = false;
-                        break 'boxes;
-                    }
-                    Err(e) => {
-                        lines.push(format!("a paid notice could not be sent: {e}"));
-                        continue 'boxes;
-                    }
-                }
-            }
-        }
-        if let Err(e) = out.settle(&boxes) {
-            lines.push(format!("the notices were not stored: {e}"));
-        }
-        for line in lines {
-            self.note_once(line);
-        }
-        reached
     }
 
     /// A send failed. A relay that cannot be reached is the courier's note

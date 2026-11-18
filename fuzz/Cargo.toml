@@ -23,7 +23,6 @@ openbmt-counter-node = { path = "../crates/openbmt-counter-node" }
 openbmt-counter-ffi = { path = "../crates/openbmt-counter-ffi" }
 openbmt-link = { path = "../crates/openbmt-link" }
 openbmt-courier = { path = "../crates/openbmt-courier" }
-openbmt-pos = { path = "../crates/openbmt-pos" }
 openbmt-books = { path = "../crates/openbmt-books" }
 openbmt-session = { path = "../crates/openbmt-session" }
 openbmt-approver = { path = "../crates/openbmt-approver" }
@@ -41,7 +40,6 @@ openbmt-lightning-node = { path = "../crates/openbmt-lightning-node", features =
 openbmt-bbqr = { path = "../crates/openbmt-bbqr" }
 openbmt-qr-jni = { path = "../crates/openbmt-qr-jni" }
 openbmt-json = { path = "../crates/openbmt-json" }
-openbmt-pos-readers = { path = "../crates/openbmt-pos-readers" }
 openbmt-box = { path = "../crates/openbmt-box" }
 openbmt-lightning = { path = "../crates/openbmt-lightning", features = ["testing"] }
 # The same exact version as openbmt-key-ffi, for the word list.
@@ -292,29 +290,8 @@ doc = false
 bench = false
 
 [[bin]]
-name = "box_notice_decode"
-path = "fuzz_targets/box_notice_decode.rs"
-test = false
-doc = false
-bench = false
-
-[[bin]]
 name = "link_proto_decode"
 path = "fuzz_targets/link_proto_decode.rs"
-test = false
-doc = false
-bench = false
-
-[[bin]]
-name = "pos_ledger_decode"
-path = "fuzz_targets/pos_ledger_decode.rs"
-test = false
-doc = false
-bench = false
-
-[[bin]]
-name = "owner_pos_setup_decode"
-path = "fuzz_targets/owner_pos_setup_decode.rs"
 test = false
 doc = false
 bench = false
@@ -474,41 +451,6 @@ doc = false
 bench = false
 
 [[bin]]
-name = "pos_till_message_decode"
-path = "fuzz_targets/pos_till_message_decode.rs"
-test = false
-doc = false
-bench = false
-
-[[bin]]
-name = "pos_square_parse"
-path = "fuzz_targets/pos_square_parse.rs"
-test = false
-doc = false
-bench = false
-
-[[bin]]
-name = "box_pos_config"
-path = "fuzz_targets/box_pos_config.rs"
-test = false
-doc = false
-bench = false
-
-[[bin]]
-name = "pos_clover_parse"
-path = "fuzz_targets/pos_clover_parse.rs"
-test = false
-doc = false
-bench = false
-
-[[bin]]
-name = "pos_loyverse_parse"
-path = "fuzz_targets/pos_loyverse_parse.rs"
-test = false
-doc = false
-bench = false
-
-[[bin]]
 name = "qr_jni_call"
 path = "fuzz_targets/qr_jni_call.rs"
 test = false
@@ -518,13 +460,6 @@ bench = false
 [[bin]]
 name = "box_status_request"
 path = "fuzz_targets/box_status_request.rs"
-test = false
-doc = false
-bench = false
-
-[[bin]]
-name = "box_till_request"
-path = "fuzz_targets/box_till_request.rs"
 test = false
 doc = false
 bench = false
@@ -810,13 +745,6 @@ doc = false
 bench = false
 
 [[bin]]
-name = "books_till_csv"
-path = "fuzz_targets/books_till_csv.rs"
-test = false
-doc = false
-bench = false
-
-[[bin]]
 name = "tap_answer"
 path = "fuzz_targets/tap_answer.rs"
 test = false
@@ -833,13 +761,6 @@ bench = false
 [[bin]]
 name = "owner_hardware_return"
 path = "fuzz_targets/owner_hardware_return.rs"
-test = false
-doc = false
-bench = false
-
-[[bin]]
-name = "owner_web_order_reply"
-path = "fuzz_targets/owner_web_order_reply.rs"
 test = false
 doc = false
 bench = false

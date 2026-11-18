@@ -147,8 +147,6 @@ internal fun Controller.showDevices() {
     rows.add(RowItem("Connect your Box") { showConnectBox() })
     // A change that waits for a counter's confirmation (OA-119).
     if (OwnWaitingChange.of(ownStore.args()) != null) rows.add(RowItem(OwnPairWords.waitingRowTitle) { showOwnWaitingChange() })
-    // GV-13: a place of giving has no till on its home screens; the row is in Settings.
-    if (Giving.homeOffersShopSteps(atGiving())) rows.add(RowItem("Till") { showTill() })
     if (key2Signer) rows.add(RowItem("Register the wallet on your signer") { showHardwareRegister { showHome() } })
     groupPage(OwnerLook.DEVICES, rows)
 }
@@ -162,15 +160,11 @@ internal fun Controller.showSettingsAndPhone() {
         OwnerLook.SETTINGS,
         listOfNotNull(
             RowItem("Settings") { showSettings() },
-            // GV-13: where a place of giving finds the till, which its home screens do not offer.
-            if (Giving.settingsCarriesTill(atGiving())) RowItem("Till") { showTill() } else null,
             RowItem("Change the PIN") { showChangePin(null) },
             RowItem("About") { showAbout() },
             RowItem(AppWords.watchSetting.heading) { showWatch() },
             RowItem(AppWords.torBuiltIn.heading) { showTor() },
-            webRow(),
             shopLightningRow(),
-            if (Giving.homeOffersShopSteps(atGiving())) tillStepsRow { showSettingsAndPhone() } else null,
         ),
     )
 }
@@ -738,11 +732,6 @@ internal fun Controller.showAbout() {
             "a spend leaves this app as a request for the Key app, and money moves only after the Key app has approved it.",
         "Screenshots" to "Screenshots and screen recordings of this app are blocked, because its screens show balances and addresses.",
         "Tor" to "Every connection goes through Tor: the app runs Tor itself, or uses Orbot if you choose it. If Tor is not connected the app sends nothing and says so.",
-        "The till" to
-            "The Till screen reads the shop's orders from Square or Clover with a read-only sign-in that you paste once. " +
-            "The sign-in is sealed on this phone, is never shown again and can be removed. The orders are read about once a minute, " +
-            "only while the app is on the screen, through Tor, and are matched against the counters' sales on this phone. " +
-            "An alert you acknowledge is marked on this phone only. It has not been tried against a real till account yet.",
         "Not built yet" to
             "The link to the counters for a wallet made on this phone; " +
             "the books; archiving paid entries.",

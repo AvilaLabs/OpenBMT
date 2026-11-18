@@ -87,14 +87,5 @@ export async function loadOwner(bytes, { now = () => Math.floor(Date.now() / 100
       tick();
       return Number(reply(take(x.chain_mine())));
     },
-    /**
-     * The owner's phone reads the shop's register: the numbers of one order and one counter sale, as text (see
-     * crates/openbmt-demo-owner/src/register.rs), go through the matcher; its verdict as text, such as `matches=1;by_order=0;alerts=0`.
-     */
-    registerVerdict(request) {
-      tick();
-      const bytes = new TextEncoder().encode(request);
-      return reply(take(x.owner_register_verdict(put(bytes), bytes.length)));
-    },
   };
 }

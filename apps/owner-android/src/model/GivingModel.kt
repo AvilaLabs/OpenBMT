@@ -15,15 +15,6 @@ object Giving {
      * of the first question, kept in the shop file (GV-03).
      */
     fun isGiving(held: SettingsHeld?, prefs: ShopPrefs): Boolean = (held?.place ?: prefs.place) == Place.Giving
-
-    /**
-     * GV-13: whether the first run and the home screens offer tips, the POS connector, the till of the Box and the cashier
-     * list. Each stays in Settings for a place that also sells.
-     */
-    fun homeOffersShopSteps(giving: Boolean): Boolean = !giving
-
-    /** GV-13: whether Settings carries the till's row itself, because home does not. */
-    fun settingsCarriesTill(giving: Boolean): Boolean = giving
 }
 
 /**

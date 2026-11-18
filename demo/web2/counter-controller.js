@@ -11,8 +11,7 @@
 // The page gives the controller (the `host`): the model (`flow`), the pretend chain (`chain`), the page's clock
 // (`clock`), the place a screen is shown (`show`) and what the page wants to hear (`event`).
 //
-// Ported: the start of the node (startNode), render, home with the cards of the requests from the till (the Box's
-// requests: Start and Not now), the new sale with its keypad, the tip choice that opens a sale, the sale's screen with
+// Ported: the start of the node (startNode), render, home, the new sale with its keypad, the tip choice that opens a sale, the sale's screen with
 // its tick through the paid screen, and Done. Not ported, because the demo's path does not reach them: the staff PINs
 // and who is at the till, the settings pages, the sales and today lists, bills, requests
 // to send, refunds, requote and cancel, the price sources, Tor, Lightning, pairing and the sound and haptic of an
@@ -28,7 +27,7 @@
   /** The words of the counter's controls, as Controller.kt writes them (the labels of its buttons and tiles). */
   const WORDS = {
     newSale: "New sale", sales: "Sales", today: "Today", bills: "Bills and tabs", lock: "Lock", openRequests: "Open requests",
-    till: { card: "From the till", start: "Start", notNow: "Not now" }, starterSeen: "Seen",
+    starterSeen: "Seen",
     amountLabel: "Amount of the sale", open: "Open the sale", request: "Request to send",
     shareLink: "Share the link", shareCode: "Share the code", copy: "Copy the request", details: "Details and refunds",
     requote: "Requote", cancel: "Cancel the sale", override: "Accept by hand (manager)", done: "Done",
@@ -49,14 +48,13 @@
   }
 
   /**
-   * Controller.kt:96 Controller(act): the controller of the counter. [host] is the page's side:
+   * Controller.kt:89 Controller(act): the controller of the counter. [host] is the page's side:
    *   flow    CounterFlowDemo of the model module;
    *   chain   the pretend chain's controls (counter-host.mjs);
-   *   withBox   true when the shop has a Box, which is where a request from the till comes from (the pairing record names it);
    *   clock   {now()}: the page's clock, in seconds;
    *   show(viewOf)   puts a screen on the counter's device: viewOf(ui) returns the page of that device's Ui;
    *   event(kind, data)   tells the page what happened: "home", "newSale", "entry", "sale", "notice" (the sale's colour
-   *                       whose sound plays, Controller.kt:681 onTurns).
+   *                       whose sound plays, Controller.kt:593 onTurns).
    */
   function Controller(host) {
     const flow = host.flow;
@@ -66,17 +64,17 @@
     // The screen on show, before the notices of CR-284 are put over it (MainActivity.kt current).
     let current = null;
 
-    /** Controller.kt:238 nowSecs(): the page's clock, in seconds since 1970. */
+    /** Controller.kt:219 nowSecs(): the page's clock, in seconds since 1970. */
     function nowSecs() {
       return host.clock.now();
     }
 
-    /** Controller.kt:379 startNode(): the node is started on the pairing record and takes its first events. */
+    /** Controller.kt:349 startNode(): the node is started on the pairing record and takes its first events. */
     function startNode() {
-      flow.start("/demo/counter", nowSecs(), host.chain.record(!!host.withBox));
+      flow.start("/demo/counter", nowSecs(), host.chain.record());
     }
 
-    /** Controller.kt:733 onPump(reported): the open screen is made again from the library's state when it changed. */
+    /** Controller.kt:645 onPump(reported): the open screen is made again from the library's state when it changed. */
     function onPump(reported) {
       onTurns();
       if (reported && tick) tick();
@@ -103,7 +101,7 @@
     }
 
     /**
-     * Controller.kt:681 onTurns(turns): the sales that turned green or red for the first time each get a notice, unless the
+     * Controller.kt:593 onTurns(turns): the sales that turned green or red for the first time each get a notice, unless the
      * screen of the sale shows; the colour's sound plays once (the page plays it on the "notice" event).
      */
     function onTurns() {
@@ -114,47 +112,47 @@
       host.event("notice", { colour: played });
     }
 
-    /** Controller.kt:694 drawNotices(): the notices stand at the top of the screen on show, which is drawn again with them. */
+    /** Controller.kt:606 drawNotices(): the notices stand at the top of the screen on show, which is drawn again with them. */
     function drawNotices() {
       if (current) display(current);
     }
 
-    /** Controller.kt:724 openFromNotice(to): a tap on a notice opens its sale; the demo's till has no lock. */
+    /** Controller.kt:636 openFromNotice(to): a tap on a notice opens its sale; the demo's till has no lock. */
     function openFromNotice(index) {
       showSale(index, null, null);
     }
 
-    /** Controller.kt:742 stopNode(): the node lets go of its folder. */
+    /** Controller.kt:654 stopNode(): the node lets go of its folder. */
     function stopNode() {
       tick = null;
       try { flow.stop(); } catch (e) { /* already stopped */ }
     }
 
-    /** Controller.kt:774 put(view, shown): [viewOf] is on the screen, with the open screen's tick cleared. */
+    /** Controller.kt:681 put(view, shown): [viewOf] is on the screen, with the open screen's tick cleared. */
     function put(viewOf, shown) {
       tick = null;
       showing = shown;
       display(viewOf);
     }
 
-    /** Controller.kt:345 render(): the screen the state calls for; with the node started, home. */
+    /** Controller.kt:315 render(): the screen the state calls for; with the node started, home. */
     function render() {
       showHome();
     }
 
-    /** Controller.kt:584 redraw(): the open screen is drawn again from the state. */
+    /** Controller.kt:552 redraw(): the open screen is drawn again from the state. */
     function redraw() {
       if (showing === "sale" && sale) showSale(sale.index, null, null);
       else showHome();
     }
 
-    /** Controller.kt:1158 counterLine(): the counter's line under the home screen; the model has its text. */
+    /** Controller.kt:1065 counterLine(): the counter's line under the home screen; the model has its text. */
     function counterLine(home) {
       return home.counterLine;
     }
 
     /**
-     * Controller.kt:1162 showHome(): the counter's home. The health card, the lines (the price here), the open
+     * Controller.kt:1069 showHome(): the counter's home. The health card, the lines (the price here), the open
      * requests and the counter's line are the model's; the tiles are the app's. New sale opens the keypad. The
      * screen is made again when what it says changes.
      */
@@ -166,11 +164,10 @@
           lines: h.lines.map((words, i) => ({ key: h.lineKeys[i], words })),
           words: WORDS, cashier: null, counterLine: counterLine(h), open: [],
           requests: h.requestTitles.map((title, i) => ({ title, sub: h.requestSubs[i] })),
-          tillCards: tillCards(),
           taps: { newSale: () => showNewSale() },
         };
       };
-      const signature = (d) => JSON.stringify([d.health, d.lines, d.counterLine, d.requests, d.tillCards.map((c) => [c.sale, c.lines])]);
+      const signature = (d) => JSON.stringify([d.health, d.lines, d.counterLine, d.requests]);
       let shown = data();
       let shownSig = signature(shown);
       put((ui) => CV.showHome(ui, shown), "home");
@@ -186,54 +183,13 @@
       host.event("home", {});
     }
 
-    /** Controller.kt:1342 tillWaiting(n): the requests from the till that wait; the model has them (TillModel.shown). */
-    function tillWaiting() {
-      return Array.from(flow.tillCards(nowSecs()));
-    }
-
-    /**
-     * Controller.kt:1279 tillCard(lines, start, notNow): the card of one request from the till. Start opens the sale for
-     * the request's amount; Not now hides the card and sends nothing.
-     */
-    function tillCard(r) {
-      return {
-        sale: r.sale,
-        lines: Array.from(r.labels).map((label, i) => ({ label, value: r.values[i] })),
-        start: () => startTillSale(r.sale),
-        notNow: () => {
-          flow.tillNotNow(nowSecs(), r.sale);
-          showHome();
-        },
-      };
-    }
-
-    /** The cards (the list of Controller.kt at line 1213) of the requests from the till, oldest first, above the other lines of home. */
-    function tillCards() {
-      return tillWaiting().map(tillCard);
-    }
-
-    /**
-     * Controller.kt:1355 startTillSale(n, request, refused): the counter opens the sale for the request's amount at its
-     * own price, and the sale's screen is shown as for a sale typed here. A refusal is shown and the request stays.
-     */
-    function startTillSale(sale) {
-      let index;
-      try {
-        index = flow.tillStart(nowSecs(), sale);
-      } catch (e) {
-        console.warn("refused:", String(e && e.message));
-        return;
-      }
-      showSale(index, null, null);
-    }
-
-    /** Controller.kt:1957 priceWords(): the price line of the keypad: the model's words for the pretend price. */
+    /** Controller.kt:1658 priceWords(): the price line of the keypad: the model's words for the pretend price. */
     function priceWords() {
       return flow.priceWords();
     }
 
     /**
-     * Controller.kt:1991 showNewSale(): the amount of the sale, the keys, and Open the sale. The entry is the model's
+     * Controller.kt:1692 showNewSale(): the amount of the sale, the keys, and Open the sale. The entry is the model's
      * (AmountEntry): a key calls it and the display shows what it says.
      */
     function showNewSale() {
@@ -259,7 +215,7 @@
     }
 
     /**
-     * Controller.kt:2130 chooseTip(amountMinor, refused): the sale opens at once when the counter offers no tip, which
+     * Controller.kt:1831 chooseTip(amountMinor, refused): the sale opens at once when the counter offers no tip, which
      * is how the demo shop's settings have it; the screen of tips (showTip) is not ported.
      */
     function chooseTip(amountMinor, refused) {
@@ -268,7 +224,7 @@
       return choices;
     }
 
-    /** Controller.kt:2212 openSale(amountMinor, tipMinor, refused): the model opens the sale, and its screen shows. */
+    /** Controller.kt:1913 openSale(amountMinor, tipMinor, refused): the model opens the sale, and its screen shows. */
     function openSale(amountMinor, tipMinor, refused) {
       let index;
       try {
@@ -280,18 +236,18 @@
     }
 
     /**
-     * Controller.kt:2239 showSale(index, first, notice): one screen that changes with the state. Not paid yet and part
+     * Controller.kt:1940 showSale(index, first, notice): one screen that changes with the state. Not paid yet and part
      * paid show the amount, the code and the next step on the page; every other state is the whole screen in the colour
      * of its outcome. The model works out the screen from the library's judgment; it is drawn again when what it says
      * changes (its signature).
      */
     function showSale(index, first, notice) {
       // The library gives the code with its judgment of the sale, so [first] is not needed here.
-      // Controller.kt:2239 showSale: the sale's own screen shows, so its notice goes (line 2244).
+      // Controller.kt:1940 showSale: the sale's own screen shows, so its notice goes (line 2244).
       flow.noticeRemove(index);
       sale = { index, data: flow.saleScreen(nowSecs(), index) };
       let lastSig = sale.data.signature;
-      // Controller.kt:2239 showSale, CR-286: what the screen drawn last can move in place (the numbers of a wait).
+      // Controller.kt:1940 showSale, CR-286: what the screen drawn last can move in place (the numbers of a wait).
       let live = { update: null };
       const draw = (show) => { live = { update: null }; show((ui) => CV.showSale(ui, saleView(sale.data, notice, live))); };
       draw((view) => put(view, "sale"));
@@ -330,7 +286,7 @@
       };
     }
 
-    /** Controller.kt:2530 payOnChainInstead(index, refused): the cashier chose the on-chain code for the rest of the sale; the screen is drawn again with it. */
+    /** Controller.kt:2188 payOnChainInstead(index, refused): the cashier chose the on-chain code for the rest of the sale; the screen is drawn again with it. */
     function payOnChainInstead(index, refused) {
       try {
         flow.onChainInstead(index);
@@ -359,10 +315,6 @@
       tick() { if (tick) tick(); },
       /** The data of the open sale, or null. */
       saleData() { return sale ? sale.data : null; },
-      /** The cards of the requests from the till that wait now. */
-      tillCards,
-      /** CR-268: the till's sale (as hex) the open sale came from, or null when it was typed at the counter. */
-      tillOfSale() { return sale ? flow.tillOfSale(sale.index) || null : null; },
     };
   }
 

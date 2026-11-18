@@ -273,32 +273,7 @@
     return card;
   };
 
-  /** CounterViews.kt:478 tillCard(lines, start, notNow): the card of one request from the till, its heading, the lines, and the buttons Start and Not now. [words] holds the card's, start's and not now's words. */
-  proto.tillCard = function (lines, start, notNow, words) {
-    const card = this.surfaceCard();
-    const col = LinearLayout("v");
-    setPadding(col, this.px(16), this.px(16), this.px(16), this.px(16));
-    addView(col, this.text(words.card, 15, true));
-    for (const l of lines) {
-      const lp = matchWide(); lp.topMargin = this.px(10);
-      addView(col, this.text(l.label, 13, false, false, this.pal.secondary, true), lp);
-      const vp = matchWide(); vp.topMargin = this.px(2);
-      const t = this.text(l.value, 20, true);
-      t.style.fontFeatureSettings = '"tnum"';
-      addView(col, t, vp);
-    }
-    const buttons = LinearLayout("h");
-    const sp = new LayoutParams(0, WRAP_CONTENT, 1); sp.rightMargin = this.px(6);
-    addView(buttons, this.primary(words.start, Colour.Blue, start), sp);
-    const np = new LayoutParams(0, WRAP_CONTENT, 1); np.leftMargin = this.px(6);
-    addView(buttons, this.secondary(words.notNow, notNow), np);
-    const bp = matchWide(); bp.topMargin = this.px(14);
-    addView(col, buttons, bp);
-    addView(card, col, matchWide());
-    return card;
-  };
-
-  /** CounterViews.kt:498 starterCard(heading, lines, seen): the card of one payment from the starter wallet that nobody at the counter has seen. [seenLabel] is its button's word. */
+  /** CounterViews.kt:475 starterCard(heading, lines, seen): the card of one payment from the starter wallet that nobody at the counter has seen. [seenLabel] is its button's word. */
   proto.starterCard = function (heading, lines, seen, seenLabel) {
     const card = this.surfaceCard();
     const col = LinearLayout("v");
@@ -321,7 +296,7 @@
   };
 
   /**
-   * CounterViews.kt:519 homeLines(lines, open): the other lines of home in one surface card: each shows its heading
+   * CounterViews.kt:496 homeLines(lines, open): the other lines of home in one surface card: each shows its heading
    * with a tone dot. A line that is good shows only its heading, and a tap shows its what and its next; any other
    * line shows its words at once, with its "Try again" button under it. [open] holds the keys of the lines a tap has opened.
    */
@@ -376,7 +351,7 @@
     return card;
   };
 
-  /** CounterViews.kt:570 tile(label, glyph, brand, onClick): a tile of home: [label] at the bottom and [glyph] at the top. [brand] makes it the brand's fill. */
+  /** CounterViews.kt:547 tile(label, glyph, brand, onClick): a tile of home: [label] at the bottom and [glyph] at the top. [brand] makes it the brand's fill. */
   proto.tile = function (label, glyph, brand, onClick) {
     const ink = brand ? this.palette.ON_BRAND : this.pal.text;
     const fill = brand ? this.roundedFill(this.palette.BRAND, 18) : this.roundedFill(this.pal.surface, 18, 1, this.pal.divider);
@@ -394,12 +369,12 @@
     return v;
   };
 
-  /** CounterViews.kt:590 fillRipple(fill, radius): a ripple of 0x40000000 over a filled drawable. */
+  /** CounterViews.kt:567 fillRipple(fill, radius): a ripple of 0x40000000 over a filled drawable. */
   proto.fillRipple = function (fill, radius) {
     return new U.RippleDrawable("rgba(0,0,0,0.251)", fill, radius);
   };
 
-  /** CounterViews.kt:602 amountPad(press): the keys of the amount of a new sale: 1 to 9, then C, 0 and the delete key, as 64 dp round surface keys. [press] is given the key's face. */
+  /** CounterViews.kt:579 amountPad(press): the keys of the amount of a new sale: 1 to 9, then C, 0 and the delete key, as 64 dp round surface keys. [press] is given the key's face. */
   proto.amountPad = function (press) {
     const faces = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "C", "0", "⌫"];
     const grid = LinearLayout("v");
@@ -429,7 +404,7 @@
     return grid;
   };
 
-  /** CounterViews.kt:644 needRow(colour, title, sub, link, count, amount, onClick): a row of Today that needs a look: a tone dot, the title, and what sits under it, with the number of a total on the right. */
+  /** CounterViews.kt:621 needRow(colour, title, sub, link, count, amount, onClick): a row of Today that needs a look: a tone dot, the title, and what sits under it, with the number of a total on the right. */
   proto.needRow = function (colour, title, sub, link, count, amount, onClick) {
     const row = LinearLayout("h");
     setGravity(row, Gravity.CENTER_VERTICAL);
@@ -465,14 +440,14 @@
     return row;
   };
 
-  /** CounterViews.kt:690 FillsFrame: a column of the body of a page that takes the height that is left, for the scanner. */
+  /** CounterViews.kt:667 FillsFrame: a column of the body of a page that takes the height that is left, for the scanner. */
   function FillsFrame() {
     const v = FrameLayout();
     v.isFills = true;
     return v;
   }
 
-  /** CounterViews.kt:696 CoverLayout(aspectW, aspectH): the camera's surface, scaled to cover the whole of the layout and centred; what runs over the edges is cut. */
+  /** CounterViews.kt:673 CoverLayout(aspectW, aspectH): the camera's surface, scaled to cover the whole of the layout and centred; what runs over the edges is cut. */
   function CoverLayout(aspectW, aspectH) {
     const v = FrameLayout();
     v.style.overflow = "hidden";
@@ -563,7 +538,7 @@
     return (name) => given[name] || (() => {});
   }
 
-  /** Controller.kt:854 left(view): [view] at the left edge of the body, as wide as it is. */
+  /** Controller.kt:760 left(view): [view] at the left edge of the body, as wide as it is. */
   function left(view) {
     const v = LinearLayout("h");
     addView(v, view, new LayoutParams(WRAP_CONTENT, WRAP_CONTENT));
@@ -571,8 +546,8 @@
   }
 
   /**
-   * Controller.kt:1162 showHome(): the counter's home: the bar with the gear (and a Lock button when a cashier is at
-   * the till), the health card, the cards of the till and of the starter wallet, the other lines, the note, the
+   * Controller.kt:1069 showHome(): the counter's home: the bar with the gear (and a Lock button when a cashier is at
+   * the till), the health card, the card of the starter wallet, the other lines, the note, the
    * three tiles, the open requests and the counter's line. [d] holds the words and values of the moment.
    */
   function showHome(ui, d) {
@@ -581,7 +556,6 @@
     const lines = Slot();
     const noteSlot = Slot();
     const requestsSlot = Slot();
-    const tillSlot = Slot();
     const starterSlot = Slot();
     const bar = ui.bar("Counter", d.cashier ? `Cashier: ${d.cashier}` : null, null, true, tap("settings"));
     if (d.cashier) {
@@ -609,17 +583,10 @@
     // counterLine() (Controller.kt:1067): the text of the line, 17 sp, 16 dp above.
     const counterLine = ui.text(d.counterLine || "", Type.BODY);
     setPadding(counterLine, 0, ui.px(16), 0, 0);
-    const page = ui.page(bar, [health, tillSlot, starterSlot, lines, noteSlot, tiles, requestsSlot, counterLine], [], null);
+    const page = ui.page(bar, [health, starterSlot, lines, noteSlot, tiles, requestsSlot, counterLine], [], null);
     health.show(ui.healthCard(d.health));
     const open = new Set(d.open || []);
     if (d.lines && d.lines.length) lines.show(ui.homeLines(d.lines.map((l) => HomeLine(l.key, l.words, l.extra, l.retry)), open));
-    if (d.tillCards && d.tillCards.length) {
-      tillSlot.show(...d.tillCards.map((c) => {
-        const card = ui.tillCard(c.lines, c.start || (() => {}), c.notNow || (() => {}), d.words.till);
-        card.layoutParams = ui.margins(0, 12);
-        return card;
-      }));
-    }
     if (d.starterCards && d.starterCards.length) {
       starterSlot.show(...d.starterCards.map((c) => {
         const card = ui.starterCard(c.heading, c.lines, () => {}, d.words.starterSeen);
@@ -636,7 +603,7 @@
   }
 
   /**
-   * Controller.kt:1991 showNewSale(): the amount of the sale in 60 sp, the keys, and the buttons Open the sale and
+   * Controller.kt:1692 showNewSale(): the amount of the sale in 60 sp, the keys, and the buttons Open the sale and
    * Request to send. [d] has the entry's text, the price line and the words.
    */
   function showNewSale(ui, d) {
@@ -667,7 +634,7 @@
   }
 
   /**
-   * Controller.kt:2239 showSale(...): the sale's screen. While the sale shows its code (not paid yet, part paid) the
+   * Controller.kt:1940 showSale(...): the sale's screen. While the sale shows its code (not paid yet, part paid) the
    * page has the state chip in the bar, the amount, the code in its card, the words, the extra notices and the
    * buttons; every other state is the whole screen in the colour of the outcome. [d] has the state's words, the
    * amounts, the code's modules and the flags.
@@ -683,7 +650,7 @@
       const body = [];
       if (d.flash) body.push(ui.notice(d.flash));
       const amount = LinearLayout("v");
-      // Controller.kt:2239 showSale, CR-285: a part paid sale leads with what is missing, under its heading.
+      // Controller.kt:1940 showSale, CR-285: a part paid sale leads with what is missing, under its heading.
       if (d.stillHeading) {
         const still = ui.text(d.stillHeading, 16, false, false, ui.pal.secondary, true);
         setTextGravity(still, Gravity.CENTER);
@@ -708,7 +675,7 @@
         addView(qr, QrView(ui, d.modules, side), new LayoutParams(side, side));
         body.push(ui.codeCard(qr));
       }
-      // Controller.kt:2353 lightningFirst: CR-283, over the instant limit the code is the invoice alone; the line says why and the button shows the on-chain code.
+      // Controller.kt:2030 lightningFirst: CR-283, over the instant limit the code is the invoice alone; the line says why and the button shows the on-chain code.
       if (d.lightningFirst) {
         const line = ui.text(d.words.lightningLine, 13, false, false, ui.pal.secondary);
         setTextGravity(line, Gravity.CENTER);
@@ -751,7 +718,7 @@
       line.style.fontFeatureSettings = '"tnum"';
       setTextGravity(line, Gravity.CENTER);
       addView(centre, line, ui.margins(8));
-      // Controller.kt:2239 showSale, CR-286: a short check shows a ring that empties; a wait for a block says how long ago the
+      // Controller.kt:1940 showSale, CR-286: a short check shows a ring that empties; a wait for a block says how long ago the
       // payment was seen. The mark beside it pulses only while the check is healthy. The numbers move in place (d.live.update).
       if (d.ringSecs != null || d.seen != null) {
         const row = LinearLayout("h");
@@ -781,7 +748,7 @@
         if (d.live) d.live.update = update;
         addView(centre, row, ui.margins(16));
       }
-      // CR-254: the sale's number and the till's reference, large enough to copy into the till's payment note.
+      // CR-254: the sale's number and its bill, large enough to read across the counter.
       for (const pl of d.paidLines || []) {
         const lbl = ui.text(pl.label, 14, false, false, band.sub, true);
         setTextGravity(lbl, Gravity.CENTER);
@@ -819,7 +786,7 @@
   }
 
   /**
-   * Controller.kt:694 drawNotices() and MainActivity's place(): the notices of CR-284 stand one under the other at the
+   * Controller.kt:606 drawNotices() and MainActivity's place(): the notices of CR-284 stand one under the other at the
    * top of whatever screen shows, and the screen is placed under them. [d] has the notices (index, green, heading, next,
    * tap) and the line "and N more in Sales" or null. With none, [page] is the whole screen.
    */
@@ -855,7 +822,7 @@
     return shell;
   }
 
-  /** Controller.kt:2675 showSales(): the label, and one card of rows, one for each sale, newest first. */
+  /** Controller.kt:2333 showSales(): the label, and one card of rows, one for each sale, newest first. */
   function showSales(ui, d) {
     const views = [ui.label(d.words.heading)];
     if (!d.rows.length) views.push(ui.text(d.words.none, 16));
@@ -863,7 +830,7 @@
     return ui.page(ui.bar("Sales", null, () => {}), views, []);
   }
 
-  /** Controller.kt:2704 showSaleDetails(index, notice): a sale's facts, its words, the note and the reference, the refunds, and the buttons. */
+  /** Controller.kt:2362 showSaleDetails(index, notice): a sale's facts, its words, the note, the refunds, and the buttons. */
   function showSaleDetails(ui, d) {
     const views = [];
     if (d.notice) views.push(ui.notice(d.notice));
@@ -872,7 +839,6 @@
     views.push(ui.notice(d.says));
     for (const w of d.flags || []) views.push(ui.notice(w));
     if (d.note) views.push(ui.facts([[d.words.note, d.note]]));
-    if (d.reference) views.push(ui.facts([[d.words.reference, d.reference]]));
     views.push(ui.label(d.words.refunds));
     if (!d.refunds.length) views.push(ui.text(d.words.noRefund, 16));
     for (const r of d.refunds) {
@@ -883,7 +849,7 @@
     return ui.page(ui.bar("Details and refunds", null, () => {}), views, actions);
   }
 
-  /** Controller.kt:3118 heroTile(line): a small tile inside the hero card: the label, the amount and what is under it. */
+  /** Controller.kt:2769 heroTile(line): a small tile inside the hero card: the label, the amount and what is under it. */
   function heroTile(ui, line) {
     const v = LinearLayout("v");
     setBackground(v, ui.roundedFill(ui.pal.background, 14));
@@ -903,7 +869,7 @@
   }
 
   /**
-   * Controller.kt:3130 showToday(people): the day's totals: the hero card (what was paid, and how), the rows that need a look
+   * Controller.kt:2781 showToday(people): the day's totals: the hero card (what was paid, and how), the rows that need a look
    * and the quiet lines in one card, and the lines per person behind the manager's PIN (or the PIN's entry).
    */
   function showToday(ui, d) {

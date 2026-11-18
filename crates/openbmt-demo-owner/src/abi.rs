@@ -10,10 +10,6 @@
 //!   1's account key;
 //! - `owner_address(index) -> u64`: the regtest address of the shop wallet
 //!   at that receive index; text, `ok:` and the address, or `err:` and why;
-//! - `owner_register_verdict(ptr, len) -> u64`: the owner's phone reads the
-//!   shop's register: the numbers of one order and one counter sale written
-//!   at `ptr` go through the matcher; text, `ok:` and the verdict, or `err:`
-//!   and why;
 //! - `chain_pay(ptr, len, sats) -> u64`: a customer pays the address written
 //!   at `ptr` on the pretend chain; the reply is text, `ok:` and the id, or
 //!   `err:` and why;
@@ -124,22 +120,6 @@ pub extern "C" fn owner_shop(part: u32) -> u64 {
 #[no_mangle]
 pub extern "C" fn owner_address(index: u32) -> u64 {
     give(text_of(crate::shop::address(index)))
-}
-
-/// The owner's phone reads the register: the request of `len` bytes at `ptr`
-/// (freed here) is the text of `register::verdict_of_text`.
-///
-/// # Safety
-/// `ptr` and `len` must be exactly a buffer from `demo_alloc`, not yet freed.
-#[no_mangle]
-pub unsafe extern "C" fn owner_register_verdict(ptr: *mut u8, len: usize) -> u64 {
-    // SAFETY: the contract is the caller's, as for `take`.
-    let request = unsafe { take(ptr, len) };
-    let verdict = match std::str::from_utf8(&request) {
-        Ok(request) => crate::register::verdict_of_text(request),
-        Err(_) => Err("the request is not text".to_string()),
-    };
-    give(text_of(verdict))
 }
 
 /// A customer pays `sats` to the address of `len` bytes at `ptr` (freed here).

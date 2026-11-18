@@ -205,7 +205,7 @@ private fun Controller.showOwnPaired(r: OwnPairExit, p: OwnPairing) {
     // A counter added while another is in force waits for a confirmation at that one (OA-122).
     if (p.pairedWaits()) views.add(para(OwnPairWords.pairedLater))
     views.add(ui.text(OwnPairWords.pairedNext, 15f, bold = true))
-    val done = ui.primary(FirstRunWords.tillStepsDone) {
+    val done = ui.primary(OwnPairWords.pairedDone) {
         ownPairing = null
         r.done()
     }

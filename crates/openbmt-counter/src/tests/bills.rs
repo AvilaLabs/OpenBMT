@@ -1,10 +1,10 @@
-//! Section 25: bills, tabs and the till's reference (CR-245 to CR-255).
+//! Section 25: bills and tabs (CR-246 to CR-255).
 
 use openbmt_core::records::RecordKind;
 use openbmt_core::wire::DecodeError;
 
 use super::kit::*;
-use crate::bills::{reference_ok, split_shares, MAGIC_BILLS};
+use crate::bills::{split_shares, MAGIC_BILLS};
 use crate::say::all_words;
 use crate::{
     Actor, Amount, BillEnd, BillKind, BillPart, BillRefused, Bills, Event, Facts, LightningPaid,
@@ -25,7 +25,7 @@ impl World {
     fn bill(&mut self, kind: BillKind, cents: u64) -> u32 {
         let now = self.now;
         self.c
-            .open_bill(kind, Amount(cents), None, now, &mut self.m)
+            .open_bill(kind, Amount(cents), now, &mut self.m)
             .unwrap()
     }
 
@@ -82,174 +82,6 @@ fn ended_how(w: &World, number: u32) -> Option<BillEnd> {
     w.c.bill_view(number)?.bill.ended().map(|e| e.how)
 }
 
-// CR-245.
-
-#[test]
-fn cr_245_a_reference_is_one_to_thirty_two_of_the_allowed_characters() {
-    for ok in ["A", "INV-2026/0042", "a_b#c.d-9", &"x".repeat(32)] {
-        assert!(reference_ok(ok), "{ok}");
-    }
-    for bad in [
-        "",
-        &"x".repeat(33),
-        "a b",
-        "a+b",
-        "caf\u{e9}",
-        "a\n",
-        "a,b",
-        "\u{ff21}",
-    ] {
-        assert!(!reference_ok(bad), "{bad:?}");
-    }
-}
-
-#[test]
-fn cr_245_a_sale_takes_a_reference_when_it_opens_and_it_is_a_tag_25_record() {
-    let mut w = World::new();
-    let facts = w.open_facts();
-    let o =
-        w.c.open_with_extras(
-            Amount(500),
-            Amount(0),
-            usd(),
-            rate(),
-            &fresh(facts.now),
-            facts,
-            None,
-            SaleExtras {
-                reference: Some("CHK-17"),
-                ..SaleExtras::default()
-            },
-            &mut w.m,
-        )
-        .unwrap();
-    assert_eq!(w.c.sale_reference(o.index), Some("CHK-17"));
-    let events = w.m.events();
-    assert!(matches!(events[0], Event::Opened { .. }));
-    let e = Event::Referenced {
-        index: o.index,
-        at: T0,
-        reference: "CHK-17".to_string(),
-    };
-    assert_eq!(events[1], e);
-    let bytes = e.encode();
-    assert_eq!(bytes[0], 25);
-    assert_eq!(&bytes[1..5], &o.index.to_le_bytes());
-    assert_eq!(&bytes[5..13], &T0.to_le_bytes());
-    assert_eq!(&bytes[13..], b"\x06CHK-17");
-    assert_eq!(e.kind(), RecordKind::Sale);
-    assert_eq!(Event::decode(&bytes), Ok(e));
-}
-
-#[test]
-fn cr_245_a_reference_that_does_not_fit_is_refused_with_nothing_written() {
-    let mut w = World::new();
-    let facts = w.open_facts();
-    let err =
-        w.c.open_with_extras(
-            Amount(500),
-            Amount(0),
-            usd(),
-            rate(),
-            &fresh(facts.now),
-            facts,
-            None,
-            SaleExtras {
-                reference: Some("has space"),
-                ..SaleExtras::default()
-            },
-            &mut w.m,
-        )
-        .unwrap_err();
-    assert_eq!(err, OpenRefused::BadReference);
-    assert_eq!(err.rule(), "CR-245");
-    assert_eq!(w.m.writes, 0);
-    let o = w.open_five();
-    w.m.reset();
-    for bad in ["", "no good", &"y".repeat(33)] {
-        let err = w.c.add_reference(o.index, bad, T0, &mut w.m).unwrap_err();
-        assert_eq!(err, BillRefused::BadReference);
-        let now = w.now;
-        let n = w.bill(BillKind::Bill, 100);
-        w.m.reset();
-        let err = w.c.add_bill_reference(n, bad, now, &mut w.m).unwrap_err();
-        assert_eq!(err, BillRefused::BadReference);
-        assert_eq!(w.m.writes, 0);
-    }
-    let err =
-        w.c.open_bill(BillKind::Bill, Amount(100), Some("a b"), T0, &mut w.m)
-            .unwrap_err();
-    assert_eq!(err, BillRefused::BadReference);
-    assert_eq!(w.m.writes, 0);
-}
-
-#[test]
-fn cr_245_a_reference_is_added_once_and_survives_a_restart() {
-    let mut w = World::new();
-    let o = w.open_five();
-    assert_eq!(w.c.sale_reference(o.index), None);
-    w.c.add_reference(o.index, "R-1", T0 + 1, &mut w.m).unwrap();
-    let err =
-        w.c.add_reference(o.index, "R-2", T0 + 2, &mut w.m)
-            .unwrap_err();
-    assert_eq!(err, BillRefused::AlreadyReferenced);
-    assert_eq!(w.c.sale_reference(o.index), Some("R-1"));
-    assert_eq!(
-        w.c.add_reference(77, "R-2", T0, &mut w.m).unwrap_err(),
-        BillRefused::UnknownSale(77)
-    );
-    let c = w.m.reload();
-    assert_eq!(c.sale_reference(o.index), Some("R-1"));
-    // A failed write leaves the sale with none.
-    let p = w.open_five();
-    w.m.reset();
-    w.m.fail_on = Some(1);
-    assert!(matches!(
-        w.c.add_reference(p.index, "R-3", T0, &mut w.m),
-        Err(BillRefused::Store(_))
-    ));
-    assert_eq!(w.c.sale_reference(p.index), None);
-}
-
-#[test]
-fn cr_245_a_bill_takes_a_reference_with_a_byte_that_says_it_is_a_bills() {
-    let mut w = World::new();
-    let n = w.bill(BillKind::Bill, 500);
-    w.c.add_bill_reference(n, "TAB/9", T0, &mut w.m).unwrap();
-    assert_eq!(w.view(n).bill.reference(), Some("TAB/9"));
-    assert_eq!(
-        w.c.add_bill_reference(n, "TAB/10", T0, &mut w.m)
-            .unwrap_err(),
-        BillRefused::AlreadyReferenced
-    );
-    let e = Event::BillReferenced {
-        number: n,
-        at: T0,
-        reference: "TAB/9".to_string(),
-    };
-    let bytes = e.encode();
-    assert_eq!(bytes[0], 25);
-    assert_eq!(&bytes[13..], b"\x05TAB/9\x01");
-    assert_eq!(Event::decode(&bytes), Ok(e.clone()));
-    assert_eq!(e.bill_number(), Some(n));
-    assert_eq!(e.sale_index(), None);
-    let mut other = bytes.clone();
-    *other.last_mut().unwrap() = 2;
-    assert!(Event::decode(&other).is_err());
-    other.push(0);
-    assert!(Event::decode(&other).is_err());
-    // A bill opened with one writes both records.
-    let m =
-        w.c.open_bill(BillKind::Tab, Amount(900), Some("T-1"), T0, &mut w.m);
-    let m = m.unwrap();
-    assert_eq!(w.view(m).bill.reference(), Some("T-1"));
-    // The records of a bill do not move a sale's last record.
-    assert_eq!(
-        w.m.reload().bill_view(n).unwrap().bill.reference(),
-        Some("TAB/9")
-    );
-}
-
 // CR-246.
 
 #[test]
@@ -267,7 +99,7 @@ fn cr_246_a_bill_has_a_number_from_one_and_the_amount_is_above_nothing() {
     w.m.reset();
     for bad in [0, crate::MAX_BILL_AMOUNT + 1] {
         let err =
-            w.c.open_bill(BillKind::Bill, Amount(bad), None, T0, &mut w.m)
+            w.c.open_bill(BillKind::Bill, Amount(bad), T0, &mut w.m)
                 .unwrap_err();
         assert_eq!(err, BillRefused::BadAmount);
         assert_eq!(err.rule(), "CR-246");
@@ -283,7 +115,7 @@ fn cr_246_the_number_is_stored_before_it_is_used_and_never_given_twice() {
     // Write 1 is the file with the next number; stopping there wastes one.
     w.m.fail_on = Some(2);
     let err =
-        w.c.open_bill(BillKind::Bill, Amount(500), None, T0, &mut w.m)
+        w.c.open_bill(BillKind::Bill, Amount(500), T0, &mut w.m)
             .unwrap_err();
     assert!(matches!(err, BillRefused::Store(_)));
     assert_eq!(w.m.log[0], "Bills");
@@ -293,7 +125,7 @@ fn cr_246_the_number_is_stored_before_it_is_used_and_never_given_twice() {
     assert!(c.bill_views().is_empty());
     w.m.reset();
     let n = c
-        .open_bill(BillKind::Bill, Amount(500), None, T0, &mut w.m)
+        .open_bill(BillKind::Bill, Amount(500), T0, &mut w.m)
         .unwrap();
     assert_eq!(n, 2);
     // A failure of the first write gives no number at all.
@@ -302,7 +134,7 @@ fn cr_246_the_number_is_stored_before_it_is_used_and_never_given_twice() {
     w.m.fail_on = Some(1);
     assert!(w
         .c
-        .open_bill(BillKind::Bill, Amount(500), None, T0, &mut w.m)
+        .open_bill(BillKind::Bill, Amount(500), T0, &mut w.m)
         .is_err());
     assert_eq!(w.c.next_bill_number(), 1);
     assert_eq!(w.m.reload().next_bill_number(), 1);
@@ -890,7 +722,6 @@ fn cr_253_the_bills_file_has_magic_obm_bracket_and_reads_back_whole() {
     let mut w = World::new();
     let a = w.bill(BillKind::Bill, 1_000);
     let t = w.bill(BillKind::Tab, 500);
-    w.c.add_bill_reference(a, "INV-1", T0, &mut w.m).unwrap();
     w.c.add_other_part(a, Amount(100), PartWay::Cash, T0, &mut w.m)
         .unwrap();
     let o = w.part(a, 200).unwrap();
@@ -903,7 +734,6 @@ fn cr_253_the_bills_file_has_magic_obm_bracket_and_reads_back_whole() {
     let bills = Bills::from_bytes(&bytes).unwrap();
     assert_eq!(bills.to_bytes(), bytes);
     let got = bills.get(a).unwrap();
-    assert_eq!(got.reference(), Some("INV-1"));
     assert_eq!(
         got.parts(),
         [
@@ -995,7 +825,7 @@ fn cr_253_at_most_256_bills_are_open_and_a_bill_has_at_most_32_parts() {
     }
     w.m.reset();
     let err =
-        w.c.open_bill(BillKind::Bill, Amount(1), None, T0, &mut w.m)
+        w.c.open_bill(BillKind::Bill, Amount(1), T0, &mut w.m)
             .unwrap_err();
     assert_eq!(err, BillRefused::TooManyOpen);
     assert_eq!(err.rule(), "CR-253");
@@ -1078,16 +908,11 @@ fn cr_255_every_state_and_refusal_has_words_that_name_its_rule() {
         .iter()
         .filter(|(name, _)| name.starts_with("BillRefused::") || name.starts_with("BillView::"))
         .collect();
-    assert_eq!(bills.len(), 26);
+    assert_eq!(bills.len(), 24);
     for (name, w) in bills {
         assert!(!w.heading.starts_with("WORDS_NEEDED"), "{name}");
         assert!(w.code.is_some(), "{name}");
     }
-    let (_, w) = all
-        .iter()
-        .find(|(n, _)| n == "OpenRefused::BadReference")
-        .unwrap();
-    assert_eq!(w.code, Some("CR-245"));
     let (_, w) = all.iter().find(|(n, _)| n == "LoadError::Bills").unwrap();
     assert_eq!(w.code, Some("CR-253"));
 }

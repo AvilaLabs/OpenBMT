@@ -30,8 +30,6 @@ import org.openbmt.counter.StarterDecision
 import org.openbmt.counter.StarterPayment
 import org.openbmt.counter.StarterState
 import org.openbmt.counter.SwitchSame
-import org.openbmt.counter.TillOfSale
-import org.openbmt.counter.TillRequest
 import org.openbmt.counter.ActorRole
 import org.openbmt.counter.CounterException
 import org.openbmt.counter.DayTotals
@@ -108,7 +106,7 @@ object AppModelTest {
         ok(dirty.detail == "bad text", "a system text is cleaned in the details: ${dirty.detail}")
         ok(SayCheck.problem(dirty) == null, "words with a cleaned detail pass")
         val text = AppWords.screensMarkdown()
-        ok(text.lines().filter { it.startsWith("| ") }.size == all.size + 1 + SwitchWords.all().size + 1 + WordsOfTill.all().size + 1 + WordsOfStarter.all().size + 1 + ShopLightningWords.all().size + 1 + PairHereWords.all().size + 1 + GivingWords.all().size + 1 + LightningFirstWords.all().size + 1 + StillToPayWords.all().size + WaitWords.all().size + 1 + 1 + 1 + 1, "one row for each words and the header, and for each text of the switch, of the till, of the starter line and of the Lightning key and their headers")
+        ok(text.lines().filter { it.startsWith("| ") }.size == all.size + 1 + SwitchWords.all().size + 1 + WordsOfStarter.all().size + 1 + ShopLightningWords.all().size + 1 + PairHereWords.all().size + 1 + GivingWords.all().size + 1 + LightningFirstWords.all().size + 1 + StillToPayWords.all().size + WaitWords.all().size + 1 + 1 + 1 + 1, "one row for each words and the header, and for each text of the switch, of the starter line and of the Lightning key and their headers")
         ok(text.lines().filter { !it.startsWith("|") }.all { it.length <= 80 }, "lines are at most 80 characters")
         if (screensMd != null) {
             if (System.getenv("OPENBMT_WRITE_SCREENS") != null) screensMd.writeText(text)
@@ -1619,13 +1617,12 @@ object AppModelTest {
         }
     }
 
-    // ---- bills, tabs and the till's reference (CR-245 to CR-254) -------------------------------------------
+    // ---- bills and tabs (CR-246 to CR-254) -------------------------------------------
 
     private fun bill(
         number: Long = 1,
         kind: BillKind = BillKind.Bill,
         amount: Long = 1_000,
-        reference: String? = null,
         state: BillState = BillState.Open,
         bitcoin: Long = 0,
         other: Long = 0,
@@ -1633,7 +1630,7 @@ object AppModelTest {
         parts: List<BillPart> = emptyList(),
         unpaid: Long = 0,
     ) = Bill(
-        number, kind, amount, reference, 100, state, if (state == BillState.Open) 0 else 200, unpaid, bitcoin, other, pending,
+        number, kind, amount, 100, state, if (state == BillState.Open) 0 else 200, unpaid, bitcoin, other, pending,
         if (state == BillState.Open) maxOf(0, amount - bitcoin - other) else 0, parts, Words(0, 1, "WORDS_NEEDED_X", "x.", "y.", null, null, null, null),
     )
 
@@ -1652,21 +1649,21 @@ object AppModelTest {
         ok(BillModel.wayLabel(PartWay.Cash) == WordsOfBills.WAYS[0] && BillModel.wayLabel(PartWay.Card) == WordsOfBills.WAYS[1] && BillModel.wayLabel(PartWay.Other) == WordsOfBills.WAYS[2], "CR-247: the ways")
         // CR-246 to CR-252: the buttons.
         val fresh = BillModel.buttons(bill())
-        ok(fresh.bitcoinPart && fresh.otherPart && fresh.join && fresh.split && fresh.addReference && fresh.cancel && fresh.closeShort, "CR-252: a new bill takes parts, splits, closes short and is cancelled")
+        ok(fresh.bitcoinPart && fresh.otherPart && fresh.join && fresh.split && fresh.cancel && fresh.closeShort, "CR-252: a new bill takes parts, splits, closes short and is cancelled")
         ok(!fresh.changeTab && !fresh.finishTab, "CR-251: a bill is not a tab")
         val tab = BillModel.buttons(bill(kind = BillKind.Tab))
         ok(tab.changeTab && tab.finishTab, "CR-251: a tab is raised and finished")
-        val part = BillModel.buttons(bill(reference = "T-1", other = 300))
-        ok(!part.cancel && !part.addReference && part.closeShort, "CR-252: a bill with a part that counts is not cancelled; CR-245: a reference is added once")
+        val part = BillModel.buttons(bill(other = 300))
+        ok(!part.cancel && part.closeShort, "CR-252: a bill with a part that counts is not cancelled")
         ok(!BillModel.buttons(bill(pending = 1)).cancel, "CR-252: a bill with a part pending is not cancelled")
         val paidUp = BillModel.buttons(bill(kind = BillKind.Tab, bitcoin = 1_000))
         ok(!paidUp.split && !paidUp.closeShort && paidUp.finishTab, "CR-251: a tab with nothing left is finished, not split or closed short")
         for (state in listOf(BillState.Settled, BillState.ClosedShort, BillState.Cancelled)) {
             val b = BillModel.buttons(bill(state = state))
-            ok(!b.bitcoinPart && !b.otherPart && !b.join && !b.split && !b.addReference && !b.changeTab && !b.finishTab && !b.closeShort && !b.cancel, "CR-246: an ended bill takes nothing ($state)")
+            ok(!b.bitcoinPart && !b.otherPart && !b.join && !b.split && !b.changeTab && !b.finishTab && !b.closeShort && !b.cancel, "CR-246: an ended bill takes nothing ($state)")
         }
         // CR-249: the lines.
-        ok(BillModel.listLine(usd, bill(reference = "T-1", other = 400)) == "1 T-1 \u00B7 ${WordsOfBills.STATE_OPEN} \u00B7 ${WordsOfBills.LEFT} 6.00 USD", "CR-246: the list line of an open bill: ${BillModel.listLine(usd, bill(reference = "T-1", other = 400))}")
+        ok(BillModel.listLine(usd, bill(other = 400)) == "1 \u00B7 ${WordsOfBills.STATE_OPEN} \u00B7 ${WordsOfBills.LEFT} 6.00 USD", "CR-246: the list line of an open bill: ${BillModel.listLine(usd, bill(other = 400))}")
         ok(BillModel.listLine(usd, bill(state = BillState.ClosedShort, unpaid = 250)).endsWith("${WordsOfBills.UNPAID} 2.50 USD"), "CR-252: the list line of a bill closed short says what was not paid")
         val totals = BillModel.totals(usd, bill(bitcoin = 300, other = 200, pending = 2))
         ok(totals.map { it.value } == listOf("10.00 USD", "5.00 USD", "2", "5.00 USD"), "CR-249: amount, received, pending, left: ${totals.map { it.value }}")
@@ -1674,9 +1671,6 @@ object AppModelTest {
         // CR-250: the split lines are what the library returned; the helper takes 2 to 20 people.
         ok(BillModel.splitLines(usd, listOf(334, 334, 332)) == listOf("1 \u00B7 3.34 USD", "2 \u00B7 3.34 USD", "3 \u00B7 3.32 USD"), "CR-250: three people share 10.00")
         ok(!BillModel.peopleOk(1) && BillModel.peopleOk(2) && BillModel.peopleOk(20) && !BillModel.peopleOk(21), "CR-250: 2 to 20 people")
-        // CR-245: a reference fits or does not.
-        ok(BillModel.referenceOk("T-14/1") && BillModel.referenceOk("a".repeat(32)) && !BillModel.referenceOk("") && !BillModel.referenceOk("a".repeat(33)) && !BillModel.referenceOk("no space") && !BillModel.referenceOk("caf\u00E9"), "CR-245: the reference's characters and length")
-        ok(BillModel.referenceFrom("  ") == null && BillModel.referenceFrom(" T-1 ") == "T-1", "CR-245: a reference typed is trimmed, and none is none")
         // CR-250: a share fills the keypad as if its digits were typed.
         val entry = AmountEntry(usd)
         entry.set(334)
@@ -1695,15 +1689,15 @@ object AppModelTest {
         // CR-248: a sale that is in a bill is not offered again.
         val inBill = bill(parts = listOf(BillPart(3, 500, null, true), BillPart(null, 100, PartWay.Cash, true)))
         ok(BillModel.joinable(listOf(5, 3, 1), listOf(inBill)) == listOf(5L, 1L), "CR-248: a sale joins one bill only")
-        // CR-254: the Paid screen shows the number and the reference, and the bill when the sale is a part.
-        val plain = SaleInfo(null, 0, 0, false, null, null, "USD")
-        ok(BillModel.paidLines(6, plain).map { it.label to it.value } == listOf(WordsOfBills.SALE_NUMBER to "7"), "CR-254: a sale with no reference shows its number only")
-        val referenced = SaleInfo(null, 0, 0, false, "T-14/1", 3, "USD")
-        ok(BillModel.paidLines(6, referenced).map { it.label to it.value } == listOf(WordsOfBills.SALE_NUMBER to "7", WordsOfBills.SALE_REFERENCE to "T-14/1", WordsOfBills.SALE_BILL to "3"), "CR-254: the number, the reference and the bill")
+        // CR-254: the Paid screen shows the number, and the bill when the sale is a part.
+        val plain = SaleInfo(null, 0, 0, false, null, "USD")
+        ok(BillModel.paidLines(6, plain).map { it.label to it.value } == listOf(WordsOfBills.SALE_NUMBER to "7"), "CR-254: a sale that is no part of a bill shows its number only")
+        val billed = SaleInfo(null, 0, 0, false, 3, "USD")
+        ok(BillModel.paidLines(6, billed).map { it.label to it.value } == listOf(WordsOfBills.SALE_NUMBER to "7", WordsOfBills.SALE_BILL to "3"), "CR-254: the number and the bill")
         if (appDir != null) {
             val controller = File(appDir, "src/android/Controller.kt").readText()
             ok(controller.substringAfter("private fun showRefundRequest(").substringBefore("private fun showCashRefund(").contains("saleMoney(n, index, shop)") && controller.substringAfter("private fun showCashRefund(").substringBefore("private fun showWithdraw(").let { it.contains("saleMoney(n, index,") && it.contains("minor, m.code, why") }, "CR-196: the refund screens use the sale's own money and pass its currency")
-            for (name in listOf("showBills", "showBill", "showNewBill", "showBillPart", "showOtherPart", "showJoinSale", "showSplit", "showChangeTab", "showCloseShort", "showSaleReference")) {
+            for (name in listOf("showBills", "showBill", "showNewBill", "showBillPart", "showOtherPart", "showJoinSale", "showSplit", "showChangeTab", "showCloseShort")) {
                 ok(controller.contains("private fun $name("), "CR-246: the screen $name is there")
             }
             ok(controller.contains("BillModel.paidLines(index, info)"), "CR-254: the Paid screen reads its lines from the model")
@@ -1713,46 +1707,6 @@ object AppModelTest {
             ok(close.contains("resolveActor(") && close.contains("n.closeShort(nowSecs(), number, who)"), "CR-252: close short goes through the PIN check and the library")
             ok(controller.contains("n.cancelBill(nowSecs(), number)") && controller.contains("n.finishTab(nowSecs(), number)") && controller.contains("n.setTabAmount(nowSecs(), number,"), "CR-251, CR-252: cancel, finish and change go to the library")
             ok(controller.contains("n.openBillPart(") && controller.contains("n.addOtherPart(") && controller.contains("n.joinSale(") && controller.contains("n.billSplit(number,"), "CR-247, CR-248, CR-250: parts, joining and splitting go to the library")
-        }
-    }
-
-    // ---- a sale from the till (CR-266 to CR-271) -------------------------------------------------
-
-    private fun tillRequest(sale: Int, amount: Long, reference: String, minutes: Long) =
-        TillRequest(ByteArray(16) { sale.toByte() }, amount, reference, 1_000, minutes, Words(0, 2, "WORDS_NEEDED_CR_267_FROM_THE_TILL", "x.", "y.", null, null, null, null))
-
-    private fun cr266TillTests(appDir: File?) {
-        val usd = Money("USD", 2)
-        // CR-271: every text is written, and each is said once.
-        ok(WordsOfTill.all().none { it.second.startsWith("WORDS_NEEDED") || it.second.isBlank() }, "CR-271: every text is written")
-        ok(WordsOfTill.all().map { it.second }.toSet().size == WordsOfTill.all().size, "CR-271: each text once")
-        ok(WordsOfTill.all().map { it.first }.toSet().size == WordsOfTill.all().size, "CR-271: each key once")
-        // CR-267: the card shows the amount, the reference and the minutes; a request with no reference shows none.
-        val r = tillRequest(1, 1_250, "POS/0007", 4)
-        ok(TillModel.lines(usd, r).map { it.label to it.value } == listOf(WordsOfTill.AMOUNT to "12.50 USD", WordsOfTill.REFERENCE to "POS/0007", WordsOfTill.MINUTES_LEFT to "4"), "CR-267: amount, reference, minutes: ${TillModel.lines(usd, r).map { it.value }}")
-        ok(TillModel.lines(usd, tillRequest(2, 500, "", 1)).map { it.label } == listOf(WordsOfTill.AMOUNT, WordsOfTill.MINUTES_LEFT), "CR-267: a request with no reference shows none")
-        // CR-267: the oldest is first as the library lists them; one with no minutes left is not shown.
-        val listed = listOf(tillRequest(1, 100, "", 3), tillRequest(2, 200, "", 0), tillRequest(3, 300, "", 1))
-        ok(TillModel.shown(listed).map { it.amountMinor } == listOf(100L, 300L), "CR-267: the oldest first, none that lapsed")
-        ok(TillModel.signature(listed) != TillModel.signature(listed.take(2)) && TillModel.signature(emptyList()) == "", "CR-267: the card is made again only when what it shows changes")
-        ok(TillModel.signature(listOf(tillRequest(1, 100, "", 3))) != TillModel.signature(listOf(tillRequest(1, 100, "", 2))), "CR-267: the minutes count down on the card")
-        // CR-269: the line on a started sale that the till cancelled.
-        val sale = ByteArray(16) { 1 }
-        ok(TillModel.cancelledLine(TillOfSale(sale, true, null)) == WordsOfTill.CANCELLED, "CR-269: a sale the till cancelled says so")
-        ok(TillModel.cancelledLine(TillOfSale(sale, false, null)) == null && TillModel.cancelledLine(TillOfSale(null, false, null)) == null && TillModel.cancelledLine(null) == null, "CR-269: a sale the till did not cancel says nothing")
-        if (appDir != null) {
-            val controller = File(appDir, "src/android/Controller.kt").readText()
-            val home = controller.substringAfter("private fun showHome()").substringBefore("/** What a words shows")
-            ok(home.contains("TillModel.shown(tillWaiting(n))") && home.contains("ui.tillCard(TillModel.lines(m, r)"), "CR-267: Home shows a card for each request, from the model")
-            ok(home.contains("n.tillNotNow(nowSecs(), r.sale)") && home.contains("startTillSale(n, r)"), "CR-267: the card has Start and Not now")
-            val start = controller.substringAfter("private fun startTillSale(").substringBefore("/** What a words shows")
-            ok(start.contains("n.tillStart(nowSecs(), request.sale, rate.rate, rate.sourceLabel, rate.sourceFetchedAt, atTheTill())") && start.contains("showSale(o.index, o.payment, null)"), "CR-268: Start opens the sale at the counter's own price and shows it as any sale")
-            ok(start.contains("val (rate, words) = quote()"), "CR-268: the rate is the counter's own, from the same price as a sale typed here")
-            val sale = controller.substringAfter("private fun showSale(").substringBefore("private fun requote(")
-            ok(sale.contains("n.tillOfSale(index)") && sale.contains("tillCancelled?.let { extra.add"), "CR-269: the sale screen shows the line when the till cancelled it")
-            val views = File(appDir, "src/android/CounterViews.kt").readText()
-            ok(views.contains("fun Ui.tillCard(") && views.contains("primary(WordsOfTill.START)") && views.contains("secondary(WordsOfTill.NOT_NOW)"), "CR-267: the card's two buttons are Start and Not now")
-            ok(!views.substringAfter("fun Ui.tillCard(").substringBefore("fun Ui.homeLines").contains("EditText"), "CR-267: the amount is not changed at the counter")
         }
     }
 
@@ -1770,7 +1724,7 @@ object AppModelTest {
             val controller = File(appDir, "src/android/Controller.kt").readText()
             val sale = controller.substringAfter("private fun showSale(").substringBefore("private fun requote(")
             ok(sale.contains("if (s.lightningFirst)") && sale.contains("LightningFirstWords.LINE") && sale.contains("LightningFirstWords.BUTTON"), "CR-283: the sale screen shows the line and the button under the code when the library says Lightning first")
-            ok(sale.contains("s.lightningFirst, info.reference"), "CR-283: the screen is drawn again when Lightning first goes")
+            ok(sale.contains("s.lightningFirst, info.billNumber"), "CR-283: the screen is drawn again when Lightning first goes")
             ok(controller.substringAfter("private fun payOnChainInstead(").substringBefore("private fun cancelSale(").contains("n.saleOnChainInstead(index)"), "CR-283: the button asks the library to keep the choice")
             ok(sale.contains("if (notices.remove(index)) drawNotices()"), "CR-284: a sale's own screen takes its notice away")
             val turns = controller.substringAfter("private fun onTurns(").substringBefore("private fun openFromNotice(")
@@ -1938,7 +1892,6 @@ object AppModelTest {
         cr240ConfirmChangeTests(screensMd?.parentFile?.parentFile?.parentFile?.let { File(it, "apps/counter-android") })
         cr260ConfirmSwitchTests(screensMd?.parentFile?.parentFile?.parentFile?.let { File(it, "apps/counter-android") })
         cr245BillsTests(screensMd?.parentFile?.parentFile?.parentFile?.let { File(it, "apps/counter-android") })
-        cr266TillTests(screensMd?.parentFile?.parentFile?.parentFile?.let { File(it, "apps/counter-android") })
         cr277OnePhoneTests(screensMd?.parentFile?.parentFile?.parentFile?.let { File(it, "apps/counter-android") })
         cr273StarterTests(screensMd?.parentFile?.parentFile?.parentFile?.let { File(it, "apps/counter-android") })
         cr85HoldClockTests(screensMd?.parentFile?.parentFile?.parentFile?.let { File(it, "apps/counter-android") })

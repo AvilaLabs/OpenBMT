@@ -2,9 +2,7 @@
 //!
 //! ```text
 //! openbmt-box <data dir> <bind addr> [--invitation-file <path>]
-//!             [--status-page <addr:port>] [--till-listen <addr:port>]
-//!             [--no-console]
-//! openbmt-box till-key <data dir>
+//!             [--status-page <addr:port>] [--no-console]
 //! ```
 //!
 //! It prints its key's four fingerprint words and its key in hex, then the
@@ -12,32 +10,13 @@
 //! named by `--invitation-file`, which is then deleted, or typed on standard
 //! input as `invite <text>`. Other commands on standard input: `state`
 //! (unpaired, invitation open, paired or turned off), `members`, `notes` and
-//! `quit`. For the POS (BX-41): `pos-token` reads the POS sign-in from the
-//! next line of standard input and stores it, and `pos` prints the state of
-//! the POS side, never the token. `pos-setup` reads the next line of standard
-//! input as the shop's POS vendor (BX-49) and stores it; the Box reads that
-//! vendor's POS over the system's `curl` from its next start. The line is
-//! `key=value` words separated by `|`: `vendor` (`square` or `clover`),
-//! `location` (Square's location id or Clover's merchant id), `currency`,
-//! `tenders` (the exact names of the Bitcoin tenders, separated by `;`) and,
-//! if needed, `curl` (a path), `socks` (the Tor proxy, `host:port`) and `host`
-//! (`https://` and a name). The program runs until the end of standard input
-//! or `quit`. Without a `pos-setup` it reads no POS and keeps the counters'
-//! notices no further than the Box's files.
+//! `quit`. The program runs until the end of standard input or `quit`.
 //!
 //! With `--status-page` the Box also serves a web page on that address: its
 //! state in words and a box for the invitation while it waits for one
 //! (BX-54 to BX-62). While the Box is not paired it prints a setup code
 //! after the page's address, which the page asks for with the invitation. The
 //! page is off without the argument.
-//!
-//! With `--till-listen` the Box also takes sale requests from a till on that
-//! address, as JSON over plain HTTP, each signed with a key made from the
-//! till key, used once and on time, and every answer signed (BX-70 to
-//! BX-80). `openbmt-box till-key <data dir>` makes the till key, prints it
-//! once and stores only the request key and the reply key made from it; the
-//! console command `till-key` does the same on a Box that is running. The
-//! listener is off without the argument.
 //!
 //! With `--no-console` the Box reads no standard input (a service has none)
 //! and an invitation comes only from `--invitation-file`. It runs until the
@@ -52,14 +31,9 @@ use std::process::ExitCode;
 use std::sync::Arc;
 
 use openbmt_box::say::{
-    invite_lines, members_lines, notes_lines, pos_lines, pos_setup_lines, pos_token_lines, render,
-    state_lines, till_key_failed_lines, till_key_lines, unknown_lines, ConsoleAnswer,
+    invite_lines, members_lines, notes_lines, render, state_lines, unknown_lines, ConsoleAnswer,
 };
-use openbmt_box::setup_files::{take_setup_files, till_file_listen};
-use openbmt_box::{
-    make_till_key, read_invitation_file, BoxError, BoxRunner, DirFiles, PageConfig, PosConfigError,
-    TillConfig,
-};
+use openbmt_box::{read_invitation_file, BoxRunner, PageConfig};
 use openbmt_link::ServerConfig;
 use openbmt_net_io::SystemClock;
 
@@ -69,7 +43,7 @@ fn hex(bytes: &[u8]) -> String {
 
 fn usage() -> ExitCode {
     eprintln!(
-        "usage: openbmt-box <data dir> <bind addr> [--invitation-file <path>] [--status-page <addr:port>] [--till-listen <addr:port>] [--no-console]\n       openbmt-box till-key <data dir>"
+        "usage: openbmt-box <data dir> <bind addr> [--invitation-file <path>] [--status-page <addr:port>] [--no-console]"
     );
     ExitCode::from(2)
 }
@@ -99,38 +73,13 @@ fn complain(lines: Vec<String>) {
     }
 }
 
-/// `openbmt-box till-key <data dir>` (BX-71): make the till key, print it, and
-/// keep only its hash. It writes the one file by renaming a whole one over
-/// the old (BX-50) and takes no lock on the data folder, so a Box that is
-/// running reads the new hash at its next request.
-fn till_key(dir: &str) -> ExitCode {
-    match make_till_key(&mut DirFiles::new(dir)) {
-        Ok(key) => {
-            say_all(till_key_lines(&key));
-            ExitCode::SUCCESS
-        }
-        Err(e) => {
-            complain(till_key_failed_lines(&e));
-            ExitCode::FAILURE
-        }
-    }
-}
-
 fn main() -> ExitCode {
     let mut args = std::env::args().skip(1);
     let (Some(dir), Some(bind)) = (args.next(), args.next()) else {
         return bad_arguments();
     };
-    if dir == "till-key" {
-        return if args.next().is_none() {
-            till_key(&bind)
-        } else {
-            bad_arguments()
-        };
-    }
     let mut invitation_file: Option<PathBuf> = None;
     let mut status_page: Option<String> = None;
-    let mut till_listen: Option<String> = None;
     let mut no_console = false;
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -140,10 +89,6 @@ fn main() -> ExitCode {
             },
             "--status-page" => match args.next() {
                 Some(addr) => status_page = Some(addr),
-                None => return bad_arguments(),
-            },
-            "--till-listen" => match args.next() {
-                Some(addr) => till_listen = Some(addr),
                 None => return bad_arguments(),
             },
             "--no-console" => no_console = true,
@@ -164,25 +109,11 @@ fn main() -> ExitCode {
         },
         None => None,
     };
-    let till_addr = match till_listen {
-        Some(text) => match text.parse::<SocketAddr>() {
-            Ok(addr) => Some(addr),
-            Err(_) => {
-                complain(render(&ConsoleAnswer::BadAddress(text).words()));
-                return usage();
-            }
-        },
-        None => None,
-    };
-    let data_dir = PathBuf::from(&dir);
-    // BX-64: the setup files are taken as the Box starts, before its POS side
-    // and the till listener are built, so each works at this start.
-    let (mut runner, setup_lines) = match BoxRunner::start_taking(
+    let mut runner = match BoxRunner::start(
         dir,
         bind_addr,
         Arc::new(SystemClock),
         ServerConfig::default(),
-        |store| take_setup_files(store, &data_dir),
     ) {
         Ok(r) => r,
         Err(e) => {
@@ -196,21 +127,6 @@ fn main() -> ExitCode {
     ));
     say(&format!("key: {}", hex(&runner.device_id().to_bytes())));
     say(&format!("listening: {}", runner.local_addr()));
-    say_all(setup_lines);
-    // A `--till-listen` flag wins over the address in `till.txt`.
-    let till_addr = match till_addr {
-        Some(addr) => Some(addr),
-        None => match till_file_listen(&data_dir) {
-            Some(text) => match text.parse::<SocketAddr>() {
-                Ok(addr) => Some(addr),
-                Err(_) => {
-                    say_all(render(&ConsoleAnswer::BadAddress(text).words()));
-                    None
-                }
-            },
-            None => None,
-        },
-    };
     if let Some(addr) = page_addr {
         match runner.serve_status_page(addr, PageConfig::default()) {
             Ok(bound) => {
@@ -219,15 +135,6 @@ fn main() -> ExitCode {
                     say(&format!("setup code: {code}"));
                 }
             }
-            Err(e) => {
-                complain(render(&e.words()));
-                return ExitCode::FAILURE;
-            }
-        }
-    }
-    if let Some(addr) = till_addr {
-        match runner.serve_till(addr, TillConfig::default()) {
-            Ok(bound) => say(&format!("till listener: {bound}")),
             Err(e) => {
                 complain(render(&e.words()));
                 return ExitCode::FAILURE;
@@ -257,29 +164,13 @@ fn main() -> ExitCode {
             std::thread::park();
         }
     }
-    let mut lines = io::stdin().lock().lines();
-    while let Some(line) = lines.next() {
+    for line in io::stdin().lock().lines() {
         let Ok(line) = line else { break };
         let line = line.trim();
         let (command, rest) = line.split_once(' ').unwrap_or((line, ""));
         match command {
             "invite" => say_all(invite_lines(&runner.enter_invitation(rest.trim()))),
             "state" => say_all(state_lines(runner.status())),
-            "pos-token" => match lines.next() {
-                Some(Ok(token)) => say_all(pos_token_lines(runner.store_pos_token(&token))),
-                // No line after the command is an empty token.
-                _ => say_all(pos_token_lines(Err(BoxError::BadToken("empty")))),
-            },
-            "pos-setup" => match lines.next() {
-                Some(Ok(setup)) => say_all(pos_setup_lines(&runner.store_pos_config(&setup))),
-                // No line after the command is a setup with no words.
-                _ => say_all(pos_setup_lines(&Err(PosConfigError::Missing("vendor")))),
-            },
-            "till-key" => match runner.make_till_key() {
-                Ok(key) => say_all(till_key_lines(&key)),
-                Err(e) => say_all(till_key_failed_lines(&e)),
-            },
-            "pos" => say_all(pos_lines(&runner.pos_view(), runner.status())),
             "members" => say_all(members_lines(&runner.members())),
             "notes" => say_all(notes_lines(&runner.notes())),
             "quit" => break,

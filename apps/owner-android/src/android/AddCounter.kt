@@ -152,7 +152,7 @@ internal fun Controller.showCounterCode(w: WaitingCounter, back: () -> Unit) {
         actions.add(
             ui.primary("The counter shows Paired") {
                 if (attempt(msg) { n.counterDelivered(w.counter) } != null) {
-                    centre(AppWords.counterDelivered, listOf(ui.primary("Done") { afterFirstCounter() }), title = "Owner")
+                    centre(AppWords.counterDelivered, listOf(ui.primary("Done") { showHome() }), title = "Owner")
                 }
             },
         )

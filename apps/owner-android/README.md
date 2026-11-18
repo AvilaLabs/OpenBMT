@@ -29,7 +29,6 @@ the app keeps are in `docs/OWNER-APP-RULES.md` (OA-01 to OA-35, OA-60 to OA-65).
 | Add a counter | Scan a counter's code with the camera, compare its four words, queue its settings and first batch, then show it a code. |
 | Link and counters | The relay, each counter's records, head and last check-in. |
 | Alerts | The node's alerts, with clear. |
-| Till | Connect a Square or Clover till with a read-only token, see when it was last read, how many sales matched, and each open alert with its words and an acknowledge button. |
 | Refund notes and Notes | What the node noted about refunds and everything else. |
 | Waiting | What is signed and waits to be delivered, by kind and age (read-only). |
 | Unlock | The first screen of every start and every return after more than a minute away: the PIN or passphrase of key 1 (OA-62). |
@@ -96,37 +95,6 @@ when the scan button is tapped. The pure parts are in
 `src/model/ExchangeModel.kt`.
 Scanning and showing have not been tried on a phone.
 
-## The till
-
-The Till screen matches the shop's orders against the counters' sales on this
-phone (`docs/OWNER-COINS-RULES.md`, OC-30 to OC-37). The owner node parses
-the vendor's pages and does the matching; the app holds the token and does
-the HTTP (OA-16 to OA-19).
-
-- **Connect.** The vendor (Square or Clover), the location id (Clover: the
-  merchant id), the exact names of the Bitcoin tender, the shop's currencies,
-  and a read-only token pasted once into a hidden field. The token is sealed
-  under its own Keystore key in its own file in `noBackupFilesDir`, is never
-  shown again and can be removed with the till. The settings go to the library
-  first, so a refused till seals nothing.
-- **Reading.** One thread reads the till while the app is on the screen, at
-  most once a minute, through Orbot (nothing is sent if Orbot does not answer),
-  with `HttpsURLConnection`: no redirect, no cache, a fixed User-Agent, 20
-  second timeouts, 8 MiB at most per page, only `connect.squareup.com` and
-  `api.clover.com`. The `Authorization` header is set in
-  `src/android/HttpsPosFetcher.kt` and nowhere else; it is never logged.
-- **Alerts.** Each open alert is shown with the library's words (why, and what
-  to do next). **Acknowledge marks it on this phone only.** No signed command
-  for it exists, so the Box and the counters do not learn of it. The screen and
-  the About screen say so.
-- **A 401 or 403** is shown with the library's words (the token was refused;
-  make a new read-only one in the till's system) and the screen offers to
-  replace the token.
-- **Not checked without a real account.** The vendors' answers are known from
-  their published documentation and the fixtures of `openbmt-pos-readers`
-  only, and the hosts and the paths are marked for verification in
-  `openbmt-owner-node/src/pos.rs`.
-
 ## Setup text
 
 The app's own plain-line format, which the ceremony on this phone also writes
@@ -165,7 +133,7 @@ nothing. This app stores what they return.
   ceremony's file, the Keystore key and then the tries file, and says that
   the money is not lost because two of the three keys still exist, with the
   recovery kit and the holder of key 2 as the way on (OA-64). The node's
-  folder, the config and the till's token are not touched.
+  folder and the config are not touched.
 - **Changing it.** "Change the PIN" on the home screen.
 
 ## Why `FLAG_SECURE` here and not in the Counter app
@@ -204,9 +172,7 @@ scan the code from it.
   secret and no owner key, signs nothing but heartbeats, never starts after a
   reboot, and takes no wake lock or alarm.
 - **Threads (OA-12).** One thread pumps, one thread takes the link's turns
-  (only when there is a link), one thread reads the till (only when there is a
-  link, at most once a minute, OA-18), and the screen thread makes every other
-  call.
+  (only when there is a link), and the screen thread makes every other call.
 
 ## Build
 
@@ -225,8 +191,7 @@ never in the repository.
 
 - `tests/run-jvm.sh` runs the common model tests, then the owner app's model
   tests (words, setup text, config, request and response text, Tor gate,
-  screen choice, forms, the till's token store, address check, page cap, pace
-  and read loop) and one test for each rule, named `oa_NN_...`. They
+  screen choice, forms, address check, page cap and pace) and one test for each rule, named `oa_NN_...`. They
   need no device. `OPENBMT_WRITE_SCREENS=1` rewrites
   `docs/screens/owner-app.md`.
 - `tests/check-manifest.sh APK` checks the permission list, backup,
@@ -237,8 +202,7 @@ never in the repository.
 Nothing is copied from the other apps; the owner app compiles
 `apps/android-common` as it is. What is written again here, because it is the
 app's own: the Tor gate and its SOCKS5 probe (`src/model/TorGate.kt`, as the
-Counter app has), the till's fetcher (`src/android/HttpsPosFetcher.kt`, the
-same shape as the Counter app's `HttpsFetcher`), the config file, the file
+Counter app has), the config file, the file
 picker and the save-as-file helper (`src/android`).
 
 ## Signing
@@ -257,11 +221,7 @@ the key ceremony against a real Key app on a second phone (scanning its answer
 and key 2, showing it the setup, resuming after the app was closed),
 how the screens look and lay out, the keyboard types of the fields, the file
 picker and the save of a request as a file, the clipboard copy and clear, the
-Keystore sealing (of the setup and of the till's token), the hidden token
-field and its paste, a read of a real Square or Clover account through Orbot
-(the hosts, the headers a vendor needs such as Square's version, the shape of
-its answers, its rate limits and what a refused token looks like), the till
-thread starting and stopping with the app, `FLAG_SECURE` in a screenshot and
+Keystore sealing (of the setup), `FLAG_SECURE` in a screenshot and
 in the list of recent apps, the SOCKS probe against a real Orbot, the node following the chain
 through Orbot, a link to a real relay and counters, the Key app's response
 round trip with a real Key app, the scan of a counter's request, how long the

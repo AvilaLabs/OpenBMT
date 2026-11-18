@@ -22,10 +22,6 @@ bip39 = { version = "=2.2.2", default-features = false, features = ["alloc"] }
 # The same pin and features as openbmt-link and openbmt-lock: the sealed
 # seed of the starter wallet (SS-20). It is in the lock file already.
 chacha20poly1305 = { version = "=0.10.1", default-features = false, features = ["alloc"] }
-# The web order key (WO-43): Ed25519 signatures of the owner phone, the one
-# package the web order rules add. No default features: no random number
-# generator, no encodings; only signing and wiping the seed on drop.
-ed25519-dalek = { version = "=2.2.0", default-features = false, features = ["zeroize"] }
 
 # The kernel's bytes with the checks of SS-02, shared with every other key the
 # Rust side makes.

@@ -1,5 +1,4 @@
-//! What a cashier is told about bills, tabs and the till's reference
-//! (CR-255), under `docs/SCREEN-RULES.md`.
+//! What a cashier is told about bills and tabs (CR-255), under `docs/SCREEN-RULES.md`.
 
 use std::fmt::Display;
 
@@ -11,7 +10,7 @@ use crate::refusal::{BillRefused, PartRefused};
 use crate::say::{refused, store_failed, RETRY_NEXT};
 
 impl<E: Display> BillRefused<E> {
-    /// What the cashier is told when a bill, a tab or a reference is refused
+    /// What the cashier is told when a bill or a tab is refused
     /// (CR-255). Nothing was written.
     pub fn words(&self) -> Words {
         let code = self.rule();
@@ -29,20 +28,6 @@ impl<E: Display> BillRefused<E> {
                 "No bill on this counter has that number.",
                 c,
                 "Pick the bill from the list of bills.",
-                code,
-            ),
-            Self::BadReference => refused(
-                "Reference does not fit",
-                "The till reference has a sign or a space that is not allowed, or is over 32 characters.",
-                c,
-                "Type the reference again as the till shows it, without spaces.",
-                code,
-            ),
-            Self::AlreadyReferenced => refused(
-                "Reference already set",
-                "This already has a till reference, and it takes only one.",
-                c,
-                "Nothing to change. If the reference is wrong, tell the manager.",
                 code,
             ),
             Self::BadAmount => refused(
@@ -239,8 +224,6 @@ pub(crate) fn all_bill_words() -> Vec<(String, Words)> {
     let refusals: Vec<(&str, BillRefused<String>)> = vec![
         ("UnknownSale", BillRefused::UnknownSale(3)),
         ("UnknownBill", BillRefused::UnknownBill(3)),
-        ("BadReference", BillRefused::BadReference),
-        ("AlreadyReferenced", BillRefused::AlreadyReferenced),
         ("BadAmount", BillRefused::BadAmount),
         ("TooManyOpen", BillRefused::TooManyOpen),
         ("TooManyParts", BillRefused::TooManyParts),
@@ -275,7 +258,6 @@ pub(crate) fn all_bill_words() -> Vec<(String, Words)> {
             amount: Amount(1_000),
             currency: Currency::of_shop(openbmt_core::currency::ShopCurrency::Usd),
             opened_at: 0,
-            reference: None,
             parts: Vec::new(),
             ended,
         },

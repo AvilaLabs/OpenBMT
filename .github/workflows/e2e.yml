@@ -245,8 +245,6 @@ jobs:
             script: starter-e2e-core.sh
           - label: switch against Core
             script: switch-e2e-core.sh
-          - label: Till against Core
-            script: till-e2e-core.sh
           - label: requests against Core
             script: requests-e2e-core.sh
     steps:
@@ -295,19 +293,6 @@ jobs:
         env:
           SHOP_CHAIN: ${{ matrix.shop_chain }}
         run: scripts/${{ matrix.script }}
-
-  woocommerce-php:
-    name: "End to end: WooCommerce plugin tests"
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - name: The runner's PHP
-        run: php --version
-      - name: Standalone tests against the vectors of the Rust side
-        run: integrations/woocommerce/openbmt-pay/tests_standalone/run.sh
 
   fuzz-build:
     name: Fuzz targets build (nightly)

@@ -41,27 +41,23 @@
   }
 
   /**
-   * The bar's tabs, in order. A tab with a [menu] shows a chevron and opens its sub-scenarios; [screen] says the tab's own
-   * label opens a screen too (the register's choice), and the chevron alone opens the menu.
+   * The bar's tabs, in order. A tab with a [menu] shows a chevron and opens its sub-scenarios.
    */
   const BAR = [
     { name: "Customer" },
     { name: "Café" },
-    { name: "With your register", screen: true, menu: ["Your register sends the amount", "Square", "Clover"] },
     { name: "When something goes wrong", menu: ["A short payment", "A cancelled payment"] },
   ];
   /** The scenarios that play, by their bar names: a tab without a menu, or a menu's item. */
   const SCENARIOS = BAR.flatMap((t) => t.menu || [t.name]);
   /** The tab a scenario (or the tab itself) belongs to. */
   const tabOf = (name) => (BAR.find((t) => t.name === name || (t.menu && t.menu.includes(name))) || {}).name || null;
-  // The spoken name of the chevron beside a tab with a menu.
-  const chevronLabel = (tab) => `Choices under ${tab}`;
   const ACTOR_W = 250;
   /** How long sizes ease when the lit device changes, and the share of its size the other devices keep. */
   const EASE_MS = 300;
   const REST_SHARE = 0.7;
 
-  /** The ending card of each scenario: a heading and three lines. The register has a card for each of its three ways. */
+  /** The ending card of each scenario: a heading and three lines. */
   const CARDS = {
     Customer: {
       heading: "You paid a shop in bitcoin.",
@@ -77,30 +73,6 @@
         "Small sales turn green in seconds, on the counter's own check.",
         "Lightning is final at once, at any amount.",
         "Every payment goes straight to the shop's own wallet.",
-      ],
-    },
-    "Register sends": {
-      heading: "That is a sale with your register.",
-      lines: [
-        "The register sent the amount, so nothing was typed twice.",
-        "The counter checked the payment itself.",
-        "The register closed its own order when the sale was paid.",
-      ],
-    },
-    Square: {
-      heading: "An earlier manual Square style illustration.",
-      lines: [
-        "The cashier rang a separate sale on a Square style screen and the counter.",
-        "This hand built illustration is not a supported Square or OpenBMT tender integration.",
-        "Reconcile the two records manually; no order closes automatically.",
-      ],
-    },
-    Clover: {
-      heading: "That is a sale with Clover.",
-      lines: [
-        "The cashier rang it up on Clover and on the counter.",
-        "The order was closed as Bitcoin.",
-        "The owner's phone matched the two, and would raise an alert if they did not match.",
       ],
     },
     "Something goes wrong": {
@@ -154,12 +126,6 @@
       this.scenEl.setAttribute("aria-label", "Scenario");
       this.scenSel = el("select", "scenario-select");
       this.scenSel.setAttribute("aria-label", "Scenario");
-      // Shown (and hidden from the list) while the register's choice screen is open, which the select has no item for.
-      this.scenHold = el("option");
-      this.scenHold.value = "";
-      this.scenHold.hidden = true;
-      this.scenHold.disabled = true;
-      this.scenSel.append(this.scenHold);
       this.tabs = new Map();
       for (const item of BAR) this.buildTab(item);
       this.scenSel.addEventListener("change", () => {
@@ -227,20 +193,9 @@
       list.setAttribute("role", "menu");
       list.hidden = true;
       entry.list = list;
-      let opener = label;
-      if (item.screen) {
-        // The label opens the tab's own screen; the chevron beside it opens the menu.
-        label.addEventListener("click", () => this.pick(item.name));
-        const chev = el("button", "tab-chev");
-        chev.setAttribute("aria-label", chevronLabel(item.name));
-        chev.addEventListener("click", () => this.toggleMenu(item.name));
-        tab.append(chev);
-        opener = chev;
-        label.addEventListener("keydown", (ev) => { if (ev.key === "ArrowDown") { ev.preventDefault(); this.openMenu(item.name, true); } });
-      } else {
-        label.addEventListener("click", () => this.toggleMenu(item.name));
-        label.classList.add("chevron");
-      }
+      label.addEventListener("click", () => this.toggleMenu(item.name));
+      label.classList.add("chevron");
+      const opener = label;
       opener.setAttribute("aria-haspopup", "menu");
       opener.setAttribute("aria-expanded", "false");
       opener.addEventListener("keydown", (ev) => { if (ev.key === "ArrowDown") { ev.preventDefault(); this.openMenu(item.name, true); } });
@@ -320,8 +275,7 @@
           if (name === tab && item === sub) b.setAttribute("aria-current", "true"); else b.removeAttribute("aria-current");
         }
       }
-      // The select holds the playing scenario; on a tab's own screen it shows the tab's name.
-      this.scenHold.textContent = tab || "";
+      // The select holds the playing scenario.
       this.scenSel.value = sub || (tab && !this.tabs.get(tab).items.size ? tab : "");
       this.current = tab;
       this.sub = sub || null;
@@ -470,7 +424,7 @@
      * screen has played it).
      */
     start(roles, snap, opts = {}) {
-      let s = this.root.querySelector(".start:not(.chooser)");
+      let s = this.root.querySelector(".start");
       if (!s) {
         s = el("div", "start");
         const top = el("div", "top");
@@ -496,8 +450,6 @@
       this.reset();
       this.closeMenu();
       this.demo.hidden = true;
-      const chooser = this.root.querySelector(".start.chooser");
-      if (chooser) chooser.remove();
       if (snap && !opts.quiet) snap.play();
     }
 
@@ -514,28 +466,6 @@
     }
 
     /**
-     * A choice inside the demo, under the scenario bar (the register's three ways): [opts] {title, lede}, [roles] as for
-     * [start]. The bar stays, and the screen goes when a scenario begins or the start screen comes.
-     */
-    choice(roles, opts) {
-      const old = this.root.querySelector(".start.chooser");
-      if (old) old.remove();
-      this.reset();
-      this.closeMenu();
-      this.clearDevices();
-      const s = el("div", "start chooser");
-      const mid = el("div", "mid");
-      mid.append(el("h1", null, opts.title), el("p", "lede", opts.lede), this.cards(roles));
-      s.append(mid);
-      this.root.append(s);
-      const plain = this.root.querySelector(".start:not(.chooser)");
-      if (plain) plain.hidden = true;
-      this.stepList.replaceChildren();
-      this.say("", []);
-      this.demo.hidden = false;
-    }
-
-    /**
      * Opens the demo with [steps] (names) and [devices] left to right: [{id, caption, sizes}], where [sizes] is a
      * list of {label, size} the visitor can switch between (the first is shown first), or one {size}.
      * [actorAfter] keeps room beside that device for the customer the demo plays.
@@ -545,7 +475,7 @@
       this.reset();
       this.stage.classList.toggle("actor-flow", !!opts.actorFlow);
       this.closeMenu();
-      for (const s of this.root.querySelectorAll(".start")) { if (s.classList.contains("chooser")) s.remove(); else s.hidden = true; }
+      for (const s of this.root.querySelectorAll(".start")) s.hidden = true;
       this.demo.hidden = false;
       this.stepList.replaceChildren();
       steps.forEach((name, i) => {

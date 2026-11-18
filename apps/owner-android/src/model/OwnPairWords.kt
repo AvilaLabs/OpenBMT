@@ -35,6 +35,7 @@ object OwnPairWords {
     const val pairedHeading = "{name} is paired"
     const val pairedText = "It makes its addresses from your wallet and sells within the shop's settings."
     const val pairedNext = "Nothing to do."
+    const val pairedDone = "Done"
 
     // ---- the gap limit (OA-113) ----
     const val gapTitle = "How far your wallet looks ahead"
@@ -148,7 +149,7 @@ object OwnPairWords {
         add("compareMatch", compareMatch); add("compareDiffer", compareDiffer)
         add("bundleHeading", bundleHeading); add("bundleText", bundleText)
         add("bundlePaired", bundlePaired); add("bundleAgain", bundleAgain)
-        add("pairedHeading", pairedHeading); add("pairedText", pairedText); add("pairedNext", pairedNext)
+        add("pairedHeading", pairedHeading); add("pairedText", pairedText); add("pairedNext", pairedNext); add("pairedDone", pairedDone)
         add("gapTitle", gapTitle); add("gapUsual", gapUsual); add("gapMore", gapMore); add("gapMoreNext", gapMoreNext)
         add("walletTitle", walletTitle); add("walletButton", walletButton); add("waitingLabel", waitingLabel)
         for ((k, w) in listOf("walletNotSaved" to walletNotSaved, "noWallet" to noWallet, "codeNotShown" to codeNotShown)) {

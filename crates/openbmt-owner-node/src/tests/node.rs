@@ -37,7 +37,6 @@ mod receipts;
 mod requests;
 mod starter;
 mod stopped;
-mod web_orders;
 
 use super::coins::{mine, tx_from};
 use super::{id, Dir, TestClock};

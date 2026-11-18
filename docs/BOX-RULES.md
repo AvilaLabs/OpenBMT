@@ -1,18 +1,16 @@
 # Box rules: the merchant's own small server
 
 Status: specification for `crates/openbmt-box`. All sections are
-implemented, section 4 (the POS on the Box, and its way to a vendor over
-curl), section 5b (the status page), section 5c (the till listener) and
-section 5d (Shop Lightning's store) included.
+implemented, section 5b (the status page) and section 5d (Shop Lightning's
+store) included.
 Each rule has an ID so that a test can name the rule it proves. The rules
 implement `docs/DESIGN.md` §5.3 and close the open item of §16: how a Box,
 which has no screen, is paired.
 
-The Box is a program on a small computer the merchant owns. It does three
+The Box is a program on a small computer the merchant owns. It does two
 jobs and no others: it is the relay between the shop's devices
-(`docs/LINK-RULES.md` §2), it reads the POS and matches orders to sales
-(`docs/POS-RULES.md`), and it keeps what both need on disk. With Shop
-Lightning on, it also keeps the sealed second copy of the Lightning
+(`docs/LINK-RULES.md` §2), and it keeps what the relay needs on disk. With
+Shop Lightning on, it also keeps the sealed second copy of the Lightning
 counter's state (section 5d), which it cannot open. It holds no
 bitcoin key, derives no address, checks no payment and cannot move funds.
 What it says is a hint to the other devices and never a proof.
@@ -24,12 +22,11 @@ What it says is a hint to the other devices and never a proof.
   same key is the relay's key (LK-32). The key signs the relay's hello and
   the Box's sealed messages, and nothing else.
 - **BX-02.** One process uses a Box's data directory at a time (NR-79).
-- **BX-03.** A Box that is not paired takes no sealed message, makes no
-  mailbox and reads no POS. It answers a hello, and a claim while an
-  invitation is open (BX-12), and refuses everything else.
+- **BX-03.** A Box that is not paired takes no sealed message and makes
+  no mailbox. It answers a hello, and a claim while an invitation is open
+  (BX-12), and refuses everything else.
 - **BX-04.** A Box never holds: a wallet description, an address, a
-  transaction ID, a key that signs for the shop, or the owner's own POS
-  sign-in. The POS token it holds is its own (BX-41).
+  transaction ID, or a key that signs for the shop.
 
 ## 2. Pairing: the invitation
 
@@ -131,7 +128,7 @@ allowed.
 What it does not protect against: the computer the invitation is typed on.
 Whoever reads the invitation there, within its 30 minutes and before the
 real Box is approved, can stand in for the Box. That computer already sets
-up the Box, POS token included, so it is trusted for this anyway; the
+up the Box, so it is trusted for this anyway; the
 setup text says to use the Box's own console or the host system's own
 screen and not a shared computer.
 
@@ -153,82 +150,11 @@ screen and not a shared computer.
   mailbox is kept to be fetched until it has been or for 7 days (LK-28,
   LK-29), so that the device learns it was removed.
 - **BX-23.** Settings that no longer list this Box turn it off: the member
-  list becomes empty, the POS reading stops and the POS token is erased
-  from its storage. It stays pinned to its roots (BX-16).
+  list becomes empty. It stays pinned to its roots (BX-16).
 - **BX-24.** The roles the Box gives the other devices when it opens a
   sealed message (LK-05) come from the same settings: the owner root's key
   is the owner, keys with a share are counters, keys in the Box set are
   Boxes.
-
-## 4. The POS on the Box
-
-- **BX-40.** The Box runs the reading and matching of `docs/POS-RULES.md`
-  on what the counters tell it in paid notices (LK-08). A paid notice is
-  signed by the counter and names: the counter's key, the sale index, the
-  amount and currency in the shop's money, when the sale opened, and one
-  of "opened", "paid", "unpaid again" and "final" with its time. The Box
-  checks the signature, that the counter is on the list, and that the
-  notice's number is above the last from that counter, and builds the
-  sale facts of PS-05 from the notices alone. A notice never carries an
-  amount in satoshis, a rate, an address or a transaction ID, and the Box
-  is never given a counter's records.
-- **BX-41.** The POS sign-in the Box uses is entered in the Box's setup and
-  stored in its data directory, in a file only the Box's user can read.
-  The setup says what the token can do. It is separate from the owner's
-  own read-only sign-in, so the owner's matching does not depend on the
-  Box.
-- **BX-42.** The Box sends what it finds (matches, alerts) to the owner as
-  sealed messages of kind POS notice. The owner's device treats them as
-  the Box's report and shows them as such; its own matching decides.
-- **BX-43.** The Box closes an order in a POS only through a connector
-  that can, only for a sale with a counter-signed "paid" notice, and with
-  the idempotency key of PS-81. With no such connector it closes nothing.
-
-- **BX-44.** The Box reaches a POS vendor over HTTPS only through the
-  system's `curl`, run as a child process once for each request. It has no
-  TLS library and no HTTP library, and the dependency lists do not change
-  for it: curl and its TLS library come from the system and get the
-  system's security updates. The path of curl is a setting, `curl` from
-  `PATH` unless the shop's setup names another. A curl that is not there, or
-  that the system will not run, is a refusal with words ("curl is not
-  installed on this Box"), never a panic and never another way out.
-- **BX-45.** The POS token is never in the arguments of curl and never in
-  its environment. A request is given to curl as a config on its standard
-  input (`--config -`): every header, the token's among them, and the body.
-  The arguments hold the flags of BX-46 and the URL only. The child is run
-  with an empty environment (so that no proxy variable and no user config
-  file can change what it does), but for the places of the certificates, and
-  `-q` is its first argument. A header or a body that cannot be written
-  into a config is refused before curl is run.
-- **BX-46.** Every request is bounded. The flags are `--proto =https`,
-  `--tlsv1.2` (or later), `--max-time` of 30 seconds, a connect time of 15,
-  `--max-filesize`, `--silent --show-error` and `--write-out '%{http_code}'`;
-  redirects are not followed. The reply goes to standard output and is read
-  with a cap of 8 MiB (PS-90): curl is ended when the cap is passed. A
-  request body is at most 16 KiB. A time out, a name or server that cannot
-  be reached, a TLS failure, a reply over the cap, a curl that failed in
-  another way and an output with no status are each a refusal with words;
-  the reading fails and changes nothing (PS-74).
-- **BX-47.** When the settings in force say Tor is on, every request goes
-  through the SOCKS5 proxy of the setup (`127.0.0.1:9050` unless it names
-  another) with `--socks5-hostname`, so that the proxy resolves the name.
-  A Box that cannot tell whether Tor is on takes it as on. If the proxy is
-  not there, or refuses, the request is refused and nothing else is tried:
-  there is no fallback to a direct request.
-- **BX-48.** The status of a reply decides what it is. 200 to 299 is read.
-  401 and 403 are "the token was refused": the words say to make a new
-  read-only token at the vendor and give it with `pos-token`. 429 is "wait":
-  the reading is not made again for a minute. A time the vendor names in
-  its answer is not read. A redirect is refused, and any other
-  status is refused with it named.
-- **BX-49.** The Box reads the POS of the vendor its own `pos-config` names
-  (Square or Clover) with the reader of `openbmt-pos-readers` for it:
-  one request for each page (and, for Square, the payments of its orders),
-  a page at a time, the cursor stored after each
-  page and a page that does not move it refused (PS-74, PS-80). A reading is
-  made once a minute at most, a paid notice's wish for one at once
-  included. The Box closes no order through the vendor's API: Square is
-  read-only (`docs/DESIGN.md` section 5.6) and no Clover close is built.
 
 ## 5. Storage
 
@@ -258,25 +184,10 @@ screen and not a shared computer.
   StartOS raw TCP interface lists IPv6 addresses) needs `[::]` or an IPv6
   address in the bind.
 - **BX-63. A restored Box.** A Box whose data folder is put back from a
-  backup holds the settings, the till key and the POS token it had then, so
-  a counter removed since, or a till key replaced since, works on it again.
-  The owner phone sends the settings in force to every Box when it starts
-  and every six hours, so a restored Box takes the newer settings within
-  that time. Where the host system allows it, the till key and the POS
-  token are left out of its backups and must be set up again after a restore.
-- **BX-64. Setup by files.** A host system without a console sets the Box
-  up with files in its data folder, read at start before the POS side and
-  the till listener are set up, so that what they hold works at that start:
-  `pos-setup.txt` and `pos-token.txt` hold what the console's `pos-setup` and
-  `pos-token` take, are checked as those are, and are deleted once read;
-  `till.txt` names the till listener's address as `--till-listen` does and is
-  kept, and the flag wins when both are given. A refused `pos-setup.txt` is
-  renamed with `.refused` at the end; a refused `pos-token.txt` is deleted,
-  because it holds a token. The Box says in its log what it did with each
-  file and why one was refused, and never writes the token there. A file
-  that cannot be deleted is emptied, and an empty file is not applied: the
-  next start only deletes it.
-
+  backup holds the settings it had then, so a counter removed since works
+  on it again. The owner phone sends the settings in force to every Box when
+  it starts and every six hours, so a restored Box takes the newer settings
+  within that time.
 ## 5a. What the code fixes
 
 These are details the rules above leave open. None of them changes a rule.
@@ -284,11 +195,9 @@ These are details the rules above leave open. None of them changes a rule.
 - **Files.** The data directory holds `box.key` (the identity secret),
   `invitation` (the invitation, its box nonce and the time it was entered),
   `roots`, `settings` (the signed settings in force), `link-inbox` and
-  `link-outbox` (the message numbers of LK-40), `pos.token` (BX-41),
-  `pos-notices` and `pos-ledger` (the POS side, below), `till-key` (BX-71),
-  `till-seen` (the latest time of a till request taken, BX-80), and the
-  directory `relay/` (the relay's member list and mailboxes). Every file is
-  written with mode 0600.
+  `link-outbox` (the message numbers of LK-40), and the directory `relay/`
+  (the relay's member list and mailboxes). Every file is written with mode
+  0600.
 - **Welcome request.** The welcome and the first settings reach an unpaired
   Box over its relay connection as one request (`docs/LINK-RULES.md`,
   LK-27): the length of the welcome as 4 bytes little endian, the welcome,
@@ -343,216 +252,8 @@ These are details the rules above leave open. None of them changes a rule.
   accepted.
 - **Reading its own mailbox (BX-21, BX-24).** The Box opens what is sealed
   for it with the roles of BX-24 and the rules of LK-05. Settings from the
-  owner go to BX-21; a paid notice goes to the POS side (BX-40); a message
-  of any other kind is noted as not handled yet and dropped.
-
-### The POS on the Box (BX-40 to BX-43)
-
-These details too leave every rule of section 4 as it is.
-
-- **The paid notice.** A counter sends it as a sealed message of kind Paid
-  notice to each Box on its device list (LK-08). The content is exactly 141
-  bytes, strict, with the magic `OBMc` (157 bytes, and version 2, when the
-  notice names a till sale, BX-77):
-
-  ```text
-  "OBMc" | 1 | counter key (32) | number (8) | sale index (4)
-         | amount (8) | currency (3) | opened (8) | state (1)
-         | state time (8) | signature (64)
-  signature = BIP340 over the tagged hash
-              "OpenBMT/paid-notice/v1" of every byte before it
-  ```
-
-  Integers are little endian. The amount is in minor units of the currency,
-  the currency is three capital letters, the state is 1 opened, 2 paid, 3
-  unpaid again or 4 final, and the number is from 1 and zero is refused.
-  There is no field for a satoshi amount, a rate, an address or a
-  transaction ID, and the length is fixed, so none can be added to a notice
-  that reads. The sale reference of PS-20 is not carried: the Box works it
-  out from the counter's key and the sale index.
-- **What a notice says.** A notice is the state of the sale and not a
-  change to it. The time of a "paid" notice is when the sale was first
-  reported paid (so a "paid" notice sent after the sale was unpaid again
-  carries the same time); the time of the other three is when the state
-  was reached. "Unpaid again" and "final" clear each other, and "paid"
-  clears both. A sale that is unpaid again is never also final.
-- **When a counter sends one.** When a sale opens, and whenever the sale as
-  the counter's own records give it (PS-06, PS-09) changes state, or the
-  time it was first reported paid changes. The counter reads its own
-  records to know: it writes nothing and asks nothing of the sale. The
-  number is the counter's, from 1, shared by all its Boxes. The number and
-  the notices not yet taken by the relay are stored whole in
-  `notice-outbox` in the link's directory before anything is sent, and a
-  restart sends again what the relay did not take. The relay taking it is
-  the only acknowledgement there is. A queue is at most 4,096 notices, and
-  when it is full the oldest go and a note says so. With no Box on the
-  list nothing is read, queued or sent; a Box added later is sent the
-  notices of the whole chain, the newest 4,096 of them. A notice that is
-  lost is made good by the next one about the sale, which carries the
-  whole sale. A failure to send or to store is a note on the counter and
-  never an error in front of the cashier, and never changes a sale.
-- **What the Box checks, in order.** That the notice reads; that the key
-  that signed it is the key that sent the message; that the key is a counter
-  in the settings in force (BX-24), which is how a counter taken off the list
-  stops being heard; that the signature is good; that the number is above the
-  last taken from that counter; that the amount, the currency and the time
-  the sale opened are those earlier notices gave, when it has seen the sale.
-  A notice that fails is dropped with a note, and its number is not used up.
-  A notice for a sale the Box has not seen makes the sale from the notice.
-- **What is stored (BX-50).** The Box keeps, for each sale, the fact of
-  PS-05 as the notices gave it, and for each counter the last number taken
-  (at most 256 counters; the numbers of counters no longer on the list are
-  let go when the table is full). They are in `pos-notices` with the closes
-  and the POS notices waiting for the relay, written whole, and the new
-  value is stored before it takes effect, so a number is never taken
-  without being stored. Messages that come together are taken as one write.
-- **How many sales (PS-72).** At most 16,384 sales, about 1.2 MB. When a
-  new sale would be the 16,385th, the Box drops up to 1,024 of the oldest
-  sales that are final, not unpaid again, first reported paid more than the
-  matching window (PS-33, 30 minutes) ago and with no close under way. A
-  sale dropped is not judged again; a match to it is kept as it is (PS-36).
-  The record of its close goes with it, so the closes recorded never
-  outnumber the sales. If none can be dropped the new notice is refused
-  with a note: nothing else is ever dropped for room.
-- **The timer.** The time is the clock the Box is given. The POS is read
-  every 60 seconds (BX-49), and at once at the next turn of the worker after a
-  paid notice was taken; a notice that is refused does not bring a reading.
-  Each reading is a sync of PS-74 on all the sales the Box holds. A reading
-  that fails (the POS is down, times out, answers with something that does
-  not read, refuses the sign-in) is a note and changes nothing; the next one
-  is at the next time. A POS that asks to wait is not read again before it
-  said, if that is later. The timer needs a token and a paired Box that the
-  settings list; with the Box unpaired or turned off the connector is told to
-  forget the token and nothing is read (BX-03, BX-23).
-- **The token (BX-41).** It is the one line of `pos.token`, at most 1,024
-  bytes with no control character, in a file with mode 0600. The Box
-  refuses to read it, with an error that names the file and says what its
-  mode is, when the mode has any bit of the group or of others; the relay
-  runs on and the POS is not read. A Box with no token file reads no POS.
-  The console command `pos-token` takes the next line of standard input as
-  the token and stores it; `pos` prints the state of the POS side (whether
-  it reads and why not, whether the connector can close, the time of the
-  last reading and its error, and counts) and never the token. A Box that
-  is unpaired or turned off takes no token.
-- **What the connector is.** The `Connector` trait of `openbmt-pos` is the
-  reader of PS-80 and four things the Box needs: `set_token`, `can_close`
-  (false unless the connector says so), `find_order` and `close` (PS-81).
-  The binary holds no connector, so on its own it keeps the notices and
-  reads no POS; a program that links the library gives it one.
-- **The POS notice.** The Box sends what a reading made new, and what its
-  closing did, to the owner as sealed messages of kind POS notice (LK-08),
-  one thing in each, strict, with the magic `OBMd`:
-
-  ```text
-  "OBMd" | 1 | Box key (32) | number (8) | time (8) | item (1) | body
-         | signature (64)
-  signature = BIP340 over the tagged hash
-              "OpenBMT/pos-notice/v1" of every byte before it
-  ```
-
-  The item is 1 a match (the order, the tender, the sale, how it was
-  matched, whether by order of time, when), 2 an alert (as the ledger of
-  PS-71 stores it, with its why and next step as the alert holds them), 3 an
-  order the Box closed, or 4 a sale reported unpaid again after its order
-  was closed. The number is the Box's, from 1. There is no field for a
-  satoshi amount, an address or a transaction ID. A reading that finds
-  nothing new sends nothing. At most 256 are kept for the relay; the oldest
-  go first, with a note.
-- **What the owner does with it (BX-42).** The owner takes a POS notice only
-  from a key it holds as a Box, with that Box's signature on it and a number
-  above the last from that Box. It keeps the newest 256 as the Box's report
-  and shows them as such. It does not merge them into its own matching and
-  does not act on them. Anything it refuses is a note. The list and the
-  numbers are in memory. A counter takes a POS notice, opens it and drops it
-  with a note.
-- **Closing an order (BX-43).** On each turn the Box looks at the sales whose
-  latest notice is "paid" or "final", which is what "a sale with a
-  counter-signed "paid" notice" comes to once a sale can be final, and for
-  each that has no close recorded asks the connector, which is the only one
-  that knows the POS, for the one open order that carries the sale's
-  reference (`find_order`). With no order named nothing is closed and the
-  sale is tried again on a later turn. The connector is asked about at
-  most 16 sales in a turn, taken in turn so that a sale with no order does
-  not keep the others waiting, and only about sales first reported paid
-  inside the matching window (PS-33): an older one is left to the owner.
-  With one, the attempt is stored,
-  then the connector is called with the idempotency key of PS-81, and then
-  the result is stored with a POS notice to the owner. A stop between the
-  two leaves the attempt, and the next turn calls again with the same key
-  and the same order. A sale gets at most one close: the Box records
-  it, and the key of PS-81 makes the POS refuse a second one even after
-  the Box dropped the record with the sale. At most 16 orders are closed
-  in a turn. A sale that is not reported paid now is
-  refused before the connector is called, by `CloseRequest::for_sale`.
-  A sale that goes unpaid again after its order was closed makes one POS
-  notice of item 4 to the owner. Nothing is undone, and the sale is not
-  closed again if it is paid once more.
-- **A stop in the middle.** A reading's ledger is stored before the POS
-  notices it made. A stop between the two loses those notices, which are
-  hints; the owner's own matching sees the same conditions.
-- **Files that do not read back.** A `pos-notices` or `pos-ledger` that is
-  there and does not read is not read over and not made new: the POS side
-  is off, a note says which file, and the relay runs on.
-
-### The way to a vendor (BX-44 to BX-49)
-
-These details too leave every rule of section 4 as it is.
-
-- **The file `pos-config`.** The Box's own file, written whole (BX-50) and
-  read strictly, with the magic `OBMq` and version 1. It holds the vendor
-  (1 Square, 2 Clover), the currency, the vendor's location (Square's
-  location id, or Clover's merchant id, which is 1 to 32 letters and
-  digits), 1 to 8 exact names of the Bitcoin tenders (PS-10) and three
-  optional texts: the path of curl, the Tor proxy as `host:port` and the
-  vendor's host (`https://` and a name; the vendor's own when it is left
-  out, which for Clover is the North American one). It holds no token. A
-  file that is there and does not read back, or whose values are not valid,
-  leaves the POS side off with a note; it is not read over and not replaced.
-- **`pos-setup`.** The console command takes the next line of standard
-  input as `key=value` words separated by `|`: `vendor`, `location`,
-  `currency` and `tenders` (separated by `;`) are needed, `curl`, `socks`
-  and `host` may be given. It stores the file and says the setup is used
-  from the next start of the Box. A word that is not a key the Box knows, a
-  key twice, a key left out or a value that is not valid is refused with
-  words and nothing is stored.
-- **One location.** The Box serves the one location the setup names. The
-  counters at it are the counters on the device list in force, whatever the
-  list is when the settings change, so a counter added or taken off is heard
-  or not at the next step. A list the POS settings do not allow (PS-14: at
-  most 16 counters to a location) is not taken, with one note, and the old
-  list stays.
-- **What curl is run with.** For a Square read: `curl -q --config - --silent
-  --show-error --proto =https --tlsv1.2 --max-time 30 --connect-timeout 15
-  --max-filesize 8388608 --request POST --write-out %{http_code}` and the
-  URL, with `--socks5-hostname <proxy>` when Tor is on. The config has the
-  headers (`Authorization: Bearer <token>`, `Accept`, and for a POST
-  `Content-Type`) and, for a POST, the body as `data-binary`. A body that
-  starts with `@` is refused, because curl would read it as a file. The
-  environment is empty but for `SSL_CERT_FILE` and `SSL_CERT_DIR`, when
-  they are set. `Square-Version` is not sent: the reply is in the version
-  set for the application at the vendor.
-- **What a failure comes to.** Each refusal of BX-44 to BX-49 becomes the
-  POS side's `PosError` for the sync (401 and 403 a refused sign-in, 429 a
-  request to wait, a time out or an unreachable server "not reached", the
-  rest an answer that did not read) and a note of the form `the POS was not
-  reached (<kind>): <rule>: <detail>`, whose words the `notes` and `pos`
-  commands show. The reading after a 429 is not made before the later of
-  the minute and the time the vendor asked for, which is a minute when the
-  vendor did not say (curl is not asked for the header).
-- **Square payments.** After the search of a page that has orders, the Box
-  asks for the payments of the same orders (ListPayments, a GET, PS-95)
-  through the same runner, the same token, the same caps and the same proxy,
-  one request for each page of payments, at most 64 pages of 100. It stops
-  at a page with no cursor or one that repeats the cursor it was asked from.
-  More pages than that fail the poll with a note saying so: a page is never
-  left unread in silence, since a Bitcoin tender's payment could be on it.
-  The
-  replies are handed to the reader with the orders, so a tender of type
-  `OTHER` is known by its payment's source too and a payment cancelled after
-  the order closed is seen (PS-96, **[verify, E5]**). A page with no order
-  asks for none, and a Clover poll asks for none: Clover's payments come with
-  its orders. A payments request that is refused fails the poll like any
-  other (BX-46 to BX-48).
+  owner go to BX-21; a message of any other kind is noted as not handled
+  yet and dropped.
 
 ## 5b. The status page
 
@@ -612,8 +313,8 @@ adds no way to do anything else.
   as `Host`, compared without regard to case. An `Origin` that is `null`,
   has a path or user information, or is not `http` or `https`, does not
   match; with neither header the request is refused.
-- **BX-59.** No page holds a key, an invitation (whole or in part), a POS
-  token, an address of a device, or the Box's own key. The shop is shown by
+- **BX-59.** No page holds a key, an invitation (whole or in part), an
+  address of a device, or the Box's own key. The shop is shown by
   four words derived from its owner root, and the last note by its heading
   and its two sentences only, never its detail. All text is escaped.
 - **BX-60.** The page runs on its own listener and its own threads. A thread
@@ -646,172 +347,6 @@ has just entered. The invitation file keeps working beside the page. The
 page is plain HTTP: whoever can read the network between the browser and the
 Box can read the invitation as it is typed, which the Umbrel and StartOS
 hosts answer with their own login and TLS in front of it.
-
-## 5c. The till listener
-
-A till that sits in front of the shop's counters (an Odoo point of sale, for
-one) can ask the Box for a bitcoin sale. The cashier presses Bitcoin in the
-till, the till asks the Box, the Box asks one counter, the cashier taps Start
-on the counter, the customer pays, and the till closes its own sale. The
-listener is how the till talks to the Box. It is off unless it is asked for,
-and it adds no way to move money: the counter still makes the quote, shows the
-code and checks the payment.
-
-- **BX-70.** The listener is plain HTTP/1.1 written with the standard library
-  alone, on its own listener and its own threads, separate from the status
-  page, and it answers JSON only. A request is at most 4 KiB, head and body
-  together. Every line of the head ends in CR LF and holds printable ASCII
-  only, with no folded line, no `Transfer-Encoding` and no `Content-Encoding`.
-  One request is served for each connection (`Connection: close`). A request
-  not whole 5 seconds after the connection was made is answered 400 and
-  closed, the answer must be written within 5 seconds, and no more than 16
-  connections are served at once; one more is closed at once. The listener is
-  off unless the Box is started with `--till-listen <addr:port>` (IPv4 or
-  IPv6, as BX-53); the Box prints `till listener: <addr>` when it is serving,
-  and an address that is not an address and a port, or that cannot be bound,
-  stops the Box at the start, saying so.
-- **BX-71.** The till key is 32 bytes from the system's randomness.
-  `openbmt-box till-key <data dir>` (or `till-key` on the console of a Box
-  that runs) makes one, prints it once as 64 lowercase hex with the words
-  `tillKeyMade`, and stores in `till-key` in the data directory, written whole
-  with mode 0600 (BX-50), the request key and the reply key made from it
-  (BX-80), never the key itself. The two are as good as the key for signing
-  requests and answers, so the file is left out of the Box's backups where the
-  host system allows it (BX-63), and a Box whose data directory may have been
-  copied needs a new key. A new key replaces the old one, which stops working
-  at the next request. Every request is signed as BX-80 says. The Box checks
-  each request's mac under the request key in a copy of the file it holds in
-  memory, comparing in constant time. The copy is replaced when the Box makes
-  a key, and read again when another process has replaced the file, so a new
-  key works at the next request. A request with a wrong mac never waits for
-  the Box's state: only an accepted request takes it. No key file, or a wrong
-  mac, is a 401 with the words `tillKeyWrong`. The Box never prints or logs
-  the key or the keys made from it.
-- **BX-72.** `POST /till/v1/sales` takes `Content-Type: application/json`
-  and an object of strings: `counter`, `amount`, `currency`, `request` and
-  `reference` (the last may be left out). `counter` is the first 4 bytes of a
-  counter's device key as 8 lowercase hex (the owner app's "Counter 1a2b3c4d")
-  and must match exactly one counter of the settings in force, else 404
-  `tillUnknownCounter`. `currency` must be the shop's currency of the settings
-  in force, else 409 `tillWrongMoney`. `amount` is a decimal string above zero
-  with at most as many decimals as the shop's currency has minor units (none
-  for yen, won and satoshis), else 400 `tillBadAmount`. `reference` is cut to
-  40 characters, with anything outside printable ASCII dropped. `request` is 1
-  to 64 of `[A-Za-z0-9_-]`; the same `request` again answers the same sale and
-  sends nothing new. An object that does not read is a 400 `tillBadRequest`
-  with no words. The answer is 200 `{"sale":"<32
-  hex>","state":"waiting","amount","currency","request","reference"}`, the
-  last four as the Box took them: the amount written with exactly as many
-  decimals as the currency has minor units, and the reference after it was cut
-  (empty when there is none). A Box that has not joined the shop answers 503
-  `tillNotPaired` to every request that carries the key.
-- **BX-73.** `GET /till/v1/sales/<sale>` answers 200
-  `{"sale","state","amount","currency","request","reference"}`, the last four
-  as BX-72 gives them, where state is one of `waiting`, `opened`, `paid`,
-  `unpaid`, `expired` and `cancelled`, and for the last four also `words`, an
-  object of `heading`, `what` and `next`: for `paid` the plain line "Paid in
-  bitcoin." in `what` with the other two empty, and for the rest the words
-  `tillUnpaid`, `tillExpired` and `tillCancelled`. A sale the Box does not
-  know, or an id that is not 32 lowercase hex, is a 404 `tillLost`.
-- **BX-74.** `POST /till/v1/sales/<sale>/cancel` makes the sale `cancelled`
-  unless it is `paid`, which stays `paid`, and sends the counter a cancel. The
-  answer is the sale as BX-73 gives it. An unknown sale is a 404 `tillLost`.
-- **BX-75.** Every body the listener writes is JSON in UTF-8 with
-  `Content-Type: application/json`. A refusal is its status with `{"error":
-  "<key>","words":{...}}` and the words of the key. Any other path, and any
-  other method on a path of the three, is a 404 with `{"error":
-  "tillNotFound"}` and no words; a request that does not read is a 400 and one
-  over its limit a 413, each with an error key and no words. The paths are
-  matched exactly, with no query, before the till key is looked at, so a path
-  that does not exist says nothing about the key.
-- **BX-76.** The Box asks the counter with a sealed message of kind POS notice
-  to that counter only (LK-08), whose content is a sale request (`sale` 16
-  bytes the Box makes, the amount in minor units, the currency, the reference
-  and the time the request lapses) or a sale cancel (`sale`), with the magic
-  `OBM+`. A request lapses 5 minutes after it was made; a sale nobody started
-  by then is `expired`. At most 32 sales wait for a counter at once; one more
-  is a 429 `tillBusy`. Sales and the messages not yet sent are in memory only,
-  so a restart forgets them, and a sale it does not know is `tillLost`. A sale
-  that has ended is kept one hour and then dropped. A message the relay did not
-  take is sent again at the next step and then left off the list when the sale
-  can no longer use it.
-- **BX-77.** A paid notice may name the till sale it answers: `PaidNotice` and
-  `NoticeDraft` carry `till_sale`, 16 bytes or none, signed with the rest. A
-  notice with none is as it always was: version 1, 141 bytes, the same
-  signature. A notice with one is version 2 and 157 bytes, the 16 bytes
-  between the state time and the signature. Both read strictly.
-- **BX-78.** The Box moves a till sale to `opened` on a counter-signed
-  "opened" notice, and to `paid` only on a counter-signed "paid" or "final"
-  notice, each naming that sale, from the counter that was asked, with the
-  same amount and currency, with a good signature and a number above the last
-  from that counter. Any mismatch is ignored with a note, and its number is
-  not used up. "Unpaid again" before `paid` moves the sale to `unpaid`. After
-  `paid`, a later "unpaid again" does not change what the till was told; it
-  goes to the owner through the POS notices of BX-42, as it does for any sale.
-- **BX-79.** A till sale never closes a POS order by itself, and BX-43 is
-  unchanged: the Box closes an order only as BX-43 says. The till closes its
-  own order when it reads `paid`.
-- **BX-80. The Box's answers are signed.** The listener is plain HTTP (BX-70),
-  so whoever is on the path between the till's server and the Box sees what is
-  sent. The key the till holds is therefore never sent. The till keeps two
-  keys made from it, the request key, the tagged hash
-  `OpenBMT/till-request/v1` of the key, and the reply key, the tagged hash
-  `OpenBMT/till-reply/v1`; the Box keeps both. Every request carries
-  `X-OBM-Nonce`, 32 lowercase hex the till makes fresh for that request,
-  `X-OBM-Time`, the till's Unix time in seconds, and `X-OBM-Request`, 64
-  lowercase hex: the HMAC-SHA256 under the request key of these, joined by
-  line feeds: `OBM-TILL-REQUEST-1`, the method, the path, the nonce, the time
-  as sent, and the SHA-256 of the body as 64 lowercase hex. A request without
-  them is a 400 `tillBadRequest`. The Box refuses a wrong mac (401
-  `tillKeyWrong`), a time more than five minutes from its own (401
-  `tillClock`), and a nonce it has taken in the last ten minutes (401
-  `tillReplay`), so a request seen on the path can be neither sent again nor
-  changed. Every answer, refusals included, carries `X-OBM-Reply`, 64
-  lowercase hex: the HMAC-SHA256 under the reply key of these, joined by line
-  feeds: `OBM-TILL-REPLY-2`, the request's method, its path, its nonce, the
-  SHA-256 of the request's body as 64 lowercase hex (of no bytes for a request
-  without a body), the answer's status as three digits, and the answer's body.
-  The till takes an answer only when it carries the mac of the request it
-  sent, body included, so an answer changed or made up on the path, an old one
-  sent again, or a true answer to a request that was changed on its way, is
-  refused: seeing a request does not let anyone sign. The till also checks
-  that the amount, currency, request and reference of every answer that names
-  a sale are the ones it asked for, and cancels the sale (BX-74) and fails the
-  payment if they are not. A `till-key` file of an earlier form, which holds
-  no request key, is answered 401 `tillKeyOld` until a new key is made.
-
-What the code fixes. `till-key` takes no lock on the data directory (BX-02):
-it writes only that one file, by renaming a whole file over the old, and the
-Box reads the file at each request, so a key made while the Box runs works at
-once. The file holds a version byte, the request key and the reply key, each
-made as BIP340 tagged hashes are. A file in an earlier form, which holds only
-a hash of the key or a hash of a bearer token, gets `tillKeyOld` until a new
-key is made. The Box keeps the nonces of the last ten minutes and one second
-in memory only, at most 8,192 of them; when they are full a request is refused
-429 `tillFlood` until older ones have expired. A request's time may be up to
-five minutes either side of the Box's, so the same request can be taken at
-most ten minutes apart; its nonce is kept one second longer, so it is refused
-for its time before its nonce is forgotten. A restart forgets the nonces, so
-the Box also writes to `till-seen` the latest time of a request it took,
-before it answers; after a start it refuses as `tillClock` a request whose
-time is not later than the one in `till-seen`, so a request recorded before a
-restart cannot be sent again after it, whatever either clock said. A Box whose
-clock went back a long way refuses the till until the clocks agree again. A
-`till-seen` that does not read refuses every till request, with a note in the
-Box's notes. Making a new till key clears `till-seen`, after the new key is
-written, because no request signed with the old key is taken again, so a new
-key is also how a till refused for a `till-seen` that does not read works
-again. The shop's currency is named by its three letters, `SAT` for Bitcoin
-Standard (CR-196). A sale counts as waiting from BX-72 until the counter's
-"opened" notice; at most 32 do, and at most 4,096 sales of any state are kept,
-so that a till that makes and cancels sales cannot grow the table without
-limit. An opened sale that nothing comes of for an hour counts as `unpaid`. A
-"paid" or "final" notice moves a sale that is `unpaid`, `expired` or
-`cancelled` to `paid` while the Box still keeps it, because the counter's word
-that it was paid is what the till needs most; a till that cancelled a sale and
-then reads `paid` has been paid. The numbers of the counters' notices are
-checked for the till against the last till notice taken from the counter, in
-memory, because the till works on a Box that reads no POS.
 
 ## 5d. Shop Lightning's store
 
@@ -847,21 +382,6 @@ memory, because the till works on a Box that reads no POS.
 ## 6. What these rules do not do
 
 - **They do not make the Box trusted.** A Box that lies can hold messages
-  back (LK-26), report orders wrongly, and with a closing connector mark an
-  order paid that was not. The owner's own matching is what catches the
-  last two.
-- **They do not hide the shop's orders and revenue from whoever runs the
-  Box.** For a hosted Box that is the host, and the setup says so.
-- **They do not protect the POS token from someone with the Box's disk.**
-- **They do not stop whoever runs the Box from guessing at payments.**
-  The Box knows each sale's amount in the shop's money and its time, as
-  the POS vendor does. With a public price that gives a rough amount in
-  bitcoin and a time window to search the chain with. Only running the
-  Box yourself keeps that inside the shop.
-- **They do not stop whoever has the till key from asking a counter to
-  start a sale.** The cashier still taps Start on the counter, the counter
-  makes the quote and checks the payment, and nobody can move money with the
-  key. The key is kept as a hash, so a copy of the Box's disk does not give
-  it away, but a till that is taken over holds it.
+  back (LK-26).
 - **They do not cover push wake-ups, a full node on the Box, updates or
   packaging.** Those are separate work (`docs/DESIGN.md` §5.3, R4).

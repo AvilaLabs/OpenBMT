@@ -23,6 +23,5 @@ openbmt-net-io = { path = "../openbmt-net-io" }
 openbmt-owner = { path = "../openbmt-owner" }
 openbmt-owner-ffi = { path = "../openbmt-owner-ffi", default-features = false }
 openbmt-owner-node = { path = "../openbmt-owner-node", default-features = false }
-openbmt-pos = { path = "../openbmt-pos" }
 openbmt-watch = { path = "../openbmt-watch" }
 bitcoin = { version = "=0.32.8", default-features = false, features = ["std"] }

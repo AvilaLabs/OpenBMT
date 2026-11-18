@@ -37,7 +37,6 @@ fn request(w: &mut World, cents: u64, days: RequestDays) -> Opened {
         cents,
         SaleExtras {
             note: None,
-            reference: None,
             request: Some(days),
         },
     )
@@ -50,7 +49,6 @@ fn noted(w: &mut World, cents: u64, note: &str) -> Opened {
         cents,
         SaleExtras {
             note: Some(note),
-            reference: None,
             request: None,
         },
     )
@@ -192,7 +190,6 @@ fn cr_206_a_note_is_plain_text_of_one_to_sixty_four_characters() {
             500,
             SaleExtras {
                 note: Some(bad),
-                reference: None,
                 request: None,
             },
         )
@@ -456,7 +453,6 @@ fn a_request() -> Sale {
         500,
         SaleExtras {
             note: Some("Tour 12 May"),
-            reference: None,
             request: Some(RequestDays::Three),
         },
     )

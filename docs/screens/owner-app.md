@@ -125,17 +125,6 @@ the library (`docs/screens/owner.md`, `docs/screens/owner-node.md`,
 | editValueNotReadMinutes | Value not accepted | The value for Heartbeat age for instant is not a whole number of minutes, so nothing was saved. | Type whole minutes, like 10. | the owner |  |
 | editValueNotReadSats | Value not accepted | The value for Smallest bitcoin sale is not a whole number of satoshis, so nothing was saved. | Type whole satoshis, like 1000, or 0 for none. | the owner |  |
 | editValueNotReadSwitch | Value not accepted | The value for Tor on the counters was not chosen, so nothing was saved. | Choose one of the two answers. | the owner |  |
-| posNotConnected | No till connected | This phone is not reading any till, so no order is matched against the counters' sales. | Choose the till's vendor, type its location, and paste a read-only sign-in, then connect. | the owner |  |
-| posNeedsLink | Till needs the link | Matching a till needs the link to the counters, and this phone was set up without a relay. | Nothing to do here. A setup text with a relay adds the link. | the owner |  |
-| posTokenNotAccepted | Sign-in not accepted | A read-only sign-in is 1 to 512 letters, digits and signs, with no space in it. | Paste it again from the till's system, or make a new one there. | the owner |  |
-| posConnected | Till connected | The till is connected, and its sign-in is sealed on this phone and is not shown again. | Nothing to do. Keep the app open: the till is read about once a minute. | nobody |  |
-| posRemoved | Till taken off | The till's settings, its sign-in and the matches kept for it are removed from this phone. | Nothing to do. Connect a till again when you want its orders matched. | nobody |  |
-| posAcknowledged | Alert acknowledged | The alert is acknowledged on this phone only: the Box and the counters do not learn of it. | Nothing to do. | nobody |  |
-| posTokenMissing | Sign-in missing | A till is connected, but this phone holds no sign-in for it, so nothing is read. | Replace the sign-in with a new read-only one from the till's system. | the owner |  |
-| posAddressRefused | Till address refused | The library asked for an address that is not the till's system, so nothing was sent. | Close the app and open it again. If it happens again, do not rely on the matching. | the owner |  |
-| posPageTooLong | Till answer too long | The till's system sent an answer longer than 8 megabytes, so it was not read. | Nothing to do now. The next read is in about a minute. | the owner |  |
-| posReadCutOff | Till read cut off | One read asked for more pages than a read may take, so it was ended. | Nothing to do now. The next read is in about a minute. | the owner |  |
-| posNotReached | Till not reached | The till's system did not answer through Tor, so nothing was read. | Check that the phone is online and Tor is connected. The next read is in about a minute. | the owner |  |
 | starting | Starting | The owner node is starting and looking for the network. | Wait a moment. Keep the app open. | nobody |  |
 | stopped | Owner node stopped | The owner node has stopped, so the wallet is no longer followed. | Close the app and open it again. | the owner |  |
 | libraryMissing | The app is incomplete | The part of this app that runs the owner node did not load, so nothing was done. | Do not use this copy. Install the app again from the place you got it. | the owner |  |
@@ -228,8 +217,8 @@ What Android shows for the background watch, which is not a screen of the app:
 - Notification when Tor is not connected:
   Not watching: Tor is not connected. Instant sales are off.
 
-The first run: the welcome, the practice shop, the shop, the till and its
-steps, in `FirstRunWords`. `{till}` is the till's name as listed:
+The first run: the welcome, the practice shop and the shop, in
+`FirstRunWords`:
 
 | Key | Text |
 |---|---|
@@ -241,7 +230,7 @@ steps, in `FirstRunWords`. `{till}` is the till's name as listed:
 | welcomeLine | Your keys. Your bitcoin. Your shop. |
 | welcomeNew | OpenBMT is new, and no independent security audit has been done yet. Start with small amounts. |
 | beforeTitle | Before you start |
-| beforeText | About 10 minutes. You'll need this phone, a pen, and the phone or tablet for your till, if you use one. |
+| beforeText | About 10 minutes. You'll need this phone and a pen. |
 | beforeResume | You can stop at any step and carry on later. |
 | beforeGo | Start |
 | practiceBanner | PRACTICE. No real money. |
@@ -277,59 +266,6 @@ steps, in `FirstRunWords`. `{till}` is the till's name as listed:
 | moneyBitcoinNote | Prices are set in sats, and the books count in sats. No exchange rate is used. |
 | moneyTabsSpoken | Your money: {tab} chosen. Double tap the other tab to switch. |
 | shopNext | Next |
-| tillTitle | How do you take payments now? |
-| tillText | Bitcoin is added to your till as one more way to pay. Nothing else about your till changes. |
-| tillReads | OpenBMT only reads your till's orders, to match each bitcoin payment to its sale. It never changes them, and your till never sees a bitcoin address. |
-| tillSearch | Search tills |
-| tillNone | No till. I write sales down or use a cash box. |
-| tillOther | Another till |
-| tillNext | Next |
-| tillStepsTitle | Add Bitcoin to {till} |
-| tillStepsIntro | Do this once, on the computer or tablet where you manage {till}. It takes about two minutes. |
-| tillStepsCashier | At the till, the cashier rings up the sale in {till} as usual, takes the bitcoin on the counter, then picks Bitcoin as the payment in {till}. |
-| tillStepsNoFee | {till} does not move the money, so it charges no fee for this payment type. |
-| tillStepsChecked | Steps read on {till}'s own help pages on 11 November 2026. Menus change; if yours looks different, look for "payment types". |
-| tillStepsDone | Done |
-| tillSquare | Square |
-| tillSquareStep1 | In Square Dashboard, open Settings, then Payments, then Payment methods. |
-| tillSquareStep2 | Open Custom payment methods and tap Add payment method. |
-| tillSquareStep3 | Name it OpenBMT, not Bitcoin: Square's own Bitcoin method pays into Square's wallet. |
-| tillSquareStep4 | Turn on Activate on Point of Sale, then tap Add. |
-| tillSquareStep5 | To keep all bitcoin in the shop's wallet, turn off Square's own: in the Square app, Settings, Checkout, Payment, then the X by Bitcoin. |
-| tillSquareCashier | Cashier: Charge, then More, then Custom payment methods, then OpenBMT. |
-| tillSquareReports | Reports: bitcoin sales are under Other in the sales summary. |
-| tillToast | Toast |
-| tillToastStep1 | In Toast Web, open the payment settings and find Other payment options. |
-| tillToastStep2 | Tap Add and name it Bitcoin. |
-| tillToastStep3 | Set Show on POS to Yes, then Save and publish. |
-| tillToastCashier | Cashier: Pay, then Other payments, then Bitcoin. |
-| tillShopify | Shopify POS |
-| tillShopifyStep1 | In the Shopify POS app, open Settings, then Payment settings. |
-| tillShopifyStep2 | Open Custom payment types and tap Add custom payment type. |
-| tillShopifyStep3 | Name it Bitcoin, save, and turn it on. |
-| tillShopifyNote | It is on for every POS device unless you turn it off on one. |
-| tillLoyverse | Loyverse |
-| tillLoyverseStep1 | In Loyverse Back Office, open Settings, then Payment types. |
-| tillLoyverseStep2 | Tap Add payment type, pick Other, and name it Bitcoin. |
-| tillLoyverseStep3 | Choose the stores that take it, then Save. |
-| tillLoyverseReports | Reports: Sales by payment type shows bitcoin on its own line. |
-| tillOdoo | Odoo |
-| tillOdooStep1 | In Odoo, open Point of Sale, then Configuration, then Payment Methods. |
-| tillOdooStep2 | Tap New and name it Bitcoin. |
-| tillOdooStep3 | Pick a journal of its own for it, leave Integration as None, and choose the points of sale that take it. Save. |
-| tillHike | Hike |
-| tillHikeStep1 | In Hike, open Setup, then Payment Types. |
-| tillHikeStep2 | Tap Add Payment Type, name it Bitcoin, choose Custom, and save. |
-| tillHikeStep3 | Under Register Availability, choose the registers that take it. |
-| tillStoreHub | StoreHub |
-| tillStoreHubStep1 | In StoreHub BackOffice, open Settings, then Payment Options. |
-| tillStoreHubStep2 | Tap Add Payment Option, name it Bitcoin, and choose Custom. |
-| tillStoreHubStep3 | Choose the stores and registers, then Save. |
-| tillStoreHubStep4 | On each register, open the menu and tap Sync, twice. |
-| tillStoreHubCashier | Cashier: if Bitcoin is not shown at charge, tap Others. |
-| tillNoneText | The counter keeps every sale with its time, amount and who took it. Your books come from there. |
-| tillOtherText | Most tills let you add your own payment type. In your till's settings, look for "payment types" or "payment methods", add one called Bitcoin, and turn it on for your registers. |
-| tillOtherAsk | If your till has no such setting, the counter still keeps every sale for your books. |
 | moneyTitle | Your wallet |
 | moneyText | Bitcoin from your sales goes straight to a wallet you hold. Choose how to start. |
 | moneyPlan | Sell today, then move to a hardware wallet |
@@ -442,15 +378,8 @@ steps, in `FirstRunWords`. `{till}` is the till's name as listed:
 | cardPrint | Print |
 | cardTitle | Taking bitcoin |
 | cardTitleShop | Taking bitcoin at {shop} |
-| cardRingUp | Ring up the sale in {till} as usual. |
-| cardRingUpOther | Ring up the sale in your till as usual. |
 | cardCounter | Type the amount on the counter and show the customer the code. |
 | cardPaid | Hand over the goods when the counter shows Paid. A bigger payment can take about ten minutes. |
-| cardTillSquare | Then, in Square: Charge, then More, then Custom payment methods, then OpenBMT. |
-| cardTillToast | Then, in Toast: Pay, then Other payments, then Bitcoin. |
-| cardTillStoreHub | Then pick Bitcoin as the payment in StoreHub. If it is not shown, tap Others. |
-| cardTillPick | Then pick Bitcoin as the payment in {till}. |
-| cardTillPickOther | Then pick Bitcoin as the payment in your till. |
 | cardDoubt | Anything other than Paid: keep the goods and ask the owner. |
 | cardPrintFailed | The card could not be printed. Try again, or choose Save as PDF on the print screen. |
 | howThisWorks | How this works |
@@ -555,6 +484,7 @@ addresses:
 | pairedHeading | {name} is paired |
 | pairedText | It makes its addresses from your wallet and sells within the shop's settings. |
 | pairedNext | Nothing to do. |
+| pairedDone | Done |
 | gapTitle | How far your wallet looks ahead |
 | gapUsual | Your wallet's usual setting shows every payment. |
 | gapMore | Set your wallet to look at least {n} addresses ahead, or it will not show every payment. |
@@ -892,55 +822,6 @@ link) are shown as they arrive:
 | RQ_28_CHECK_TITLE | Check it with the customer |
 | RQ_28_CHECK_TEXT | Compare these groups with the customer by another way than the message the address came in, such as a call or in person. |
 | RQ_28_CHECK_NEXT | Someone who can change your messages can change an address in them. The return waits in the queue until you pay the returns. |
-
-The web store (`docs/WEB-ORDER-RULES.md`, WO-01 to WO-32), in
-`WebOrderWords`. What the library says of a refusal or a failed visit
-is in `crates/openbmt-owner/src/web_order/say.rs`:
-
-| Key | Text |
-|---|---|
-| rowTitle | Web store |
-| rowSub | Bitcoin at checkout in your own online store |
-| pageTitle | Your web store |
-| back | Back |
-| whatItIs | Customers of your WooCommerce store can pay in bitcoin at checkout. Each order gets a new address of the shop's wallet, and this phone tells the store when the order is paid. |
-| noStore | No store is paired with this phone yet. |
-| start | Pair a store |
-| pairTitle | Pair your store |
-| addressLabel | The store's web address |
-| addressHint | https://shop.example.com |
-| nameLabel | Shop name shown at checkout |
-| fieldsMissing | Type the store's address and the shop's name first. |
-| makeCode | Make the pairing code |
-| codeTitle | Pairing code |
-| codePaste | On a computer, open the store's admin pages, then the OpenBMT payment settings in WooCommerce, and paste this code there. |
-| codeCopy | Copy the code |
-| codeCopied | Copied. Paste it in the store's settings. |
-| fingerprintLabel | Key check |
-| compare | Once the code is in, the store shows a key check. It must be the same as the one here. |
-| match | They are the same |
-| differ | They differ |
-| waiting | A pairing was started and not finished. |
-| continuePairing | Finish the pairing |
-| shopLabel | Shop name |
-| storeLabel | Store address |
-| lastVisitLabel | Last visit |
-| neverVisited | Not visited yet |
-| nextVisitLabel | Next try |
-| visitNow | Visit the store now |
-| sentLabel | Addresses given to the store |
-| leftLabel | Addresses not used yet |
-| ordersLabel | Orders taken |
-| waitingLabel | Orders waiting for payment |
-| toldLabel | Orders the store was told are paid |
-| noticesLabel | Paid notices still to send |
-| refusedTitle | Orders this phone refused. Do not ship them before you have checked them in the store. |
-| refusedOrderLabel | Refused order |
-| unpair | Unpair the store |
-| unpairTitle | Unpairing the store |
-| unpairWhat | This phone stops taking the store's orders. Unpair it in the store's settings too, so that it stops offering bitcoin at checkout. |
-| unpairConfirm | Unpair |
-| unpairKeep | Addresses already given to the store stay watched, so a late payment is still seen. |
 
 Shop Lightning (`docs/SHOP-LIGHTNING-RULES.md`, SL-04 to SL-78), in
 `ShopLightningWords`. What the library says of a refusal is the

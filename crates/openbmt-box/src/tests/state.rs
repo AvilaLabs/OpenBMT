@@ -8,7 +8,7 @@ use super::kit::*;
 use crate::files::{BoxFiles, DirFiles, MemFiles};
 use crate::state::{
     BoxCore, BoxError, BoxStatus, INVITATION_FILE, INVITE_SECS, KEY_FILE, MAX_MEMBERS,
-    PAIRED_WITH_FILE, POS_TOKEN_FILE, ROOTS_FILE, SETTINGS_FILE,
+    PAIRED_WITH_FILE, ROOTS_FILE, SETTINGS_FILE,
 };
 
 fn is_damaged(e: &BoxError, file: &str) -> bool {
@@ -807,20 +807,17 @@ fn bx_22_settings_that_come_to_more_members_than_the_relay_holds_are_refused() {
 }
 
 #[test]
-fn bx_23_settings_that_drop_the_box_turn_it_off_and_erase_its_pos_token() {
+fn bx_23_settings_that_drop_the_box_turn_it_off() {
     let (mut core, _) = paired_core();
-    core.files_mut().write(POS_TOKEN_FILE, b"token").unwrap();
     let mut v2 = settings_with(2, &core.device_id());
     v2.devices.remove(&core.device_id());
     v2.boxes.clear();
     let taken = core.take_settings(&sign_owner(v2).to_bytes()).unwrap();
     assert!(taken.turned_off);
-    assert_eq!(taken.token_error, None);
     assert!(core.turned_off());
     assert_eq!(core.status(NOW), BoxStatus::TurnedOff);
     assert!(core.members().is_empty());
     assert!(core.roles().is_empty());
-    assert!(core.files().read(POS_TOKEN_FILE).unwrap().is_none());
     // It stays pinned (BX-16) and off after a restart.
     let mut again = reopen(core).unwrap();
     assert_eq!(again.status(NOW), BoxStatus::TurnedOff);
@@ -831,19 +828,6 @@ fn bx_23_settings_that_drop_the_box_turn_it_off_and_erase_its_pos_token() {
         again.enter_invitation(&inv.to_text(), NOW, [1; 32]),
         Err(BoxError::AlreadyPaired)
     );
-}
-
-#[test]
-fn bx_23_a_token_that_cannot_be_erased_is_reported() {
-    let (mut core, _) = paired_core();
-    core.files_mut().write(POS_TOKEN_FILE, b"token").unwrap();
-    core.files_mut().set_fail_removes(true);
-    let mut v2 = settings_with(2, &core.device_id());
-    v2.devices.remove(&core.device_id());
-    v2.boxes.clear();
-    let taken = core.take_settings(&sign_owner(v2).to_bytes()).unwrap();
-    assert!(taken.turned_off);
-    assert!(taken.token_error.is_some());
 }
 
 #[test]
@@ -1404,7 +1388,7 @@ fn bx_63_the_settings_the_box_holds_are_taken_quietly_and_nothing_is_stored() {
     let held = sign_both(settings_with(1, &me)).to_bytes();
     let before = core.files().read(SETTINGS_FILE).unwrap();
     let taken = core.take_settings(&held).unwrap();
-    assert!(taken.unchanged && !taken.turned_off && taken.token_error.is_none());
+    assert!(taken.unchanged && !taken.turned_off);
     assert_eq!(core.settings().unwrap().version, 1);
     assert_eq!(core.files().read(SETTINGS_FILE).unwrap(), before);
     // Newer settings are taken as before, and are not "unchanged".

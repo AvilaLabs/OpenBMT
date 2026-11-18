@@ -9,7 +9,6 @@ mod kit;
 mod link;
 mod node;
 mod node_only;
-mod notices;
 mod own_node;
 mod ownnode;
 mod paired;

@@ -1,26 +1,114 @@
 //! A counter's Paid, checked against the owner's own view of the wallet
 //! (`docs/OWNER-COINS-RULES.md`, OC-60 to OC-65).
 
-use openbmt_core::records::RecordKind;
-use openbmt_core::wire::DecodeError;
-use openbmt_counter::{Amount, Event, Role};
-use openbmt_owner::{SaleFacts, SaleKey};
-use openbmt_pos::FactsError;
+use std::fs;
 
-use super::pos::{at_once, link_with, opened};
+use openbmt_core::policy::{CheckMode, InstantLabel};
+use openbmt_core::records::{Chain, ChainError, DeviceList, RecordKind};
+use openbmt_core::wire::DecodeError;
+use openbmt_counter::{Amount, Currency, Event, RateSource, Role};
+use openbmt_courier::{Courier, FirstStart, MemoryPost, MemoryRelay};
+use openbmt_owner::{SaleFacts, SaleKey};
+
 use super::refunds::{new_owner, view_with, DEPTH, TIP};
 use super::*;
 use crate::coins::CoinView;
 use crate::facts::{verified_facts, FactsRefused};
 use crate::paid_check::{
     check_paid, day_summary, default_tolerance_bps, gate_open_alarms, gather, paid_sales,
-    paid_sales_from_chain, CheckResult, Fold, LightningCounters, MarkState, PaidCheckRefused,
-    PaidChecks, PaidHow, PaidMarks, PaidSale, PaidSales, PaidState, PaidTrouble,
+    paid_sales_from_chain, CheckResult, FactsError, Fold, LightningCounters, MarkState,
+    PaidCheckRefused, PaidChecks, PaidHow, PaidMarks, PaidSale, PaidSales, PaidState, PaidTrouble,
     LIGHTNING_COUNTERS_FILE, MAGIC_LIGHTNING_COUNTERS, MAGIC_PAID_CHECK,
     MAX_OPEN_ALARMS_PER_COUNTER, MAX_PAID_MARKS, PAID_CHECK_FILE, PAID_CHECK_WAIT_SECS,
 };
+use crate::{OwnerLink, OwnerLinkConfig};
 
 const PAID_AT: u64 = 1_800_000_000;
+
+fn usd() -> Currency {
+    Currency::new(*b"USD").unwrap()
+}
+
+fn opened(index: u32, at: u64, cents: u64) -> Event {
+    Event::Opened {
+        index,
+        at,
+        amount: Amount(cents),
+        tip: Amount(0),
+        currency: usd(),
+        needs_sats: 1,
+        minor_per_btc: 1,
+        source: RateSource::new("test-fixed", at).unwrap(),
+        by: None,
+    }
+}
+
+fn at_once(index: u32, at: u64) -> Event {
+    Event::PaidAtOnce {
+        index,
+        at,
+        at_risk_sats: 1,
+        label: InstantLabel::LightCheck,
+        mode: CheckMode::Light,
+    }
+}
+
+fn owner_id() -> DeviceId {
+    id(1).device_id()
+}
+
+fn courier_for(dir: &Dir) -> Courier<MemoryPost> {
+    let relay = MemoryRelay::new(id(99), &[owner_id(), counter()]).unwrap();
+    Courier::start_with(
+        relay.post(),
+        id(1),
+        openbmt_link::Role::Owner,
+        [(counter(), openbmt_link::Role::Counter)]
+            .into_iter()
+            .collect(),
+        dir.path(),
+        FirstStart::Yes,
+    )
+    .unwrap()
+}
+
+/// A link whose copy of the counter's chain holds `events`, written to the
+/// copy's file as the link writes it and read back (verified) by the link.
+fn link_with(events: &[Event]) -> (OwnerLink<MemoryPost>, Dir, Dir) {
+    let (root, courier_dir) = (Dir::new(), Dir::new());
+    let mut chain = Chain::new();
+    for e in events {
+        chain.append(&id(3), e.kind(), e.encode()).unwrap();
+    }
+    let counter_dir = root.path().join("counters").join(
+        counter()
+            .to_bytes()
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect::<String>(),
+    );
+    fs::create_dir_all(&counter_dir).unwrap();
+    let mut file = Vec::new();
+    for r in chain.records() {
+        let bytes: Vec<u8> = r.to_bytes();
+        file.extend_from_slice(&(bytes.len() as u32).to_le_bytes());
+        file.extend_from_slice(&bytes);
+    }
+    fs::write(counter_dir.join("records"), file).unwrap();
+    let link = OwnerLink::new(
+        courier_for(&courier_dir),
+        root.path(),
+        DeviceList::new([counter(), owner_id()]),
+        vec![counter()],
+        OwnerLinkConfig {
+            poll_secs: 0,
+            retry_secs: 0,
+            ..OwnerLinkConfig::default()
+        },
+    )
+    .unwrap();
+    (link, root, courier_dir)
+}
 /// The length of a mark in the file.
 const MARK: usize = 61;
 
@@ -867,7 +955,10 @@ fn oc_61_one_counter_with_a_bad_record_alarms_while_another_is_still_checked() {
     let mut other_sale = sale(3, 5_000, PaidHow::AtOnce);
     other_sale.counter = other;
     let found = gather(vec![
-        (bad, Err(FactsError::UnknownSale { index: 9 })),
+        (
+            bad,
+            Err(FactsError::Chain(ChainError::UnknownAuthor { seq: 9 })),
+        ),
         (
             other,
             Ok(Fold {
@@ -886,14 +977,6 @@ fn oc_61_one_counter_with_a_bad_record_alarms_while_another_is_still_checked() {
     assert_eq!(result.checks.len(), 1);
     // (The test view issued no address of the other counter's: at once.)
     assert_eq!(result.raised.len(), 1);
-    // Every kind of unreadable copy is one counter's, not the whole.
-    for e in [
-        FactsError::OpenedTwice { index: 1 },
-        FactsError::TooManySales,
-    ] {
-        let found = gather(vec![(bad, Err(e)), (other, Ok(Fold::default()))]);
-        assert_eq!(found.unreadable, vec![bad]);
-    }
     // A counter that passed over a record is listed, with the sales it read.
     let passed = Fold {
         sales: vec![sale(0, 1, PaidHow::AtOnce)],

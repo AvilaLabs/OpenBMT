@@ -120,11 +120,9 @@ run on a phone. Not for real funds.**
 
 ## 3. Threads, requests and files
 
-- **OA-12.** Four threads touch the node. One thread calls `pump(250)` in
+- **OA-12.** Three threads touch the node. One thread calls `pump(250)` in
   a loop. One thread, started only when the phone has a link, calls
-  `linkStep` and `deliver` every 5 seconds. One thread, started only when
-  the phone has a link, makes the two calls of a read of the till
-  (`posRequest` and `posReply`, OA-18). The screen thread makes every
+  `linkStep` and `deliver` every 5 seconds. The screen thread makes every
   other call. No other thread calls the library, except the start, which
   runs on a worker thread before any of them begins.
 - **OA-13.** A request for the Key app is shown and saved as exactly the
@@ -145,66 +143,9 @@ run on a phone. Not for real funds.**
   key in full. The node keeps no time for a signed object other than an
   address batch, and the app says so instead of showing a time it does not
   have.
-- **OA-15.** The app opens no connection of its own but two. One is the
-  greeting to the proxy of OA-05, the only socket it has. The other is the
-  read of the till (OA-17), made by one class, `HttpsPosFetcher`, through
-  that same proxy. No other file has an HTTP client or a socket; every
-  other byte that leaves the phone is the node's.
-
-## 4. The till
-
-The owner node matches the shop's till against the counters' sales
-(`docs/OWNER-COINS-RULES.md`, OC-30 to OC-37). The node parses and matches;
-the app holds the till's token and does the HTTP, because the node has no
-connection that is not Bitcoin's.
-
-- **OA-16.** The read-only token of the till is pasted once into a hidden
-  field, sealed with AES-256-GCM under its own key of the Android Keystore
-  (not the key of OA-01), and kept in its own file in `noBackupFilesDir`,
-  written by the same atomic steps. The field is emptied and the clipboard
-  is cleared as soon as the token is taken. It is 1 to 512 printable
-  characters with no space, which is the only thing Kotlin checks about it.
-  It is read from the file for one read of the till and by no other code,
-  shown on no screen, and put in no log, no error text and no address. The
-  till's settings are given to the library first, so that a refused till
-  seals nothing; a token that cannot be sealed takes the till off again.
-  Taking the till off removes the library's records of it and the file;
-  the file is kept in order as OA-94 says.
-- **OA-17.** A read of the till sends only what the library asked for: its
-  method, its address and its body, with the token added as an
-  `Authorization` header in Kotlin and nowhere else. The address must be
-  `https://` to `connect.squareup.com` or `api.clover.com`, with a path and
-  no port, login or space; any other is not sent. That holds for each
-  request of a read, the pages of Square's payments (a GET of
-  `/v2/payments`) as much as the pages of orders. The connection goes
-  through the SOCKS proxy of OA-05 with the name left to the proxy, and if
-  the proxy does not answer nothing is sent. It follows no redirect, keeps
-  no cookie or cache, asks for no compression, uses the same generic
-  User-Agent as the counter's fetcher, and times out after 20 seconds to
-  connect, 20 seconds for each read and 60 seconds for a page. Only an
-  answer of 200 has its body read, and a page longer than 8 MiB is
-  refused whole. The status and the bytes go back to the library, which
-  parses them and says what a refusal means; the app judges nothing in a
-  page and queues no payment or refund from it.
-- **OA-18.** The till is read only while the app is on the screen, by one
-  thread that starts with the node and ends before it stops, and only when
-  the phone has a link and a till is connected. A read starts at most once
-  in 60 seconds, whoever asks: the thread works out the wait from the start
-  of the last read, a button only wakes it, and the node refuses a read that
-  starts sooner. The next page of a read that is going on is not held
-  back. A read is at most 65 requests. The rate is not a promise of what a
-  vendor allows: a vendor that asks to be read less often is shown its
-  words and read again no sooner than a minute later.
-- **OA-19.** The till screen shows the library's words and the app's own
-  for the app's own states. It shows the vendor and location, when the
-  till was last read (and that it was not, since the app was opened), the
-  number of sales matched and how many of them by order of time, and every
-  open alert with its words (why, and what to do next) and a button to
-  acknowledge it. Acknowledging is a change of this phone's own ledger: no
-  signed command exists for it, none is sent, and the Box and the counters
-  do not learn of it. The screen says so. A 401 or a 403 is shown with the
-  library's words, which say the token was refused and how to make a new
-  read-only one, and the screen offers to replace the token.
+- **OA-15.** The app opens no connection of its own but the greeting to
+  the proxy of OA-05, the only socket it has. No other file has an HTTP
+  client or a socket; every other byte that leaves the phone is the node's.
 
 ## 5. The approval by camera and screen
 
@@ -531,9 +472,6 @@ the welcome is made by the Key app. OA-36 to OA-39 are kept for other work.
   send to the owner (records, check-ins, refund requests): those are sealed
   to the owner's key, which the watcher does not hold, and they wait for the
   owner app.
-- **They do not say the till reads work.** The shape of Square's and
-  Clover's answers is from their published documentation and fixtures, not
-  from a real account (`docs/POS-RULES.md`).
 - **They do not say the camera and the screen work.** The code drawn for the
   Key app and for a counter, and the scan of the Key app's code and of a
   counter's, are the shared pieces, checked on the desktop; no phone has
@@ -613,8 +551,8 @@ and the 60-second rule are the shared `LockModel.kt` of
   tries, that the money is not lost because two of the three keys still exist,
   and the next step: follow the recovery kit to move to a new wallet
   (`docs/DESIGN.md` §5.4, "Key 1 replacement is a move to a new wallet"), or
-  ask the person who holds key 2. The node's own folder, the config and the
-  till's token are not touched.
+  ask the person who holds key 2. The node's own folder and the config are
+  not touched.
 - **OA-65.** The setup file, the ceremony's file and the tries file are in
   the app's `noBackupFilesDir`, and the manifest and both rule files
   exclude every domain from cloud backup and from device transfer (OA-02),
@@ -703,8 +641,8 @@ signs batches, settings and pairings, are never in the service.
   `openbmt-owner-watch-v1`, which is a key of its own and asks for no PIN.
   The contents hold no wallet, no key 1 and no owner key. They do reveal the
   shop's counters and its relay to someone who can read the app's storage
-  without the PIN and use the phone's Keystore, as the till's token
-  (OA-16) reveals the till; they do not reveal a wallet description. The
+  without the PIN and use the phone's Keystore; they do not reveal a wallet
+  description. The
   contents are read at the start of the library's watcher, which refuses
   anything that is not exactly what the library wrote (magic `OBM#`,
   version 1, at most 16 KiB, at most 64 counters and 16 first peers, every
@@ -828,15 +766,6 @@ signs batches, settings and pairings, are never in the service.
   background when it has a line) that opens as key and value lines. The
   read-only sentence is a footnote and "Change settings" is the footer's
   primary.
-- **OA-94.** Every operation on the till's token file (save, load and
-  remove) runs on one single-thread queue that the controller owns, in the
-  order it was asked, and no other thread touches the file; the screen
-  learns whether the file is there from the queue. Each till screen has a
-  number that goes up whenever the till is taken off or connected, and a
-  callback draws only if the number is still the one it started under;
-  otherwise it does nothing. While a removal is in flight the till page
-  shows no actions and no back arrow, and comes back when the removal is
-  done. A remove followed by a save leaves the new token.
 - **OA-95.** The Currency screen is the first of the editor. It shows the
   currency the settings hold and the sixteen choices as the library names them
   (`US dollar (USD)` and the rest, ending with `Bitcoin Standard (sats)`),
@@ -917,7 +846,7 @@ signs batches, settings and pairings, are never in the service.
   "This app could not connect to the Tor network." and "Check that the phone
   is online, then try again. If it keeps failing, choose Use Orbot.", with a
   button "Try again" that starts again, with a new run if the old one ended.
-  A read of the till that finds no Tor says the same. The background watch
+  The background watch
   does not start while the built-in Tor has no circuit.
 
 ## 16. The price a new shop needs

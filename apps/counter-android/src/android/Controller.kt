@@ -68,7 +68,6 @@ import org.openbmt.counter.SaleInfo
 import org.openbmt.counter.SaleState
 import org.openbmt.counter.StarterState
 import org.openbmt.counter.SwitchState
-import org.openbmt.counter.TillRequest
 import org.openbmt.counter.Shop
 import org.openbmt.counter.ShopSettings
 import org.openbmt.counter.TipChoice
@@ -1077,7 +1076,6 @@ class Controller(private val act: MainActivity) {
         val lines = Slot(act)
         val noteSlot = Slot(act)
         val requestsSlot = Slot(act)
-        val tillSlot = Slot(act)
         val starterSlot = Slot(act)
         val linked = hasLink(n)
         // CR-147: who is at the till, and a way to lock it.
@@ -1105,11 +1103,10 @@ class Controller(private val act: MainActivity) {
         tiles.addView(ui.tile(WordsOfBills.BILLS, Glyph.List, false) { showBills() }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ui.px(104)).also { it.topMargin = ui.px(12) })
         // GV-14: the manager leaves the settings and the lists, and the amount screen is home again.
         val leave = if (Giving.isGiving(place)) listOf(ui.button(GivingWords.LEAVE) { desk.leave(); showHome() }) else emptyList()
-        show(bar, listOf(health, tillSlot, starterSlot, lines, noteSlot, tiles, requestsSlot, counterLine()), leave, Showing.Home)
+        show(bar, listOf(health, starterSlot, lines, noteSlot, tiles, requestsSlot, counterLine()), leave, Showing.Home)
         var healthSig: String? = null
         var linesSig: String? = null
         var requestsSig: String? = null
-        var tillSig: String? = null
         var starterSig: String? = null
         tick = {
             val h = healthWords(n)
@@ -1171,30 +1168,6 @@ class Controller(private val act: MainActivity) {
                 linesSig = ls
                 lines.show(ui.homeLines(items, openLines))
             }
-            // CR-267: the requests from the till, oldest first, each on its own card above the other lines.
-            // GV-13: the Box till's requests are not on the home screen of a place of giving; the till stays in the settings.
-            val tillRequests = if (Giving.homeOffersTillSteps(place)) TillModel.shown(tillWaiting(n)) else emptyList()
-            val ts = TillModel.signature(tillRequests)
-            if (ts != tillSig) {
-                tillSig = ts
-                val m = money
-                if (tillRequests.isEmpty() || m == null) {
-                    tillSlot.show()
-                } else {
-                    val cards = tillRequests.map { r ->
-                        ui.tillCard(TillModel.lines(m, r), start = { startTillSale(n, r) { w -> noteSlot.show(note(w)) } }, notNow = {
-                            try {
-                                n.tillNotNow(nowSecs(), r.sale)
-                            } catch (e: CounterException) {
-                                noteSlot.show(note(e.sayWords()))
-                            }
-                            tillSig = null
-                            tick?.invoke()
-                        }).also { it.layoutParams = ui.margins(bottom = 12) }
-                    }
-                    tillSlot.show(*cards.toTypedArray())
-                }
-            }
             // CR-274: each payment from the starter wallet nobody has seen, on its own card until someone taps "seen".
             val unseen = StarterModel.unseen(starter)
             val ss = StarterModel.signature(unseen)
@@ -1242,33 +1215,6 @@ class Controller(private val act: MainActivity) {
         }
         homeTick = tick
         tick?.invoke()
-    }
-
-    /** CR-267: the requests from the till that wait; none when the library has none to list. */
-    private fun tillWaiting(n: CounterNode): List<TillRequest> =
-        try {
-            n.tillWaiting(nowSecs())
-        } catch (e: CounterException) {
-            emptyList()
-        } catch (e: LinkageError) {
-            emptyList()
-        }
-
-    /**
-     * CR-268: Start. The counter opens the sale for the request's amount at its own price, and the sale's screen is
-     * shown as for a sale typed here. A refusal is shown on Home and the request stays.
-     */
-    private fun startTillSale(n: CounterNode, request: TillRequest, refused: (SayWords) -> Unit) {
-        starterStop()?.let { return refused(it) }
-        val (rate, words) = quote()
-        if (rate == null) return refused(words ?: AppWords.stopped)
-        try {
-            val o = n.tillStart(nowSecs(), request.sale, rate.rate, rate.sourceLabel, rate.sourceFetchedAt, atTheTill())
-            amounts[o.index] = request.amountMinor
-            showSale(o.index, o.payment, null)
-        } catch (e: CounterException) {
-            refused(e.sayWords())
-        }
     }
 
     /** What a words shows, as one text: a screen redraws only when it changes. */
@@ -2031,15 +1977,6 @@ class Controller(private val act: MainActivity) {
                     },
                 )
                 val extra = ArrayList<WordsModel>()
-                // CR-269: a sale the till cancelled goes on; the line says so and the cashier ends it as any sale is ended.
-                val tillCancelled = try {
-                    n.tillOfSale(index).takeIf { it.cancelled }?.words
-                } catch (e: CounterException) {
-                    null
-                } catch (e: LinkageError) {
-                    null
-                }
-                tillCancelled?.let { extra.add(WordsModel.of(it.say())) }
                 s.check?.let { extra.add(WordsModel.of(it.say())) }
                 for (f in s.flags) extra.add(WordsModel.of(f.say()))
                 // CR-113: the line that says Lightning is not available for this sale, or that its code is on the way.
@@ -2053,7 +1990,7 @@ class Controller(private val act: MainActivity) {
                 val wait = SaleModel.wait(s.state, s.watchSecsLeft, s.watchSecsTotal, s.seenSecs, s.checkHealthy)
                 val sig = listOf(
                     s.state, says.heading, says.what, says.next, s.receivedSats, s.needsSats, s.missingSats, s.missingMinor, wait.ringSecs != null, wait.seen != null, wait.pulse, payment?.copyUri, flash?.heading,
-                    flash?.what, extra.joinToString("\u0002") { it.heading + it.what + it.next }, s.lightningFirst, info.reference, info.billNumber,
+                    flash?.what, extra.joinToString("\u0002") { it.heading + it.what + it.next }, s.lightningFirst, info.billNumber,
                 ).joinToString("\u0001")
                 if (sig != lastSig) {
                     lastSig = sig
@@ -2170,7 +2107,7 @@ class Controller(private val act: MainActivity) {
                             row.addView(mark, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).also { it.setMargins(ui.px(10), 0, 0, 0) })
                             centre.addView(row, ui.margins(top = 16))
                         }
-                        // CR-254: the sale's number and the till's reference, large enough to copy into the till's payment note.
+                        // CR-254: the sale's number and its bill, large enough to read across the counter.
                         if (SaleModel.isPaid(s.state) && !gift) {
                             for (line in BillModel.paidLines(index, info)) {
                                 centre.addView(ui.text(line.label, 14f, colour = band.sub, medium = true).also { it.gravity = android.view.Gravity.CENTER }, ui.margins(top = 14))
@@ -2451,13 +2388,6 @@ class Controller(private val act: MainActivity) {
                 views.add(ui.facts(listOf(WordsOfRequests.NOTE to saleNote)))
             } else {
                 actions.add(ui.button(WordsOfRequests.ADD_NOTE) { showAddNote(index) })
-            }
-            // CR-245: the till's reference of the sale, or a way to add it once.
-            val saleReference = info.reference
-            if (saleReference != null) {
-                views.add(ui.facts(listOf(WordsOfBills.REFERENCE to saleReference)))
-            } else {
-                actions.add(ui.button(WordsOfBills.ADD_REFERENCE) { showSaleReference(index) })
             }
             info.billNumber?.let { b -> actions.add(ui.button("${WordsOfBills.SALE_BILL} $b") { showBill(b, null) }) }
             views.add(label("Refunds"))
@@ -3079,7 +3009,7 @@ class Controller(private val act: MainActivity) {
         )
     }
 
-    // ---- bills, tabs and the till's reference (CR-245 to CR-254) -----------------------------------------------------------------
+    // ---- bills and tabs (CR-246 to CR-254) -----------------------------------------------------------------
 
     /**
      * The keypad page of an amount: [heading] says what it is for, [extra] are more fields, [action] is the main
@@ -3148,16 +3078,15 @@ class Controller(private val act: MainActivity) {
         show(ui.bar(WordsOfBills.BILLS, back = { showHome() }), views, actions)
     }
 
-    /** CR-246, CR-245: open a bill or a tab for an amount, with the till's reference when there is one. */
+    /** CR-246: open a bill or a tab for an amount. */
     private fun showNewBill(kind: BillKind) {
         val n = node ?: return render()
-        val reference = ui.field(WordsOfBills.REFERENCE_HINT)
         showAmountPad(
             if (kind == BillKind.Tab) WordsOfBills.NEW_TAB else WordsOfBills.NEW_BILL, null, WordsOfBills.AMOUNT, 0,
-            listOf(reference), if (kind == BillKind.Tab) WordsOfBills.NEW_TAB else WordsOfBills.NEW_BILL, { showBills() },
+            emptyList(), if (kind == BillKind.Tab) WordsOfBills.NEW_TAB else WordsOfBills.NEW_BILL, { showBills() },
         ) { minor, refused ->
             try {
-                val number = n.openBill(nowSecs(), kind, minor, BillModel.referenceFrom(reference.text.toString()))
+                val number = n.openBill(nowSecs(), kind, minor)
                 showBill(number, null)
             } catch (e: CounterException) {
                 refused(e.sayWords())
@@ -3178,7 +3107,6 @@ class Controller(private val act: MainActivity) {
             val b = BillModel.buttons(bill)
             views.add(note(bill.words.say()))
             val facts = ArrayList<Pair<String, String>>()
-            bill.reference?.let { facts.add(WordsOfBills.REFERENCE to it) }
             for (line in BillModel.totals(m, bill)) facts.add(line.label to line.value)
             views.add(ui.facts(facts))
             if (bill.parts.isNotEmpty()) {
@@ -3195,7 +3123,6 @@ class Controller(private val act: MainActivity) {
             if (b.otherPart) actions.add(ui.button(WordsOfBills.PART_OTHER) { showOtherPart(number) })
             if (b.join) actions.add(ui.button(WordsOfBills.JOIN) { showJoinSale(number) })
             if (b.split) actions.add(ui.button(WordsOfBills.SPLIT) { showSplit(number) })
-            if (b.addReference) actions.add(ui.button(WordsOfBills.ADD_REFERENCE) { showBillReference(number) })
             if (b.changeTab) actions.add(ui.button(WordsOfBills.CHANGE_TAB) { showChangeTab(number) })
             if (b.finishTab) {
                 actions.add(
@@ -3232,12 +3159,11 @@ class Controller(private val act: MainActivity) {
     /** CR-248: a bitcoin part: a sale for [start] (or the amount typed) is opened for the bill and shown for the customer to pay. */
     private fun showBillPart(number: Long, start: Long) {
         val n = node ?: return render()
-        val reference = ui.field(WordsOfBills.REFERENCE_HINT)
-        showAmountPad(WordsOfBills.PART_BITCOIN, "$number", WordsOfBills.AMOUNT, start, listOf(reference), WordsOfBills.PART_BITCOIN, { showBill(number, null) }) { minor, refused ->
+        showAmountPad(WordsOfBills.PART_BITCOIN, "$number", WordsOfBills.AMOUNT, start, emptyList(), WordsOfBills.PART_BITCOIN, { showBill(number, null) }) { minor, refused ->
             val (rate, words) = quote()
             if (rate == null) return@showAmountPad refused(words ?: AppWords.stopped)
             try {
-                val o = n.openBillPart(nowSecs(), number, minor, 0, rate.rate, rate.sourceLabel, rate.sourceFetchedAt, atTheTill(), BillModel.referenceFrom(reference.text.toString()))
+                val o = n.openBillPart(nowSecs(), number, minor, 0, rate.rate, rate.sourceLabel, rate.sourceFetchedAt, atTheTill())
                 amounts[o.index] = minor
                 showSale(o.index, o.payment, null)
             } catch (e: CounterException) {
@@ -3356,37 +3282,6 @@ class Controller(private val act: MainActivity) {
             }, { msg.show(note(it)) })
         }
         show(ui.bar(WordsOfBills.CLOSE_SHORT, sub = "$number", back = { showBill(number, null) }), views, listOf(close, ui.button("Back") { showBill(number, null) }))
-    }
-
-    /** CR-245: the till's reference of a bill that has none, added once. */
-    private fun showBillReference(number: Long) {
-        val n = node ?: return render()
-        referencePage(number.toString(), { showBill(number, null) }) { text -> n.addBillReference(nowSecs(), number, text) }
-    }
-
-    /** CR-245: the till's reference of a sale that has none, added once. */
-    private fun showSaleReference(index: Long) {
-        val n = node ?: return render()
-        locks.saleScreen(index)
-        referencePage("${index + 1}", { showSaleDetails(index) }) { text -> n.addReference(nowSecs(), index, text) }
-    }
-
-    private fun referencePage(sub: String, back: () -> Unit, save: (String) -> Unit) {
-        val views = ArrayList<View>()
-        val msg = Slot(act)
-        views.add(msg)
-        views.add(label(WordsOfBills.REFERENCE))
-        val field = ui.field(WordsOfBills.REFERENCE_HINT)
-        views.add(field)
-        val add = ui.primary(WordsOfBills.ADD_REFERENCE) {
-            try {
-                save(field.text.toString().trim())
-                back()
-            } catch (e: CounterException) {
-                msg.show(note(e.sayWords()))
-            }
-        }
-        show(ui.bar(WordsOfBills.ADD_REFERENCE, sub = sub, back = back), views, listOf(add, ui.button("Back") { back() }))
     }
 
     companion object {

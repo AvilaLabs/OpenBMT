@@ -8,7 +8,7 @@
 
 use super::*;
 use crate::bills::{
-    reference_ok, split_shares, Bill, BillEnd, BillKind, BillPart, Ended, PartWay, MAX_BILL_AMOUNT,
+    split_shares, Bill, BillEnd, BillKind, BillPart, Ended, PartWay, MAX_BILL_AMOUNT,
     MAX_BILL_PARTS, MAX_OPEN_BILLS,
 };
 use crate::refusal::PartRefused;
@@ -113,26 +113,21 @@ impl Counter {
     }
 
     /// CR-246, CR-253: open a bill or a tab for `amount` minor units of the
-    /// shop's currency, with the till's reference when there is one. A bill
-    /// is for more than nothing and at most [`MAX_BILL_AMOUNT`]; at most 256
-    /// are open.
+    /// shop's currency. A bill is for more than nothing and at most
+    /// [`MAX_BILL_AMOUNT`]; at most 256 are open.
     ///
     /// The writes, in this order: the bills file with the next number (the
-    /// number is stored before it is used), the record "bill opened" and, with
-    /// a reference, its record, then the bills file with the bill.
+    /// number is stored before it is used), the record "bill opened", then
+    /// the bills file with the bill.
     pub fn open_bill<S: Store>(
         &mut self,
         kind: BillKind,
         amount: Amount,
-        reference: Option<&str>,
         now: u64,
         store: &mut S,
     ) -> Result<u32, BillRefused<S::Error>> {
         if amount.0 == 0 || amount.0 > MAX_BILL_AMOUNT {
             return Err(BillRefused::BadAmount);
-        }
-        if reference.is_some_and(|r| !reference_ok(r)) {
-            return Err(BillRefused::BadReference);
         }
         if self.bills.open_count() >= MAX_OPEN_BILLS {
             return Err(BillRefused::TooManyOpen);
@@ -153,15 +148,6 @@ impl Counter {
         };
         self.write_event(store, &event)
             .map_err(BillRefused::Store)?;
-        if let Some(reference) = reference {
-            let event = Event::BillReferenced {
-                number,
-                at: now,
-                reference: reference.to_string(),
-            };
-            self.write_event(store, &event)
-                .map_err(BillRefused::Store)?;
-        }
         let mut bills = self.bills.clone();
         bills.bills.insert(
             number,
@@ -171,7 +157,6 @@ impl Counter {
                 amount,
                 currency,
                 opened_at: now,
-                reference: reference.map(str::to_string),
                 parts: Vec::new(),
                 ended: None,
             },
@@ -179,39 +164,6 @@ impl Counter {
         self.put_bills(store, bills, now)
             .map_err(BillRefused::Store)?;
         Ok(number)
-    }
-
-    /// CR-245: add the till's reference to a bill that has none.
-    pub fn add_bill_reference<S: Store>(
-        &mut self,
-        number: u32,
-        reference: &str,
-        now: u64,
-        store: &mut S,
-    ) -> Result<(), BillRefused<S::Error>> {
-        if !reference_ok(reference) {
-            return Err(BillRefused::BadReference);
-        }
-        let bill = self
-            .bills
-            .get(number)
-            .ok_or(BillRefused::UnknownBill(number))?;
-        if bill.reference.is_some() {
-            return Err(BillRefused::AlreadyReferenced);
-        }
-        let event = Event::BillReferenced {
-            number,
-            at: now,
-            reference: reference.to_string(),
-        };
-        self.write_event(store, &event)
-            .map_err(BillRefused::Store)?;
-        let mut bills = self.bills.clone();
-        if let Some(b) = bills.bills.get_mut(&number) {
-            b.reference = Some(reference.to_string());
-        }
-        self.put_bills(store, bills, now)
-            .map_err(BillRefused::Store)
     }
 
     /// CR-248: the checks that a sale may join a bill, before anything is
@@ -282,8 +234,8 @@ impl Counter {
 
     /// CR-248: open a sale for the bill and make it a part. The checks of the
     /// bill are made first, so a bill that is full or ended opens no sale; then
-    /// the sale opens with every rule of a sale (`extras` may carry the till's
-    /// reference or a note, not a request). If the part cannot be written after
+    /// the sale opens with every rule of a sale (`extras` may carry a note,
+    /// not a request). If the part cannot be written after
     /// the sale is stored, the sale stands and `Err` is returned: its address
     /// must not be shown, and the sale is cancelled or joined by hand.
     #[allow(clippy::too_many_arguments)]

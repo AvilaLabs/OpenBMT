@@ -12,7 +12,6 @@ use crate::facts::FactsRefused;
 use crate::link::{BatchesWaiting, SettingsNotCarried, SettingsWaiting};
 use crate::live::DeepLine;
 use crate::node::{NodeError, SendRefused, SendState};
-use crate::pos::PosRefused;
 use crate::receipts::{MergeOffer, MergeRefused, ReceiptsLine};
 use crate::refunds::{NoteKind, RefundNote};
 use crate::watcher::OwnerStartError;
@@ -941,28 +940,6 @@ pub fn all_words() -> Vec<(String, Words)> {
         ("Store", PendingError::<String>::Store(String::new())),
     ] {
         add(&format!("PendingError::{name}"), error.words());
-    }
-    // The refusals that wrap another crate's refusal have its words and are
-    // not listed again; the ones that are the owner node's own are.
-    for (name, error) in [
-        ("NotSetUp", PosRefused::NotSetUp),
-        ("NoCounters", PosRefused::NoCounters),
-        ("TooSoon", PosRefused::TooSoon { wait_secs: 30 }),
-        ("NothingAsked", PosRefused::NothingAsked),
-        ("TooManyPayments", PosRefused::TooManyPayments),
-        ("SignInRefused", PosRefused::SignInRefused { status: 401 }),
-        ("RateLimited", PosRefused::RateLimited),
-        ("Unavailable", PosRefused::Unavailable { status: 500 }),
-        ("Store", PosRefused::Store(String::new())),
-        (
-            "Corrupt",
-            PosRefused::Corrupt {
-                file: crate::pos::POS_LEDGER_FILE,
-                why: String::new(),
-            },
-        ),
-    ] {
-        add(&format!("PosRefused::{name}"), error.words());
     }
     if let Ok(identity) = openbmt_core::identity::Identity::from_secret_bytes(&[1; 32]) {
         add(

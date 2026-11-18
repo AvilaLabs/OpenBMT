@@ -21,7 +21,6 @@ import org.openbmt.counter.app.SetupStatus
 import org.openbmt.counter.app.ScreenModel
 import org.openbmt.counter.app.Showing
 import org.openbmt.counter.app.StarterModel
-import org.openbmt.counter.app.TillModel
 import org.openbmt.counter.app.WaitWords
 import org.openbmt.counter.app.sayWords
 import org.openbmt.counter.app.say
@@ -70,14 +69,6 @@ class HomeScreenData(
     val counterLine: String,
     val requestTitles: Array<String>,
     val requestSubs: Array<String>,
-)
-
-/** What the card of one request from the till shows (Controller.kt showHome, TillModel.lines): the till's sale as hex, and each line's label and value. */
-@JsExport
-class TillCardData(
-    val sale: String,
-    val labels: Array<String>,
-    val values: Array<String>,
 )
 
 /**
@@ -290,45 +281,6 @@ object CounterFlowDemo {
         needsSats = opened.needsSats
         return opened.index.toDouble()
     }
-
-    // ---- Controller.kt: the requests from the till (CR-266 to CR-269) ---------------------------------------------
-
-    private fun hex(bytes: ByteArray): String =
-        bytes.joinToString("") { b -> "0123456789abcdef"[(b.toInt() shr 4) and 15].toString() + "0123456789abcdef"[b.toInt() and 15] }
-
-    private fun waiting(now: Double) = try { TillModel.shown(running().tillWaiting(now.toLong())) } catch (e: CounterException) { emptyList() }
-
-    /** Controller.kt showHome: the cards of the requests from the till that wait, oldest first, as TillModel makes them. */
-    fun tillCards(now: Double): Array<TillCardData> {
-        val m = money ?: return emptyArray()
-        return waiting(now).map { r ->
-            val lines = TillModel.lines(m, r)
-            TillCardData(hex(r.sale), lines.map { it.label }.toTypedArray(), lines.map { it.value }.toTypedArray())
-        }.toTypedArray()
-    }
-
-    /**
-     * Controller.kt startTillSale: Start on the card of the till's sale [sale] (as hex): the counter opens the sale for
-     * the request's amount at the pretend price; the sale's receive index. A refusal is the library's own exception.
-     */
-    fun tillStart(now: Double, sale: String): Double {
-        val n = running()
-        val request = waiting(now).first { hex(it.sale) == sale }
-        val opened = n.tillStart(now.toLong(), request.sale, DEMO_RATE.toLong(), DEMO_SOURCE, now.toLong(), null)
-        amounts[opened.index] = request.amountMinor
-        lastIndex = opened.index
-        needsSats = opened.needsSats
-        return opened.index.toDouble()
-    }
-
-    /** Controller.kt showHome: Not now on the card of the till's sale [sale] (as hex). */
-    fun tillNotNow(now: Double, sale: String) {
-        val request = waiting(now).first { hex(it.sale) == sale }
-        running().tillNotNow(now.toLong(), request.sale)
-    }
-
-    /** CR-268: the till's sale (as hex) that the sale [index] came from, or null when it was typed at the counter. */
-    fun tillOfSale(index: Double): String? = running().tillOfSale(index.toLong()).sale?.let { hex(it) }
 
     // ---- Controller.kt: what the screens say ----------------------------------------------------------------------
 

@@ -130,13 +130,12 @@ use openbmt_counter::{
     OpenRefused, Opened, Overridden, OwnCheck, OwnPairing, Pairing, PartRefused, PartWay, Quote,
     RangeTakeRefused, Rate, RateSource, RefundRefused, RefundRequest, RefundView, Report,
     RequoteRefused, SaleExtras, Screen, SightingError, StaffEvent, StaffRefused, StoreFault,
-    TillCancelled, TillDropped, TillRequest, TillStartRefused, TotalsRefused, WithdrawRefused,
+    TotalsRefused, WithdrawRefused,
 };
 use openbmt_net_io::{
     AppEvent, Clock, Driver, DriverConfig, EventReceiver, Handle, Key, NetMode, OsRandomness,
     OwnNode, OwnNodeEvent, Storage, SystemClock,
 };
-use openbmt_pos::TillMessage;
 use openbmt_watch::{
     check_blocks_checked, check_health, BlockProgress, HeaderChain, HeaderStore, Health,
     HealthInput, NodeOnlyHealth, NodeOnlyInput, NodeOnlyLine, NodeOnlyTracker, OwnNodeHealth,
@@ -146,7 +145,6 @@ use openbmt_watch::{
 use crate::chainview::ChainView;
 use crate::confirm::{ChangeNotice, ConfirmRefused, Pending, PendingChange};
 use crate::dirstore::{DirStore, DirStoreError, CHECKED_WINDOW};
-use crate::notices::NodeRecords;
 use crate::paired_own::OwnPairingRecord;
 use crate::settings::{check_not_rolled, decode_file, SettingsFault, SettingsRefused};
 use crate::shopln::{SaleLightning, SeedNotTaken};
@@ -224,46 +222,6 @@ impl fmt::Display for StartError {
 }
 
 impl std::error::Error for StartError {}
-
-/// What a POS notice from the Box did to the counter (CR-266, CR-269).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TillTaken {
-    /// A sale request now waits for the cashier.
-    Waiting,
-    /// A cancel removed a request that was not started.
-    Removed,
-    /// A cancel marked the started sale with this receive index.
-    Marked(u32),
-    /// A cancel for a sale the counter does not know; nothing changed.
-    Unknown,
-}
-
-/// Why a POS notice was dropped (CR-266). Nothing is sent.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum TillNotTaken {
-    /// The notice is not from the Box of the settings in force.
-    NotTheBox,
-    /// The content does not read as a sale request or a sale cancel.
-    Unreadable(DecodeError),
-    /// The request does not fit.
-    Dropped(TillDropped),
-}
-
-impl fmt::Display for TillNotTaken {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::NotTheBox => write!(
-                f,
-                "CR-266: a POS notice from a key that is not the Box of the settings in force: \
-                 dropped"
-            ),
-            Self::Unreadable(e) => write!(f, "CR-266: a POS notice does not read: {e}"),
-            Self::Dropped(e) => write!(f, "{e}"),
-        }
-    }
-}
-
-impl std::error::Error for TillNotTaken {}
 
 /// Why [`Node::heartbeat`] did not take a heartbeat.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1083,15 +1041,6 @@ impl<P: DriverPort> Node<P> {
     /// `Counter::hash_at`).
     pub fn hash_at(&self, n: u64) -> Result<Option<[u8; 32]>, StoreFault<DirStoreError>> {
         self.counter.hash_at(n, &self.store)
-    }
-
-    /// The counter's records as a source that can be read in order, for the
-    /// notice outbox.
-    pub fn record_source(&self) -> NodeRecords<'_> {
-        NodeRecords {
-            counter: &self.counter,
-            store: &self.store,
-        }
     }
 
     /// The best header chain as the node knows it.
@@ -2471,124 +2420,14 @@ impl<P: DriverPort> Node<P> {
         self.port.watch_script(opened.script.clone());
     }
 
-    // CR-266 to CR-270: a sale from the till.
-
-    /// CR-266, CR-269: take a POS notice that came sealed to this counter
-    /// from `from`. It is taken only from a Box of the settings in force; a
-    /// request that does not fit is dropped and nothing is sent. The signed
-    /// notice that tells the Box the sale opened is not made here: it comes
-    /// from the records `Node::till_start` writes (BX-40).
-    pub fn take_till_notice(
-        &mut self,
-        from: &DeviceId,
-        content: &[u8],
-    ) -> Result<TillTaken, TillNotTaken> {
-        if !self.counter.settings().boxes.contains(from) {
-            return Err(TillNotTaken::NotTheBox);
-        }
-        let message = TillMessage::from_bytes(content).map_err(TillNotTaken::Unreadable)?;
-        let now = self.clock.now();
-        match message {
-            TillMessage::Request(r) => {
-                let request = TillRequest {
-                    sale: r.sale,
-                    amount: r.amount,
-                    currency: r.currency,
-                    reference: r.reference,
-                    lapses_at: r.expires_at,
-                };
-                self.counter
-                    .till_take(request, now)
-                    .map(|()| TillTaken::Waiting)
-                    .map_err(TillNotTaken::Dropped)
-            }
-            TillMessage::Cancel(c) => Ok(match self.counter.till_cancel(&c.sale) {
-                TillCancelled::Removed => TillTaken::Removed,
-                TillCancelled::Marked(index) => TillTaken::Marked(index),
-                TillCancelled::Unknown => TillTaken::Unknown,
-            }),
-        }
-    }
-
-    /// CR-267: the requests the home screen shows, oldest first.
-    pub fn till_waiting(&self) -> Vec<TillRequest> {
-        let now = self.clock.now();
-        self.counter
-            .till_waiting(now)
-            .into_iter()
-            .cloned()
-            .collect()
-    }
-
-    /// CR-267: Not now.
-    pub fn till_not_now(&mut self, sale: &[u8; 16]) -> bool {
-        self.counter.till_not_now(sale)
-    }
-
-    /// CR-268: Start. Opens the sale as [`Node::open_by`] does and names the
-    /// till's sale in the records; the paid notice of its opening (BX-40)
-    /// then names it too (BX-77).
-    pub fn till_start(
-        &mut self,
-        sale: &[u8; 16],
-        rate: Rate,
-        source: &RateSource,
-        by: Option<&Actor>,
-    ) -> Result<Opened, TillStartRefused<DirStoreError>> {
-        let facts = OpenFacts {
-            health: self.health.unwrap_or(NO_ANSWER_YET),
-            rescan_pending: false,
-            now: self.clock.now(),
-        };
-        let opened = self
-            .counter
-            .till_start(sale, rate, source, facts, by, &mut self.store)?;
-        self.sale_started(&opened);
-        Ok(opened)
-    }
-
-    /// CR-268, CR-270: the till's sale a held sale came from.
-    pub fn sale_till(&self, index: u32) -> Option<[u8; 16]> {
-        self.counter.sale_till(index).copied()
-    }
-
-    /// CR-269: whether the till cancelled this sale.
-    pub fn till_cancelled(&self, index: u32) -> bool {
-        self.counter.till_cancelled(index)
-    }
-
-    /// CR-245: add the till's reference to a sale.
-    pub fn add_reference(
-        &mut self,
-        index: u32,
-        reference: &str,
-    ) -> Result<(), BillRefused<DirStoreError>> {
-        let now = self.clock.now();
-        self.counter
-            .add_reference(index, reference, now, &mut self.store)
-    }
-
     /// CR-246: open a bill or a tab; returns its number.
     pub fn open_bill(
         &mut self,
         kind: BillKind,
         amount: Amount,
-        reference: Option<&str>,
     ) -> Result<u32, BillRefused<DirStoreError>> {
         let now = self.clock.now();
-        self.counter
-            .open_bill(kind, amount, reference, now, &mut self.store)
-    }
-
-    /// CR-245: add the till's reference to a bill.
-    pub fn add_bill_reference(
-        &mut self,
-        number: u32,
-        reference: &str,
-    ) -> Result<(), BillRefused<DirStoreError>> {
-        let now = self.clock.now();
-        self.counter
-            .add_bill_reference(number, reference, now, &mut self.store)
+        self.counter.open_bill(kind, amount, now, &mut self.store)
     }
 
     /// CR-248: join a sale, such as a paid request, to a bill.

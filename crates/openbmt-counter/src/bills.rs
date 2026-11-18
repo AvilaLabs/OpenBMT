@@ -1,18 +1,18 @@
-//! Bills, tabs and the till's reference (CR-245 to CR-253).
+//! Bills and tabs (CR-246 to CR-253).
 //!
 //! A bill is the amount owed in the shop's money, paid in parts: each
 //! bitcoin part is an ordinary sale, and a part paid another way is written
 //! down by the cashier. A tab is a bill whose amount grows while it is open.
-//! This module holds the pure side: the types, the split helper of CR-250,
-//! the reference check of CR-245 and the stored form of the bills file
-//! (`bills.bin`, magic `OBM[`, CR-253). What a bill has received depends on
+//! This module holds the pure side: the types, the split helper of CR-250
+//! and the stored form of the bills file (`bills.bin`, magic `OBM[`,
+//! CR-253). What a bill has received depends on
 //! its sales, so the counter works it out (`Counter::bill_view`).
 //!
 //! ```text
 //! OBM[ | 1 | next bill number u32 | n u32 | n * bill
 //!
 //! bill = number u32 | kind u8 (1 bill, 2 tab) | amount u64 | currency (3)
-//!   | opened_at u64 | reference (flag, len u8, text)
+//!   | opened_at u64
 //!   | n_parts u8 | n_parts * part
 //!   | state u8 (0 open, 1 settled, 2 closed short, 3 cancelled)
 //!   | when the state is not 0: ended_at u64 | unpaid u64
@@ -44,8 +44,6 @@ pub const KEEP_ENDED_SECS: u64 = 7 * 86_400;
 /// CR-253: most ended bills the file holds (the read is bounded). The oldest
 /// are dropped first when the file is written.
 pub const MAX_KEPT_ENDED: usize = 4_096;
-/// CR-245: the longest reference, in bytes.
-pub const MAX_REFERENCE_BYTES: usize = 32;
 /// CR-250: the fewest and the most people a bill is split between.
 pub const SPLIT_MIN: u8 = 2;
 /// CR-250: the most people a bill is split between.
@@ -53,15 +51,6 @@ pub const SPLIT_MAX: u8 = 20;
 /// CR-246: the largest amount of a bill, in minor units (CR-05: more than
 /// this is more than all the bitcoin there is, at the satoshi's own rate).
 pub const MAX_BILL_AMOUNT: u64 = MAX_SATS;
-
-/// CR-245: whether `text` is a till reference: 1 to 32 characters of `A-Z`,
-/// `a-z`, `0-9`, `-`, `_`, `/`, `#` and `.`.
-pub fn reference_ok(text: &str) -> bool {
-    (1..=MAX_REFERENCE_BYTES).contains(&text.len())
-        && text
-            .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'/' | b'#' | b'.'))
-}
 
 /// A bill or a tab (CR-246).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -188,7 +177,6 @@ pub struct Bill {
     pub(crate) amount: Amount,
     pub(crate) currency: Currency,
     pub(crate) opened_at: u64,
-    pub(crate) reference: Option<String>,
     pub(crate) parts: Vec<BillPart>,
     pub(crate) ended: Option<Ended>,
 }
@@ -213,10 +201,6 @@ impl Bill {
     /// When it opened.
     pub fn opened_at(&self) -> u64 {
         self.opened_at
-    }
-    /// The till's reference, when it has one.
-    pub fn reference(&self) -> Option<&str> {
-        self.reference.as_deref()
     }
     /// Its parts, in the order they were added.
     pub fn parts(&self) -> &[BillPart] {
@@ -355,14 +339,6 @@ impl Bills {
             out.extend_from_slice(&b.amount.0.to_le_bytes());
             out.extend_from_slice(&b.currency.code());
             out.extend_from_slice(&b.opened_at.to_le_bytes());
-            match &b.reference {
-                Some(r) => {
-                    out.push(1);
-                    out.push(u8::try_from(r.len()).unwrap_or(u8::MAX));
-                    out.extend_from_slice(r.as_bytes());
-                }
-                None => out.push(0),
-            }
             out.push(u8::try_from(b.parts.len()).unwrap_or(u8::MAX));
             for p in &b.parts {
                 match p {
@@ -392,7 +368,7 @@ impl Bills {
     /// Read the stored form strictly: the magic and version, at most 256 open
     /// and [`MAX_KEPT_ENDED`] ended bills, in ascending order of number and
     /// all below the next number, at most 32 parts each, an amount above 0
-    /// and at most [`MAX_BILL_AMOUNT`], a reference that is one, a sale that
+    /// and at most [`MAX_BILL_AMOUNT`], a sale that
     /// is a part of one bill once, and what was not paid only on a bill
     /// closed short. Any byte left over is refused.
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, DecodeError> {
@@ -401,7 +377,7 @@ impl Bills {
         if next == 0 {
             return Err(DecodeError::NonCanonical("the next bill number is 0"));
         }
-        let n = r.count(MAX_OPEN_BILLS + MAX_KEPT_ENDED, 27)?;
+        let n = r.count(MAX_OPEN_BILLS + MAX_KEPT_ENDED, 26)?;
         let mut bills = BTreeMap::new();
         let mut sales: BTreeSet<u32> = BTreeSet::new();
         let (mut open, mut ended_n) = (0usize, 0usize);
@@ -423,17 +399,6 @@ impl Bills {
             let currency = Currency::new(r.array::<3>()?)
                 .ok_or(DecodeError::NonCanonical("a currency code is not valid"))?;
             let opened_at = r.u64_le()?;
-            let reference = if r.flag()? {
-                let len = usize::from(r.u8()?);
-                let text = std::str::from_utf8(r.take(len)?)
-                    .map_err(|_| DecodeError::NonCanonical("a reference is not text"))?;
-                if !reference_ok(text) {
-                    return Err(DecodeError::NonCanonical("a reference is not allowed"));
-                }
-                Some(text.to_string())
-            } else {
-                None
-            };
             let n_parts = usize::from(r.u8()?);
             if n_parts > MAX_BILL_PARTS {
                 return Err(DecodeError::TooLarge);
@@ -503,7 +468,6 @@ impl Bills {
                     amount: Amount(amount),
                     currency,
                     opened_at,
-                    reference,
                     parts,
                     ended,
                 },

@@ -77,7 +77,6 @@ private class PictureView(context: Context, private val ui: Ui, private val pict
 
 fun Ui.welcomePicture(): View = PictureView(context, this, Picture.Welcome)
 fun Ui.practicePicture(): View = PictureView(context, this, Picture.Practice)
-fun Ui.tillPicture(): View = PictureView(context, this, Picture.Till)
 fun Ui.moneyPicture(): View = PictureView(context, this, Picture.Money)
 fun Ui.whyPicture(): View = PictureView(context, this, Picture.Why)
 fun Ui.usbPicture(): View = PictureView(context, this, Picture.Usb)
@@ -103,7 +102,6 @@ private class Scene(private val c: Canvas, private val p: Paint, private val pal
         when (picture) {
             Picture.Welcome -> welcome(t)
             Picture.Practice -> practice(t)
-            Picture.Till -> till(t)
             Picture.Money -> money(t)
             Picture.Why -> why(t)
             Picture.Usb -> usb(t)
@@ -302,35 +300,6 @@ private class Scene(private val c: Canvas, private val p: Paint, private val pal
         qr(206f, 34f, 70f, pal.text, ease(seg(t, 0.4f, 0.58f)))
         dot(241f, 116f, 12f * ease(seg(t, 0.62f, 0.7f)), pal.good.tint)
         check(241f, 116f, 16f, pal.good.band, 3.5f, ease(seg(t, 0.66f, 0.9f)))
-    }
-
-    private fun till(t: Float) {
-        // Four keys of 36 with 18 between, and 21 to the frame on both sides; the glow stays inside the frame.
-        card(40f, 12f, 280f, 148f, 14f)
-        rr(61f, 26f, 259f, 62f, 6f, pal.chip)
-        rr(75f, 38f, 145f, 44f, 3f, pal.hint)
-        rr(75f, 49f, 115f, 54f, 3f, pal.divider)
-        val lit = ease(seg(t, 0.35f, 0.6f))
-        val xs = listOf(61f, 115f, 169f, 223f)
-        for ((k, l) in xs.withIndex()) {
-            val top = 78f
-            val on = if (k == 3) lit else 0f
-            if (on > 0f) {
-                val g = 9f * on
-                rr(l - g, top - g, l + 36f + g, top + 56f + g, 8f + g, withAlpha(Palette.BRAND, 0.28f * on))
-            }
-            rr(l, top, l + 36f, top + 56f, 8f, if (on > 0.5f) Palette.BRAND else pal.chip)
-            rrOutline(l, top, l + 36f, top + 56f, 8f, if (on > 0.5f) Palette.BRAND else pal.fieldLine)
-            val mark = if (on > 0.5f) Palette.WHITE else pal.secondary
-            val x = l + 18f
-            val y = top + 28f
-            when (k) {
-                0 -> { rrOutline(x - 10f, y - 7f, x + 10f, y + 7f, 2f, mark); c.drawLine(x - 10f, y - 2f, x + 10f, y - 2f, p) }
-                1 -> { rrOutline(x - 11f, y - 7f, x + 11f, y + 7f, 2f, mark); line(mark, 2f); c.drawCircle(x, y, 3f, p) }
-                2 -> for (r in listOf(4f, 8f, 12f).also { line(mark, 2f) }) { rect.set(x - r, y - r + 4f, x + r, y + r + 4f); c.drawArc(rect, 225f, 90f, false, p) }
-                else -> btc(x, y, 24f, mark)
-            }
-        }
     }
 
     private fun money(t: Float) {

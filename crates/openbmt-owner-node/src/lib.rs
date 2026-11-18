@@ -21,11 +21,6 @@
 //! (`docs/LINK-RULES.md` section 6), and [`copy`] keeps the owner's verified
 //! copy of each counter's records, which the counters send back the same way.
 //!
-//! The [`pos`] module is the owner's own matching of the till's orders to
-//! the counters' sales (`docs/OWNER-COINS-RULES.md`, OC-30 to OC-37): the
-//! app sends the requests and hands the answers in, and the sales come from
-//! the verified copies of the counters' records.
-//!
 //! The [`requests`] module joins the payment-request library to the node
 //! (`docs/REQUEST-RULES.md`, RQ-01 to RQ-37): the request book in the node's
 //! folder, the desk's addresses in the live watch, the payments credited from
@@ -79,7 +74,6 @@ pub mod node;
 pub mod own;
 pub mod paid_check;
 pub mod paid_log;
-pub mod pos;
 pub mod price;
 pub mod random;
 pub mod range_outbox;
@@ -95,8 +89,6 @@ pub mod switch_outbox;
 mod take_journal;
 pub mod watch;
 pub mod watcher;
-pub mod web_orders;
-pub mod web_visit;
 
 #[cfg(test)]
 mod tests;
@@ -105,10 +97,9 @@ pub use batch_outbox::{BatchOutbox, BatchOutboxError, PendingBatch, MAX_PENDING_
 pub use copy::{CheckInTaken, CopyError, CounterCopy, Stop, Taken};
 pub use facts::{verified_facts, FactsRefused};
 pub use link::{
-    Alert, BatchesWaiting, BoxReport, CounterState, IndexUse, OwnerLink, OwnerLinkConfig,
-    OwnerLinkError, RangesWaiting, RecordsDay, SettingsNotCarried, SettingsWaiting, TakenReport,
-    BATCH_ALERT_SECS, BATCH_RESEND_SECS, LIGHTNING_REPORT_FILE, MAX_BOX_REPORTS,
-    MAX_CARRIED_SETTINGS, RECORDS_DAY_ALARM,
+    Alert, BatchesWaiting, CounterState, IndexUse, OwnerLink, OwnerLinkConfig, OwnerLinkError,
+    RangesWaiting, RecordsDay, SettingsNotCarried, SettingsWaiting, TakenReport, BATCH_ALERT_SECS,
+    BATCH_RESEND_SECS, LIGHTNING_REPORT_FILE, MAX_CARRIED_SETTINGS, RECORDS_DAY_ALARM,
 };
 pub use live::{
     DeepLine, Spans, WatchLimits, DEEP_CHECK_SECS, DEEP_RETRY_SECS, DEEP_STALL_SECS,
@@ -134,10 +125,6 @@ pub use paid_log::{
     standing, value_at, PaidEntry, PaidLog, PaidValue, PaidWhat, Undone, MAGIC_PAID_LOG,
     MAX_PAID_ENTRIES, PAID_ENTRY_LEN, PAID_LOG_FILE,
 };
-pub use pos::{
-    counter_facts, OwnerPos, PosMethod, PosPolled, PosRefused, PosRequest, PosSetup, PosVendor,
-    PosView, POS_LEDGER_FILE, POS_SETUP_FILE,
-};
 pub use price::{agreed_price, AgreedPrice, PriceReply};
 pub use range_outbox::{PendingRange, RangeOutbox, RangeOutboxError, MAX_PENDING_RANGES};
 pub use receipts::{MergeOffer, MergeRefused, ReceiptsLine, FEE_FILE, MERGE_MIN_COINS};
@@ -160,11 +147,3 @@ pub use watch::{
     WatchConfig, WatchLink, WatchLinkConfig, WatchNode, WatchStartError, WatchState, WATCH_LINK_DIR,
 };
 pub use watcher::{OwnerConfig, OwnerStartError, OwnerWatcher, HEARTBEAT_FILE, NOTE_LOG};
-pub use web_orders::{
-    check_store_url, AmountOff, AmountOffOrder, PairState, RefusedOrder, RefusedWhy, WebError,
-    LOW_ADDRESSES, MAGIC_WEB_ORDERS, MAX_ORDERS, MAX_RANGES, MAX_REFUSALS, WEB_ORDERS_FILE,
-};
-pub use web_visit::{
-    trouble_words, OrderStand, WebCall, WebCallKind, WebFailure, WebPairShown, WebStateInfo,
-    WebStep, BACKOFF_FIRST_SECS, BACKOFF_MAX_SECS,
-};

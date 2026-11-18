@@ -13,14 +13,12 @@
 //! 4. [`link`]: [`CounterLink`], which carries the owner's heartbeat, commands
 //!    and batches to the node and the counter's check-ins and records to the
 //!    owner, through a relay (`docs/LINK-RULES.md` section 6).
-//! 5. [`notices`]: [`NoticeOutbox`], the paid notices the link sends to a
-//!    Box (`docs/BOX-RULES.md` section 4).
-//! 6. [`ownnode`]: the counter's own-node setting (CR-100 to CR-102), read
+//! 5. [`ownnode`]: the counter's own-node setting (CR-100 to CR-102), read
 //!    from the text a manager typed.
-//! 7. [`settings`]: the settings the owner sends after pairing, the file the
+//! 6. [`settings`]: the settings the owner sends after pairing, the file the
 //!    counter keeps them in and what a start does with it (CR-160 to
 //!    CR-166).
-//! 8. [`shopln`] and [`shopln_node`]: Shop Lightning at the counter that
+//! 7. [`shopln`] and [`shopln_node`]: Shop Lightning at the counter that
 //!    the settings name, its seed, its node, its second copy on the Box and
 //!    its invoices for the sales (SL-70 to SL-78).
 //!
@@ -51,7 +49,6 @@ pub mod link;
 pub mod lnshim;
 pub mod mono;
 pub mod node;
-pub mod notices;
 pub mod ownnode;
 pub mod paired;
 pub mod paired_own;
@@ -82,10 +79,9 @@ pub use dirstore::{
 pub use link::{CounterLink, CounterLinkConfig, LinkState, Outgoing, Polled};
 pub use node::{
     DriverPort, HealthFn, HeartbeatNotTaken, HeartbeatTaken, Launch, Node, NodeConfig, StartError,
-    TillNotTaken, TillTaken, MAX_EVENTS_PER_PUMP, MAX_OWN_ASKS, MAX_OWN_EVENTS_PER_PUMP, NOTE_LOG,
-    SETTLE_EVERY_SECS, SETTLE_MIN_GAP_SECS, TX_CACHE,
+    MAX_EVENTS_PER_PUMP, MAX_OWN_ASKS, MAX_OWN_EVENTS_PER_PUMP, NOTE_LOG, SETTLE_EVERY_SECS,
+    SETTLE_MIN_GAP_SECS, TX_CACHE,
 };
-pub use notices::{NodeRecords, NoticeOutbox, NoticeStoreError, RecordSource};
 pub use ownnode::{
     default_port, every_setting_refusal, own_node_setting, OwnNodeSetting, OwnNodeSettingRefused,
 };

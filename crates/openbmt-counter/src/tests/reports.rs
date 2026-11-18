@@ -10,8 +10,6 @@ fn kinds(w: &World) -> Vec<&'static str> {
             Event::Opened { .. } => "opened",
             Event::Requoted { .. } => "requoted",
             Event::Noted { .. } => "noted",
-            Event::Referenced { .. } | Event::BillReferenced { .. } => "referenced",
-            Event::TillSale { .. } => "till-sale",
             Event::BillOpened { .. } => "bill-opened",
             Event::BillAmount { .. } => "bill-amount",
             Event::BillPartPaid { .. } => "bill-part-paid",

@@ -11,7 +11,7 @@ use openbmt_core::wire::{self, DecodeError, Reader};
 
 use bitcoin::ScriptBuf;
 
-use crate::bills::{reference_ok, BillEnd, BillKind, PartWay};
+use crate::bills::{BillEnd, BillKind, PartWay};
 use crate::desk::Role;
 use crate::money::{label_is_valid, Amount, Currency, RateSource};
 use crate::refund::{is_payment_script, refund_text_ok, Ask, MAX_SCRIPT_BYTES};
@@ -46,19 +46,12 @@ const TAG_REFUND_REQUESTED_AT_HEIGHT: u8 = 22;
 const TAG_REFUND_PAID_IN_CASH_AT_HEIGHT: u8 = 23;
 /// A note on a sale (CR-206).
 const TAG_NOTED: u8 = 24;
-/// The till's reference on a sale or a bill (CR-245).
-const TAG_REFERENCED: u8 = 25;
 // CR-247: the records of a bill. Their index field holds the bill's number.
 const TAG_BILL_OPENED: u8 = 26;
 const TAG_BILL_AMOUNT: u8 = 27;
 const TAG_BILL_PART_PAID: u8 = 28;
 const TAG_BILL_ENDED: u8 = 29;
 const TAG_BILL_PART_SALE: u8 = 30;
-/// Tags 31 to 37 belong to the records of staff, batches, ranges and the
-/// switch; the till's sale (CR-268) takes the next free one.
-const TAG_TILL_SALE: u8 = 38;
-/// The byte after the text of a reference that is a bill's, not a sale's.
-const REFERENCE_OF_BILL: u8 = 1;
 
 /// Something that happened to a sale and is written down.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -113,38 +106,6 @@ pub enum Event {
         at: u64,
         /// The note: plain text of 1 to 64 characters.
         note: String,
-    },
-    /// The sale was given the till's reference, when it opened or later
-    /// (CR-245; kind `Sale`).
-    Referenced {
-        /// The receive index.
-        index: u32,
-        /// When.
-        at: u64,
-        /// The reference: 1 to 32 characters of `A-Z a-z 0-9 - _ / # .`.
-        reference: String,
-    },
-    /// The sale is the one a till asked for (CR-268; kind `Sale`): the 16
-    /// bytes are the till's sale as the Box named it (BX-76). Written before
-    /// `Opened` of the same index, so that the first notice of the sale names
-    /// it too (BX-77).
-    TillSale {
-        /// The receive index.
-        index: u32,
-        /// When.
-        at: u64,
-        /// The till's sale.
-        sale: [u8; 16],
-    },
-    /// A bill was given the till's reference (CR-245; kind `Sale`). Written
-    /// as tag 25 with a byte after the text that says it is a bill's.
-    BillReferenced {
-        /// The bill's number.
-        number: u32,
-        /// When.
-        at: u64,
-        /// The reference.
-        reference: String,
     },
     /// A bill or a tab opened (CR-247; kind `Sale`).
     BillOpened {
@@ -529,11 +490,6 @@ fn write_text(out: &mut Vec<u8>, text: &str) {
     out.extend_from_slice(text.as_bytes());
 }
 
-fn write_reference(out: &mut Vec<u8>, reference: &str) {
-    out.push(u8::try_from(reference.len()).unwrap_or(u8::MAX));
-    out.extend_from_slice(reference.as_bytes());
-}
-
 fn read_text(r: &mut Reader<'_>, what: &'static str) -> Result<String, DecodeError> {
     let len = usize::from(r.u8()?);
     let text = std::str::from_utf8(r.take(len)?)
@@ -591,8 +547,7 @@ impl Event {
     /// The bill this event is about, for the records of a bill (CR-247).
     pub fn bill_number(&self) -> Option<u32> {
         match self {
-            Self::BillReferenced { number, .. }
-            | Self::BillOpened { number, .. }
+            Self::BillOpened { number, .. }
             | Self::BillAmount { number, .. }
             | Self::BillPartPaid { number, .. }
             | Self::BillEnded { number, .. }
@@ -626,9 +581,6 @@ impl Event {
             | Self::Dust { index, .. }
             | Self::Requoted { index, .. }
             | Self::Noted { index, .. }
-            | Self::Referenced { index, .. }
-            | Self::TillSale { index, .. }
-            | Self::BillReferenced { number: index, .. }
             | Self::BillOpened { number: index, .. }
             | Self::BillAmount { number: index, .. }
             | Self::BillPartPaid { number: index, .. }
@@ -661,9 +613,6 @@ impl Event {
             | Self::Dust { at, .. }
             | Self::Requoted { at, .. }
             | Self::Noted { at, .. }
-            | Self::Referenced { at, .. }
-            | Self::TillSale { at, .. }
-            | Self::BillReferenced { at, .. }
             | Self::BillOpened { at, .. }
             | Self::BillAmount { at, .. }
             | Self::BillPartPaid { at, .. }
@@ -686,9 +635,6 @@ impl Event {
             Self::Opened { .. }
             | Self::Requoted { .. }
             | Self::Noted { .. }
-            | Self::Referenced { .. }
-            | Self::TillSale { .. }
-            | Self::BillReferenced { .. }
             | Self::BillOpened { .. }
             | Self::BillAmount { .. }
             | Self::BillPartPaid { .. }
@@ -727,9 +673,6 @@ impl Event {
             ),
             Self::Requoted { index, at, .. } => (TAG_REQUOTED, *index, *at),
             Self::Noted { index, at, .. } => (TAG_NOTED, *index, *at),
-            Self::Referenced { index, at, .. } => (TAG_REFERENCED, *index, *at),
-            Self::TillSale { index, at, .. } => (TAG_TILL_SALE, *index, *at),
-            Self::BillReferenced { number, at, .. } => (TAG_REFERENCED, *number, *at),
             Self::BillOpened { number, at, .. } => (TAG_BILL_OPENED, *number, *at),
             Self::BillAmount { number, at, .. } => (TAG_BILL_AMOUNT, *number, *at),
             Self::BillPartPaid { number, at, .. } => (TAG_BILL_PART_PAID, *number, *at),
@@ -871,12 +814,6 @@ impl Event {
                 out.extend_from_slice(&valued.0.to_le_bytes());
             }
             Self::Noted { note, .. } => write_text(&mut out, note),
-            Self::Referenced { reference, .. } => write_reference(&mut out, reference),
-            Self::TillSale { sale, .. } => out.extend_from_slice(sale),
-            Self::BillReferenced { reference, .. } => {
-                write_reference(&mut out, reference);
-                out.push(REFERENCE_OF_BILL);
-            }
             Self::BillOpened {
                 kind,
                 amount,
@@ -1268,40 +1205,6 @@ impl Event {
                     chain_height,
                 }
             }
-            TAG_REFERENCED => {
-                let len = usize::from(r.u8()?);
-                let reference = std::str::from_utf8(r.take(len)?)
-                    .map_err(|_| DecodeError::NonCanonical("a reference is not text"))?
-                    .to_string();
-                if !reference_ok(&reference) {
-                    return Err(DecodeError::NonCanonical(
-                        "a reference is not 1 to 32 characters of the allowed ones",
-                    ));
-                }
-                match r.u8() {
-                    Ok(REFERENCE_OF_BILL) => Self::BillReferenced {
-                        number: index,
-                        at,
-                        reference,
-                    },
-                    Ok(_) => {
-                        return Err(DecodeError::NonCanonical(
-                            "a reference has a byte after it that is not known",
-                        ))
-                    }
-                    Err(DecodeError::Truncated) => Self::Referenced {
-                        index,
-                        at,
-                        reference,
-                    },
-                    Err(e) => return Err(e),
-                }
-            }
-            TAG_TILL_SALE => Self::TillSale {
-                index,
-                at,
-                sale: r.array::<16>()?,
-            },
             TAG_BILL_OPENED => {
                 let kind = BillKind::from_u8(r.u8()?)
                     .ok_or(DecodeError::NonCanonical("a bill kind is not known"))?;

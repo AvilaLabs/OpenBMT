@@ -25,8 +25,8 @@ use openbmt_core::identity::{DeviceId, Identity};
 use openbmt_core::relay::{RelayHint, SignedRelayHint};
 use openbmt_counter_node::mono::Instant;
 use openbmt_counter_node::{
-    start_link, CounterLink, DriverPort, LinkLine, LinkNotStarted, LinkState, Node,
-    NoticeStoreError, PairedRecord, RelayRefused, SettingsLine,
+    start_link, CounterLink, DriverPort, LinkLine, LinkNotStarted, LinkState, Node, PairedRecord,
+    RelayRefused, SettingsLine,
 };
 use openbmt_courier::{Courier, Post};
 use openbmt_link::Role;
@@ -75,7 +75,6 @@ impl Drop for LinkLease {
 pub(crate) struct LinkPlan {
     pub(crate) hint: RelayHint,
     pub(crate) identity: Identity,
-    pub(crate) notice_identity: Identity,
     pub(crate) owner: DeviceId,
     pub(crate) proxy: Option<SocketAddr>,
     pub(crate) tor_on: bool,
@@ -103,11 +102,7 @@ pub(crate) struct LinkSlot {
 impl LinkSlot {
     /// Make the link of `plan`. A link that cannot start leaves a slot
     /// whose line says why; the counter itself goes on.
-    pub(crate) fn start<P: DriverPort>(
-        plan: LinkPlan,
-        wait: Duration,
-        node: &Node<P>,
-    ) -> Result<Self, NoticeStoreError> {
+    pub(crate) fn start<P: DriverPort>(plan: LinkPlan, wait: Duration, node: &Node<P>) -> Self {
         let lease = LinkLease::claim(&plan.dir, wait);
         let started = match lease {
             None => Err(LinkNotStarted::Files(
@@ -126,13 +121,10 @@ impl LinkSlot {
             Ok(link) => (Some(link), LinkLine::Connecting),
             Err(e) => (None, LinkLine::from(&e)),
         };
-        // Keep an outbox even before the first Box is added. Its signer is
-        // read from the same checked pairing as the node and courier.
         if let Some(link) = link.as_mut() {
-            link.enable_notices(plan.notice_identity, plan.dir, node)?;
             sync_box_peers(link.courier_mut(), node.settings().boxes.iter().copied());
         }
-        Ok(Self {
+        Self {
             link: Mutex::new(link),
             snapshot: Mutex::new(Snapshot {
                 line,
@@ -142,7 +134,7 @@ impl LinkSlot {
                 state: None,
             }),
             _lease: lease,
-        })
+        }
     }
 
     fn snapshot(&self) -> Snapshot {

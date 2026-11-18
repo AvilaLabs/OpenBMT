@@ -74,16 +74,12 @@ use openbmt_owner_node::paid_check::{
     PaidCheckRefused, PaidChecks, PaidState, PaidTrouble, SaleCheck, MAX_OPEN_ALARMS_PER_COUNTER,
     PAID_ARRIVED_SHOWN_SECS,
 };
-use openbmt_owner_node::pos::{
-    AlertKind as PosKind, PosAlertRef, PosId, PosSaleKey, PosSubject, TenderKey,
-};
 use openbmt_owner_node::say::Alert as NodeAlert;
 use openbmt_owner_node::watcher::write_file;
 use openbmt_owner_node::{
-    counter_facts, own_approver, verified_facts, Alert, FactsRefused, MergeRefused, NodeError,
-    OwnerConfig, OwnerLink, OwnerLinkConfig, OwnerNode, OwnerParts, OwnerPort, OwnerPos,
-    OwnerStartError, PosMethod, PosRefused, PosSetup, PosVendor, ReceiptsLine, RefundIntake,
-    SendState, SettingsWaiting,
+    own_approver, verified_facts, Alert, FactsRefused, MergeRefused, NodeError, OwnerConfig,
+    OwnerLink, OwnerLinkConfig, OwnerNode, OwnerParts, OwnerPort, OwnerStartError, ReceiptsLine,
+    RefundIntake, SendState, SettingsWaiting,
 };
 use openbmt_signer::SignerState;
 use openbmt_watch::say::Device;
@@ -114,10 +110,6 @@ use crate::paid_check_views::{
     PaidAlarmView, PaidArrivedView, PaidCheckView, PaidClearArgs, PaidDayArgs, PaidDayView,
     PaidSaleLineView,
 };
-use crate::pos_views::{
-    PosAckArgs, PosAlertKey, PosAlertKind, PosAlertView, PosMethodView, PosReplyArgs, PosReplyView,
-    PosRequestView, PosSetupView, PosStateView, PosSubjectView, PosVendorView,
-};
 use crate::requests::{
     self, RequestAsk, RequestDetailView, RequestListView, RequestMadeView, RequestMakeArgs,
     RequestNumberArgs, RequestRepeatsView, RequestReturnAddedView, RequestReturnArgs,
@@ -141,10 +133,6 @@ use crate::views::{
     QueuedRefund, ReceiptsKind, ReceiptsView, RefundArgs, RefundNoteView, RefundRow, RouteView,
     SendKind, SendRow, SettingsHeldView, SettingsQueuedView, ShopCurrencyView, SkippedView,
     StageKind, StageView, StartConfig, StatusView, SwapHeldView, TakenView, ViewKind, WordsView,
-};
-use crate::web_orders::{
-    self as web, WebPairArgs, WebPairView, WebReplyArgs, WebStateView, WebStepArgs, WebStepKind,
-    WebStepView,
 };
 
 /// The longest a `pump` waits, whatever the app asks for, so that a call
@@ -260,7 +248,6 @@ struct State {
     /// when the link has one the counters can use.
     relay: Option<SignedRelayHint>,
     intake: RefundIntake,
-    pos: OwnerPos,
     /// The marks of the counter checks (OC-64).
     paid: PaidChecks,
     /// The counters the settings have named as the Lightning counter (OC-60).
@@ -455,45 +442,15 @@ pub(crate) fn node_error(e: &NodeError) -> AppError {
     }
 }
 
-/// What a refusal of the till is, as the error the app gets (OC-37).
-fn pos_error(e: &PosRefused) -> AppError {
-    let (text, words) = (e.to_string(), e.words());
-    let kind = match e {
-        PosRefused::NotSetUp
-        | PosRefused::NoCounters
-        | PosRefused::TooSoon { .. }
-        | PosRefused::NothingAsked => Kind::State,
-        PosRefused::Store(_) | PosRefused::Corrupt { .. } => Kind::Store,
-        _ => Kind::Refused,
-    };
-    from_words(kind, rule_in(&text, "OC-33"), text, words)
-}
-
-fn pos_vendor(v: PosVendorView) -> PosVendor {
-    match v {
-        PosVendorView::Square => PosVendor::Square,
-        PosVendorView::Clover => PosVendor::Clover,
-    }
-}
-
-fn pos_setup_view(s: &PosSetup) -> PosSetupView {
-    PosSetupView {
-        vendor: match s.vendor {
-            PosVendor::Square => PosVendorView::Square,
-            PosVendor::Clover => PosVendorView::Clover,
-        },
-        location: s.location.as_str().to_string(),
-        tender_names: s
-            .tender_names
-            .iter()
-            .map(|n| n.as_str().to_string())
-            .collect(),
-        currencies: s
-            .currencies
-            .iter()
-            .map(|c| String::from_utf8_lossy(&c.code()).into_owned())
-            .collect(),
-    }
+/// The shares of settings, for a screen.
+fn share_views(s: &openbmt_core::settings::Settings) -> Vec<CounterShareView> {
+    s.counters
+        .iter()
+        .map(|(c, bps)| CounterShareView {
+            counter: c.to_bytes().to_vec(),
+            bps: u32::from(*bps),
+        })
+        .collect()
 }
 
 /// What a refusal of the counter checks is, as the error the app gets
@@ -508,70 +465,6 @@ fn paid_error(e: &PaidCheckRefused) -> AppError {
 
 /// The most sales too old to check that `paid_check` lists.
 const PAID_OLD_LISTED: usize = 200;
-
-fn pos_key_view(key: &PosAlertRef) -> PosAlertKey {
-    PosAlertKey {
-        kind: match key.kind {
-            PosKind::TenderWithoutPayment => PosAlertKind::TenderWithoutPayment,
-            PosKind::ClosedBeforePaid => PosAlertKind::ClosedBeforePaid,
-            PosKind::PaymentWithoutTender => PosAlertKind::PaymentWithoutTender,
-            PosKind::AmountDiffers => PosAlertKind::AmountDiffers,
-            PosKind::TenderOnUnpaidSale => PosAlertKind::TenderOnUnpaidSale,
-            PosKind::VoidedAfterPayment => PosAlertKind::VoidedAfterPayment,
-            PosKind::DuplicateReference => PosAlertKind::DuplicateReference,
-            PosKind::BitcoinTip => PosAlertKind::BitcoinTip,
-            PosKind::UnknownCurrency => PosAlertKind::UnknownCurrency,
-        },
-        subject: match &key.subject {
-            PosSubject::Tender(t) => PosSubjectView::Tender {
-                order: t.order.as_str().to_string(),
-                tender: t.tender.as_str().to_string(),
-            },
-            PosSubject::Sale(s) => PosSubjectView::Sale {
-                counter: s.counter.to_bytes().to_vec(),
-                index: s.index,
-            },
-        },
-    }
-}
-
-/// The alert an app named, as the matcher keys it. The ids are checked
-/// again here, so that an alert that cannot exist is refused by name.
-fn pos_key_of(key: &PosAlertKey) -> Result<PosAlertRef, AppError> {
-    let kind = match key.kind {
-        PosAlertKind::TenderWithoutPayment => PosKind::TenderWithoutPayment,
-        PosAlertKind::ClosedBeforePaid => PosKind::ClosedBeforePaid,
-        PosAlertKind::PaymentWithoutTender => PosKind::PaymentWithoutTender,
-        PosAlertKind::AmountDiffers => PosKind::AmountDiffers,
-        PosAlertKind::TenderOnUnpaidSale => PosKind::TenderOnUnpaidSale,
-        PosAlertKind::VoidedAfterPayment => PosKind::VoidedAfterPayment,
-        PosAlertKind::DuplicateReference => PosKind::DuplicateReference,
-        PosAlertKind::BitcoinTip => PosKind::BitcoinTip,
-        PosAlertKind::UnknownCurrency => PosKind::UnknownCurrency,
-    };
-    let subject = match &key.subject {
-        PosSubjectView::Tender { order, tender } => PosSubject::Tender(TenderKey {
-            order: PosId::new(order).map_err(|e| pos_error(&PosRefused::Model(e)))?,
-            tender: PosId::new(tender).map_err(|e| pos_error(&PosRefused::Model(e)))?,
-        }),
-        PosSubjectView::Sale { counter, index } => PosSubject::Sale(PosSaleKey {
-            counter: device("the counter's root", "id-length", counter)?,
-            index: *index,
-        }),
-    };
-    Ok(PosAlertRef { kind, subject })
-}
-
-/// The shares of settings, for a screen.
-fn share_views(s: &openbmt_core::settings::Settings) -> Vec<CounterShareView> {
-    s.counters
-        .iter()
-        .map(|(c, bps)| CounterShareView {
-            counter: c.to_bytes().to_vec(),
-            bps: u32::from(*bps),
-        })
-        .collect()
-}
 
 fn count32(n: usize) -> u32 {
     u32::try_from(n).unwrap_or(u32::MAX)
@@ -1390,7 +1283,6 @@ fn build(req: StartConfig, spawn: Spawn, clock: &Arc<AtomicU64>) -> Result<State
             link,
             relay,
             intake,
-            pos: OwnerPos::open(&dir),
             paid: PaidChecks::open(&dir),
             lightning_named: LightningCounters::open(&dir),
             paid_key: None,
@@ -2796,107 +2688,6 @@ impl Entry {
         })
     }
 
-    pub(crate) fn pos_state(&self) -> Result<PosStateView, AppError> {
-        self.run(None, |st| {
-            let v = st.pos.view().map_err(|e| pos_error(&e))?;
-            Ok(PosStateView {
-                setup: v.setup.as_ref().map(pos_setup_view),
-                last_poll_at: v.last_poll_at,
-                open_alerts: v
-                    .open
-                    .iter()
-                    .map(|a| PosAlertView {
-                        key: pos_key_view(&a.key),
-                        raised_at: a.raised_at,
-                        words: words(a.words.clone()),
-                    })
-                    .collect(),
-                acknowledged_alerts: count32(v.summary.acknowledged_alerts),
-                tracked_orders: count32(v.summary.tracked_orders),
-                matches: count32(v.summary.matches),
-                matches_by_order: count32(v.summary.matches_by_order),
-                retired_matches: v.summary.retired_matches,
-            })
-        })
-    }
-
-    pub(crate) fn pos_setup(&self, a: PosSetupView) -> Result<(), AppError> {
-        self.run(None, move |st| {
-            let setup = PosSetup::from_text(
-                pos_vendor(a.vendor),
-                &a.location,
-                &a.tender_names,
-                &a.currencies,
-            )
-            .map_err(|e| pos_error(&e))?;
-            st.pos.set_setup(setup).map_err(|e| pos_error(&e))
-        })
-    }
-
-    pub(crate) fn pos_remove(&self) -> Result<(), AppError> {
-        self.run(None, |st| st.pos.remove().map_err(|e| pos_error(&e)))
-    }
-
-    pub(crate) fn pos_request(&self, now: u64) -> Result<PosRequestView, AppError> {
-        self.run(Some(now), move |st| {
-            let State { link, pos, .. } = st;
-            let link = link
-                .as_ref()
-                .ok_or_else(|| wrong_state("link-none", "the node was started without a link"))?;
-            let r = pos
-                .request(now, link.counters())
-                .map_err(|e| pos_error(&e))?;
-            Ok(PosRequestView {
-                method: match r.method {
-                    PosMethod::Get => PosMethodView::Get,
-                    PosMethod::Post => PosMethodView::Post,
-                },
-                url: r.url,
-                body: r.body,
-            })
-        })
-    }
-
-    pub(crate) fn pos_reply(&self, a: PosReplyArgs) -> Result<PosReplyView, AppError> {
-        self.run(Some(a.now), move |st| {
-            let State { link, pos, .. } = st;
-            // A status that is not three digits is a status no vendor sends.
-            let status = u16::try_from(a.status).unwrap_or(0);
-            let p = pos
-                .reply(status, &a.body, a.now, || match link.as_ref() {
-                    Some(l) => counter_facts(l),
-                    None => Err(PosRefused::NoCounters),
-                })
-                .map_err(|e| pos_error(&e))?;
-            Ok(PosReplyView {
-                again: p.again,
-                more_left: p.more_left,
-                pages: count32(p.pages),
-                orders_read: count32(p.orders_read),
-                new_matches: count32(p.delta.new_matches.len()),
-                new_alerts: p
-                    .delta
-                    .new_alerts
-                    .iter()
-                    .map(|al| PosAlertView {
-                        key: pos_key_view(&al.key),
-                        raised_at: al.raised_at,
-                        words: words(al.words()),
-                    })
-                    .collect(),
-                cleared: count32(p.delta.cleared.len()),
-                retired: p.delta.retired_matches,
-            })
-        })
-    }
-
-    pub(crate) fn pos_acknowledge(&self, a: PosAckArgs) -> Result<(), AppError> {
-        let key = pos_key_of(&a.key)?;
-        self.run(Some(a.now), move |st| {
-            st.pos.acknowledge(&key, a.now).map_err(|e| pos_error(&e))
-        })
-    }
-
     /// OC-60 to OC-62: check every sale a counter shows paid on chain against
     /// the wallet's view, keep the marks, and give the lists the screen shows.
     /// A shop with no link has no counters to check.
@@ -3529,75 +3320,6 @@ impl Entry {
         self.run(Some(ask.now), move |st| {
             request_prepare(st, &ask)?;
             Ok(requests::state(&st.node, &ask))
-        })
-    }
-
-    /// WO-05, WO-06: make the key and the pairing code for a store.
-    pub(crate) fn web_pair_start(&self, a: WebPairArgs) -> Result<WebPairView, AppError> {
-        self.run(Some(a.ask.now), move |st| {
-            request_prepare(st, &a.ask)?;
-            web::pair_start(&mut st.node, &a)
-        })
-    }
-
-    /// WO-05: the owner says the fingerprints match.
-    pub(crate) fn web_pair_confirm(&self, ask: RequestAsk) -> Result<WebStateView, AppError> {
-        self.run(Some(ask.now), move |st| {
-            request_prepare(st, &ask)?;
-            st.node.web_pair_confirm().map_err(web::web_error)?;
-            Ok(web::state(&st.node))
-        })
-    }
-
-    /// WO-07: forget the key and the secret.
-    pub(crate) fn web_unpair(&self, ask: RequestAsk) -> Result<WebStateView, AppError> {
-        self.run(Some(ask.now), move |st| {
-            request_prepare(st, &ask)?;
-            st.node.web_unpair().map_err(web::web_error)?;
-            Ok(web::state(&st.node))
-        })
-    }
-
-    /// WO-21, WO-22: what the store's page shows.
-    pub(crate) fn web_state(&self, ask: RequestAsk) -> Result<WebStateView, AppError> {
-        self.run(Some(ask.now), move |st| {
-            request_prepare(st, &ask)?;
-            Ok(web::state(&st.node))
-        })
-    }
-
-    /// WO-20, WO-10: the next step of a visit. When the node needs indexes
-    /// for a range they are taken from the desk here, as a request's is.
-    pub(crate) fn web_step(&self, a: WebStepArgs) -> Result<WebStepView, AppError> {
-        self.run(Some(a.ask.now), move |st| {
-            request_prepare(st, &a.ask)?;
-            let State { node, own, dir, .. } = st;
-            // One request for indexes at most in a visit.
-            for _ in 0..2 {
-                let step = node
-                    .web_step(a.ask.now, a.force, &mut web::Kernel)
-                    .map_err(web::web_error)?;
-                if let Some(view) = web::step_view(step.clone()) {
-                    return Ok(view);
-                }
-                if let openbmt_owner_node::WebStep::NeedIndexes(n) = step {
-                    requests::ready(node)?;
-                    let indexes = desk_indexes(node, own, dir, a.ask.now, n)?;
-                    node.web_give_indexes(&indexes).map_err(web::web_error)?;
-                }
-            }
-            Ok(WebStepView {
-                step: WebStepKind::Idle,
-                call: None,
-            })
-        })
-    }
-
-    /// WO-20: the store's answer to the call in the air.
-    pub(crate) fn web_reply(&self, a: WebReplyArgs) -> Result<WebStateView, AppError> {
-        self.run(Some(a.ask.now), move |st| {
-            request_prepare(st, &a.ask)?;
-            web::reply(&mut st.node, &a)
         })
     }
 

@@ -66,16 +66,10 @@
 //!   says what a sale carries besides its amount, 64 `requests` lists the
 //!   open requests (CR-215) and 65 `request_link` gives the payment link of
 //!   one (CR-214).
-//! - 73 `add_reference` gives a sale the till's reference (CR-245); 74
-//!   `open_bill`, 75 `add_bill_reference`, 76 `join_sale`, 77
-//!   `open_bill_part`, 78 `add_other_part`, 79 `bill_split`, 80
-//!   `set_tab_amount`, 81 `finish_tab`, 82 `close_short` and 83
-//!   `cancel_bill` work a bill or a tab, and 84 `bills` lists them
-//!   (CR-246 to CR-253).
-//! - 85 `till_waiting` lists the requests from the till that wait for the
-//!   cashier, 86 `till_start` opens the sale for one, 87 `till_not_now` hides
-//!   one and 88 `till_of_sale` says whether a sale came from the till and
-//!   whether the till cancelled it (CR-266 to CR-271).
+//! - 74 `open_bill`, 76 `join_sale`, 77 `open_bill_part`, 78
+//!   `add_other_part`, 79 `bill_split`, 80 `set_tab_amount`, 81
+//!   `finish_tab`, 82 `close_short` and 83 `cancel_bill` work a bill or a
+//!   tab, and 84 `bills` lists them (CR-246 to CR-253).
 //! - 71 `pending_change` reads the change to the shop's settings that waits
 //!   for a counter's confirmation, and 72 `confirm_change` signs it and
 //!   writes the record (CR-239 to CR-241). The PIN of CR-84 is the app's: it
@@ -122,8 +116,7 @@ use openbmt_counter_node::{Ceremony, OwnCeremony};
 
 use crate::bills::{
     BillKindView, BillNumberArgs, BillPartArgs, BillPartView, BillRow, BillStateView,
-    CloseShortArgs, JoinSaleArgs, OpenBillArgs, OtherPartArgs, PartWayView, ReferenceArgs,
-    TabAmountArgs,
+    CloseShortArgs, JoinSaleArgs, OpenBillArgs, OtherPartArgs, PartWayView, TabAmountArgs,
 };
 use crate::codec::{Define, Get, Put, Reader, TypeDef, MAX_REQUEST};
 use crate::error::{internal, refused_by, wrong_state, CounterError};
@@ -138,7 +131,6 @@ use crate::say::{TONES, WHOS};
 use crate::shop::{own_node_check, pairing_read, PlaceView, SettingsView};
 use crate::starter::{StarterDecisionView, StarterPaymentView, StarterSeenArgs, StarterStateView};
 use crate::tap::{tap_op, TapArgs, TapView};
-use crate::till::{TillRow, TillSaleView, TillStartArgs};
 use crate::views::{
     put_words, ActorRole, ActorView, AddNoteArgs, CancelArgs, CashArgs, ChangeFieldView,
     ChangeStateView, ChangeValueKind, ChangeValueView, CounterNetwork, DayTotalsArgs,
@@ -559,14 +551,8 @@ fn build_ops() -> Vec<Op> {
             Node,
             |c, (now, version): (u64, u32)| c.entry()?.confirm_change(now, version),
         ),
-        op(73, "add_reference", Node, |c, a: ReferenceArgs| {
-            c.entry()?.add_reference(a)
-        }),
         op(74, "open_bill", Node, |c, a: OpenBillArgs| {
             c.entry()?.open_bill(a)
-        }),
-        op(75, "add_bill_reference", Node, |c, a: ReferenceArgs| {
-            c.entry()?.add_bill_reference(a)
         }),
         op(76, "join_sale", Node, |c, a: JoinSaleArgs| {
             c.entry()?.join_sale(a)
@@ -593,21 +579,6 @@ fn build_ops() -> Vec<Op> {
             c.entry()?.cancel_bill(a)
         }),
         op(84, "bills", Node, |c, now: u64| c.entry()?.bills(now)),
-        op(85, "till_waiting", Node, |c, now: u64| {
-            c.entry()?.till_waiting(now)
-        }),
-        op(86, "till_start", Node, |c, a: TillStartArgs| {
-            c.entry()?.till_start(a)
-        }),
-        op(
-            87,
-            "till_not_now",
-            Node,
-            |c, (now, sale): (u64, Vec<u8>)| c.entry()?.till_not_now(now, &sale),
-        ),
-        op(88, "till_of_sale", Node, |c, index: u32| {
-            c.entry()?.till_of_sale(index)
-        }),
         op(89, "tap_answer", Zero, |_, a: TapArgs| Ok(tap_op(a))),
         op(90, "shop_lightning_seed", Node, |c, text: String| {
             c.entry()?.shop_lightning_seed(text)
@@ -822,7 +793,6 @@ fn definitions() -> Vec<TypeDef> {
         PartWayView::define(),
         BillStateView::define(),
         OpenBillArgs::define(),
-        ReferenceArgs::define(),
         JoinSaleArgs::define(),
         BillPartArgs::define(),
         OtherPartArgs::define(),
@@ -831,9 +801,6 @@ fn definitions() -> Vec<TypeDef> {
         CloseShortArgs::define(),
         BillPartView::define(),
         BillRow::define(),
-        TillRow::define(),
-        TillStartArgs::define(),
-        TillSaleView::define(),
         TapArgs::define(),
         TapView::define(),
         ChangeValueView::define(),

@@ -85,7 +85,6 @@ mod say;
 pub mod shop;
 mod starter;
 pub mod tap;
-mod till;
 mod views;
 
 #[cfg(test)]
@@ -93,8 +92,7 @@ mod tests;
 
 pub use bills::{
     BillKindView, BillNumberArgs, BillPartArgs, BillPartView, BillRow, BillStateView,
-    CloseShortArgs, JoinSaleArgs, OpenBillArgs, OtherPartArgs, PartWayView, ReferenceArgs,
-    TabAmountArgs,
+    CloseShortArgs, JoinSaleArgs, OpenBillArgs, OtherPartArgs, PartWayView, TabAmountArgs,
 };
 pub use call::{
     dispatch, error_response, protocol_description, Registry, MAX_NODES, REQUEST_MAGIC,
@@ -107,7 +105,6 @@ pub use rates::{RateCombineArgs, RateParseArgs, RateSourceView, RateView, Sample
 pub use say::{all_words, words_for};
 pub use shop::{PlaceView, SettingsView};
 pub use tap::{tag_content, tap_answer, TapArgs, TapView};
-pub use till::{TillRow, TillSaleView, TillStartArgs};
 pub use views::{
     ActorRole, ActorView, AddNoteArgs, CashArgs, CounterNetwork, HealthView, HeartbeatOutcome,
     LinkStepView, LinkView, OpenArgs, OpenRequestArgs, OpenTipArgs, OpenedView, OverrideArgs,

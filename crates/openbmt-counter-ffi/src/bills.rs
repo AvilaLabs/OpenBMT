@@ -1,5 +1,5 @@
-//! Bills, tabs and the till's reference through the bridge (CR-245 to
-//! CR-254): the arguments and views of ops 73 to 84, and the calls of the
+//! Bills and tabs through the bridge (CR-246 to CR-253): the arguments and
+//! views of ops 74 to 84, and the calls of the
 //! entry behind them. The words are the placeholders of the library until
 //! they are written (CR-255).
 
@@ -68,37 +68,18 @@ pub struct OpenBillArgs {
     pub kind: BillKindView,
     /// The amount in minor units of the shop's currency.
     pub amount_minor: u64,
-    /// The till's reference, when the cashier typed one (CR-245).
-    pub reference: Option<String>,
 }
 
 wire_record!(OpenBillArgs {
     now,
     kind,
-    amount_minor,
-    reference
+    amount_minor
 });
 wire_record_get!(OpenBillArgs {
     now,
     kind,
-    amount_minor,
-    reference
+    amount_minor
 });
-
-/// The arguments of `add_reference` (a sale) and `add_bill_reference` (a
-/// bill): the time, the sale index or the bill number, and the reference.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ReferenceArgs {
-    /// The time now.
-    pub now: u64,
-    /// The sale's receive index, or the bill's number.
-    pub id: u32,
-    /// The till's reference (CR-245).
-    pub reference: String,
-}
-
-wire_record!(ReferenceArgs { now, id, reference });
-wire_record_get!(ReferenceArgs { now, id, reference });
 
 /// The arguments of `join_sale` (CR-248).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -115,7 +96,7 @@ wire_record!(JoinSaleArgs { now, number, sale });
 wire_record_get!(JoinSaleArgs { now, number, sale });
 
 /// The arguments of `open_bill_part` (CR-248): those of `open_with_tip` for
-/// the bill's currency, with the bill's number, a reference and a note.
+/// the bill's currency, with the bill's number and a note.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BillPartArgs {
     /// The time now.
@@ -134,8 +115,6 @@ pub struct BillPartArgs {
     pub source_fetched_at: u64,
     /// The person at the till, when one is signed in.
     pub actor: Option<ActorView>,
-    /// The till's reference of the part (CR-245).
-    pub reference: Option<String>,
     /// A note (CR-206).
     pub note: Option<String>,
 }
@@ -149,7 +128,6 @@ wire_record!(BillPartArgs {
     source_label,
     source_fetched_at,
     actor,
-    reference,
     note
 });
 wire_record_get!(BillPartArgs {
@@ -161,7 +139,6 @@ wire_record_get!(BillPartArgs {
     source_label,
     source_fetched_at,
     actor,
-    reference,
     note
 });
 
@@ -260,7 +237,7 @@ wire_record!(BillPartView {
     counts
 });
 
-/// A bill, with what it has received (CR-246, CR-249, CR-254).
+/// A bill, with what it has received (CR-246, CR-249).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BillRow {
     /// The number.
@@ -269,8 +246,6 @@ pub struct BillRow {
     pub kind: BillKindView,
     /// The amount, in minor units.
     pub amount_minor: u64,
-    /// The till's reference, when it has one.
-    pub reference: Option<String>,
     /// When it opened.
     pub opened_at: u64,
     /// Where it stands.
@@ -297,7 +272,6 @@ wire_record!(BillRow {
     number,
     kind,
     amount_minor,
-    reference,
     opened_at,
     state,
     ended_at,
@@ -349,30 +323,10 @@ fn part_error<E: std::fmt::Display>(e: &PartRefused<E>) -> CounterError {
 }
 
 impl Entry {
-    /// CR-245: add the till's reference to a sale.
-    pub(crate) fn add_reference(&self, a: ReferenceArgs) -> Result<(), CounterError> {
-        self.run(Some(a.now), |node, _, _| {
-            node.add_reference(a.id, &a.reference)
-                .map_err(|e| bill_error(&e))
-        })
-    }
-
     /// CR-246: open a bill or a tab; returns its number.
     pub(crate) fn open_bill(&self, a: OpenBillArgs) -> Result<u32, CounterError> {
         self.run(Some(a.now), |node, _, _| {
-            node.open_bill(
-                kind_of(a.kind),
-                Amount(a.amount_minor),
-                a.reference.as_deref(),
-            )
-            .map_err(|e| bill_error(&e))
-        })
-    }
-
-    /// CR-245: add the till's reference to a bill.
-    pub(crate) fn add_bill_reference(&self, a: ReferenceArgs) -> Result<(), CounterError> {
-        self.run(Some(a.now), |node, _, _| {
-            node.add_bill_reference(a.id, &a.reference)
+            node.open_bill(kind_of(a.kind), Amount(a.amount_minor))
                 .map_err(|e| bill_error(&e))
         })
     }
@@ -400,7 +354,6 @@ impl Entry {
             let extras = SaleExtras {
                 note: a.note.as_deref(),
                 request: None,
-                reference: a.reference.as_deref(),
             };
             let opened = node
                 .open_bill_part(
@@ -525,7 +478,6 @@ fn row_of(v: &BillView, parts: Vec<BillPartView>) -> BillRow {
         number: v.bill.number(),
         kind: kind_view(v.bill.kind()),
         amount_minor: v.bill.amount().0,
-        reference: v.bill.reference().map(str::to_string),
         opened_at: v.bill.opened_at(),
         state: state_of(&v.bill),
         ended_at: ended.map_or(0, |e| e.at),

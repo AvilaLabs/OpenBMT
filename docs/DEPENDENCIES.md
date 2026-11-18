@@ -16,12 +16,12 @@ package version remains visible. The lists themselves are in `deps/`.
 |---|---|---|
 | Signer and core rules | `deps/openbmt-signer.txt` | 19 |
 | Counter | `deps/openbmt-counter-node.txt` | 78 |
-| Owner | `deps/openbmt-owner-node.txt` | 88 |
+| Owner | `deps/openbmt-owner-node.txt` | 78 |
 | Box | `deps/openbmt-box.txt` | 39 |
 | Books export | `deps/openbmt-books.txt` | 42 |
 | Key app library | `deps/openbmt-key-ffi.txt` | 44 |
 | Counter app library | `deps/openbmt-counter-ffi.txt` | 79 |
-| Owner app library | `deps/openbmt-owner-ffi.txt` | 94 |
+| Owner app library | `deps/openbmt-owner-ffi.txt` | 86 |
 | QR code encoder | `deps/openbmt-qr.txt` | 0 |
 | Price sources | `deps/openbmt-rates.txt` | 19 |
 
@@ -36,16 +36,6 @@ Where they come from:
   the same `secp256k1` package, and adds no package to any list.
 - **The link between devices, about 16 more.** ChaCha20-Poly1305 from the
   RustCrypto project, used to seal messages (LK-02).
-- **The web order key, 14 more for the owner.** `ed25519-dalek`, from the
-  dalek-cryptography project, signs what the owner phone sends a shop's
-  online store (`docs/WEB-ORDER-RULES.md`, WO-43), with its default features
-  off and only `zeroize` on. It brings `curve25519-dalek`, `ed25519`,
-  `signature`, `sha2`, `digest` and `block-buffer`, and at build time
-  `curve25519-dalek-derive` with `syn`, `quote`, `proc-macro2` and
-  `unicode-ident`, and `rustc_version` with `semver`. Ed25519 is used
-  because the store's PHP checks it with its own sodium functions, so the
-  plugin adds no library to the store; PHP has no such check for
-  secp256k1, the curve already in every list.
 - **Encrypted peer connections, 3 more.** The `bip324` crate and its two
   helpers, from the rust-bitcoin project, with no further dependencies.
 
@@ -72,12 +62,12 @@ Where they come from:
   in about 40 packages.
 - **The counter app library, the same 1 more.** The counter's list and
   `jni-sys`, bound the same way by hand. It adds nothing else.
-- **The owner app library, 6 more.** The owner's list and `jni-sys`, bound
+- **The owner app library, 8 more.** The owner's list and `jni-sys`, bound
   the same way by hand, and the PIN lock on key 1 (OA-60): `openbmt-lock`
   brings Argon2 and the helpers the Key app library already lists
-  (`argon2`, `base64ct`, `blake2`, `password-hash`, `rand_core`;
-  `block-buffer` and `digest` are in the owner's list for the web order
-  key); ChaCha20-Poly1305 was in the list for the link. Every one
+  (`argon2`, `base64ct`, `blake2`, `block-buffer`, `digest`,
+  `password-hash`, `rand_core`); ChaCha20-Poly1305 was in the list for the
+  link. Every one
   of them is in the lock file already, at the same version: this adds no
   package to it.
 - **The owner app library, the starter wallet's randomness, 1 more.**
@@ -122,26 +112,6 @@ for sealed messages and rust-bitcoin's inside `bip324`. Using the second
 for both would remove about 13 packages. It was looked at and not done:
 its tag comparison is not constant-time and it has had less review, and a
 smaller list is not worth a weaker primitive.
-
-## Packaging
-
-The Start9 package of the Box (`packaging/box/startos/`) is written in
-TypeScript against the `@start9labs/start-sdk` npm package, pinned by
-`package-lock.json` (the SDK to an exact version, everything else by the
-lockfile's versions and hashes). None of these packages is in the Box binary
-or in the container image, which is built from the Rust workspace alone
-(`packaging/box/Dockerfile`).
-
-They are not build-time only, though. The SDK bundles the package's
-TypeScript, with the parts of the SDK it imports, into the JavaScript of the
-`.s9pk` file, and StartOS runs that JavaScript on the shop's server to start,
-stop, configure and back up the Box. So the SDK and the parts of its lockfile
-that end up in that bundle are code that runs at the shop. They are not
-counted in `deps/` and are not checked by `scripts/deps-check.sh` or the Rust
-advisory check; a change of the SDK version is reviewed as a change of
-running code, and its advisories are checked by hand before a release.
-`node_modules/` is not committed. CI installs them with `npm ci`, which
-refuses a lockfile that does not match `package.json`.
 
 ## Rules
 

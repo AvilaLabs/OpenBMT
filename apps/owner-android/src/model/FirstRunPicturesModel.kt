@@ -11,7 +11,6 @@ object PictureTiming {
     enum class Picture(val loopMs: Int) {
         Welcome(3000),
         Practice(3000),
-        Till(2500),
         Money(3000),
         Why(2500),
         Usb(2500),

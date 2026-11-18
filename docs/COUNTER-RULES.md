@@ -1619,8 +1619,7 @@ by any means the phone has.
   earlier build's file is unchanged. The read is strict, as CR-42 says.
 - **CR-212.** The note is the owner's and the books': it is carried on the
   sale's line in the books' full ledger (BK-41), and goes to no other device
-  than the owner's. The POS reader is told of a sale as before and is never
-  told its note: the record of a note changes nothing it is sent.
+  than the owner's.
 - **CR-213.** On New sale, under the keypad's main button, the counter app has
   a quieter button "Request to send". It opens a page with the note field,
   which says "Optional. Like a booking name or date.", and the choice of
@@ -1897,27 +1896,14 @@ in this section: it is taken or refused as CR-236 says.
 - **CR-244.** Every state and refusal of this section has words under
   `docs/SCREEN-RULES.md`.
 
-## 25. Bills, tabs and the till's reference
+## 25. Bills and tabs
 
 A table splits its check, a guest pays a deposit and then the rest, a bar
 keeps a tab open all night. A bill is the amount owed in the shop's money,
 paid in parts: each bitcoin part is an ordinary sale with every rule of the
 sections above, and a part paid another way is written down by the cashier.
-A tab is a bill whose amount grows while it is open. The till's reference
-(its check or receipt number) can ride on a sale or a bill, so that what the
-till closed as bitcoin can be matched against what arrived
-(`docs/BOOKS-RULES.md` §13).
+A tab is a bill whose amount grows while it is open.
 
-- **CR-245.** A sale or a bill may carry the till's reference: 1 to 32
-  characters of `A-Z`, `a-z`, `0-9`, `-`, `_`, `/`, `#` and `.`. It is set
-  when the sale or the bill is opened, or added once later; one that already
-  has a reference takes no second one. A reference that does not fit is
-  refused with nothing written. It is written as a `Sale` record with tag 25
-  (the time, then the sale's index or the bill's number as CR-247 says, a
-  length byte and the text). The counter does not read it; the books and the
-  match of `docs/BOOKS-RULES.md` §13 do. Unlike a note (CR-212), the
-  reference is also given to the POS reader with the sale's events, because
-  it is the till's own number.
 - **CR-246.** A bill has a number, an amount in the minor units of the
   shop's currency (CR-193), above 0 and at most the largest amount of
   CR-05, a kind (a bill or a tab) and a state: open, settled, closed short
@@ -1963,15 +1949,11 @@ till closed as bitcoin can be matched against what arrived
   7 if they are to be refunded.
 - **CR-253.** Bills are stored in their own file, `bills.bin`, magic `OBM[`,
   version 1, written by atomic steps: the next bill number, then each open
-  bill (number, kind, amount, currency, reference, its parts: the sale's
+  bill (number, kind, amount, currency, its parts: the sale's
   index, or the amount and way of a part paid another way) and each bill
   that ended in the last 7 days, oldest first. At most 256 bills are open
   and a bill has at most 32 parts; a new bill or part past those is refused
   with words. The read is strict and bounded, as CR-42 reads sales.
-- **CR-254.** The Paid screen of a sale shows the sale's number and, when it
-  has one, the till's reference, large enough to copy into the till's
-  payment note, because a fiscal till may need them on its receipt
-  (`docs/BOOKS-RULES.md` §13).
 - **CR-255.** Every state and refusal of this section has words under
   `docs/SCREEN-RULES.md`, listed in `docs/screens/counter.md` and checked
   as every other words are; the labels of the counter app's bill screens
@@ -2068,49 +2050,6 @@ screen, and a manager's PIN confirms it. The codecs and checks are in
 - **CR-264.** Every state and refusal of this section has words under
   `docs/SCREEN-RULES.md`, listed in `docs/screens/counter.md`.
 
-
-## 27. A sale from the till
-
-A till that works with the Box (the Odoo module, `docs/BOX-RULES.md` §5c)
-asks one counter to take a payment of a set amount. The cashier starts it
-on that counter, and from then it is an ordinary sale with every rule of the
-sections above. These rules are the counter's side of BX-76 to BX-78.
-
-- **CR-266. What is taken.** A POS notice from the Box (BX-76) that is a
-  sale request is taken only from the Box of the settings in force, sealed
-  to this counter, with the shop's currency, an amount above 0 and at most
-  the largest amount of CR-05, a reference of at most 40 printable ASCII
-  characters, a lapse time not past, and a till's sale the counter does not
-  already hold. Anything else is
-  dropped with a note and nothing sent. At most 8 requests wait; one more
-  is dropped with a note, and the Box's own limit and lapse (BX-76) tell
-  the till.
-- **CR-267. What the cashier sees.** While a request waits, the counter's
-  home screen shows "From the till" with its amount, its reference and the
-  minutes left, and the buttons Start and Not now. The oldest request not
-  lapsed is shown first. The amount cannot be changed at the counter. Not
-  now hides it from the screen and sends nothing; the request lapses at the
-  Box as BX-76 says.
-- **CR-268. Start.** Start opens a sale for that amount exactly as a sale
-  typed at the counter (sections 2 and 3: the counter's own rate, address
-  and quote), and writes a `Sale` record with the next free tag naming the
-  till's sale (its 16 bytes), stored before the sale's first quote is shown,
-  as CR-59 stores a quote. The request's reference becomes the sale's
-  till's reference (CR-245) if it fits that rule, and is otherwise only
-  shown. The counter then sends the Box a signed "opened" notice naming the
-  till's sale (BX-77). Every later notice of that sale names it too: paid,
-  final and unpaid again.
-- **CR-269. A cancel.** A cancel for a request not started removes it with
-  nothing sent. A cancel for a sale already started does not end it: the
-  counter shows "The till cancelled this sale" on that sale, and the cashier
-  ends it as any sale is ended. A payment that arrives anyway is a payment
-  as any other: it is counted, shown and can be refunded. The counter never
-  ends a sale, and never marks one paid, on the Box's word alone.
-- **CR-270. After a restart.** Waiting requests are kept in memory only, as
-  the Box keeps them (BX-76), so a restart forgets them. A sale already
-  started keeps its till's sale from its record and goes on naming it.
-- **CR-271.** Every state and refusal of this section has words under
-  `docs/SCREEN-RULES.md`, and the tests name these rules.
 
 ## 28. The starter line
 

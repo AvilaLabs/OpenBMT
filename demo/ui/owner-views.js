@@ -301,7 +301,7 @@
   }
 
   /**
-   * Controller.kt:757 showFirstStart(message): the owner app's first screen: the title block and the next step of the
+   * Controller.kt:638 showFirstStart(message): the owner app's first screen: the title block and the next step of the
    * words, with Make a new shop wallet and Use setup text in the footer. [d] has the words and the two labels.
    */
   function showFirstStart(ui, d) {

@@ -54,7 +54,6 @@ object ProtocolDecoderTest {
         ownBoxThroughTheLibrary()
         requestFrames()
         requestDetailFrame()
-        webFrames()
         shopLightningFrames()
         println("ProtocolDecoderTest: ok")
     }
@@ -248,19 +247,6 @@ object ProtocolDecoderTest {
         check(outbox[0].signedAt == 1_700_000_000L && outbox[0].size == 300L && outbox[0].words.heading == "Words")
         rejects("an outbox kind tag") { decodeResponse(outboxFrame(kind = 5)).let { r -> r.list { r.outboxRow() } } }
 
-        val pos = decodeResponse(posStateFrame()).posState()
-        check(pos.setup!!.vendor == PosVendor.Clover && pos.setup!!.location == "MERCH1")
-        check(pos.setup!!.tenderNames == listOf("Bitcoin") && pos.setup!!.currencies == listOf("USD"))
-        check(pos.lastPollAt == 1_700_000_000L && pos.openAlerts.size == 2)
-        val tender = pos.openAlerts[0]
-        check(tender.key.kind == PosAlertKind.BitcoinTip && tender.raisedAt == 5L)
-        check((tender.key.subject as PosSubject.Tender).tender == "T1" && tender.words.heading == "Words")
-        check((pos.openAlerts[1].key.subject as PosSubject.Sale).index == 7L)
-        check(pos.acknowledgedAlerts == 1L && pos.trackedOrders == 4L && pos.matches == 3L)
-        check(pos.matchesByOrder == 1L && pos.retiredMatches == 9L)
-        rejects("a vendor tag") { decodeResponse(posStateFrame(vendor = 2)).posState() }
-        rejects("an alert kind tag") { decodeResponse(posStateFrame(kind = 9)).posState() }
-        rejects("a subject tag") { decodeResponse(posStateFrame(subject = 2)).posState() }
         val paid = decodeResponse(paidCheckFrame()).paidCheck()
         check(paid.kept && paid.full && paid.unreadable.size == 1 && paid.unreadable[0].size == 32 && paid.held.size == 1 && paid.held[0].size == 32 && paid.held[0][0] == 5.toByte() && paid.alarms.size == 1 && paid.arrived.size == 1 && paid.waiting.size == 1 && paid.notCheckable.isEmpty())
         val alarm = paid.alarms[0]
@@ -274,13 +260,6 @@ object ProtocolDecoderTest {
         val days = decodeResponse(header(0, Writer().u32(1).bytes(ByteArray(32) { 3 }).u32(4).u64(9_000).u32(2).u32(1).u32(0).u32(1).u64(7_000).bool(true).toByteArray())).let { r -> r.list { r.paidDay() } }
         check(days.size == 1 && days[0].sales == 4L && days[0].totalSats == 9_000L && days[0].seen == 2L && days[0].waiting == 1L)
         check(days[0].tooOld == 0L && days[0].missing == 1L && days[0].seenSats == 7_000L && days[0].differs)
-        val reply = decodeResponse(posReplyFrame()).posReply()
-        check(reply.again && !reply.moreLeft && reply.pages == 2L && reply.ordersRead == 150L)
-        check(reply.newMatches == 1L && reply.newAlerts.isEmpty() && reply.cleared == 3L && reply.retired == 4L)
-        val request = decodeResponse(header(0, Writer().u8(1).string("https://x/y").bytes(byteArrayOf(1, 2)).toByteArray())).posRequest()
-        check(request.method == PosMethod.Post && request.url == "https://x/y" && request.body.size == 2)
-        rejects("a method tag") { decodeResponse(header(0, Writer().u8(2).string("u").bytes(ByteArray(0)).toByteArray())).posRequest() }
-
         val pump = decodeResponse(header(0, Writer().u32(1).string("note").u8(1).toByteArray())).pump()
         check(pump.notes == listOf("note") && pump.stopped)
     }
@@ -714,40 +693,6 @@ object ProtocolDecoderTest {
         }
     }
 
-    // ---- the store's web orders ----
-
-    private fun webFrames() {
-        val state = Writer().u8(0).u8(2).string("Shop").string("https://shop.example").string("ab12 cd34")
-            .u8(0).u8(1).u64(1_700_000_000L).u8(0).u8(0).u8(1).u64(40).u32(100).u8(0)
-            .u32(5).u32(1).u32(3).u32(0).u32(1).u64(9).string("bc1qweb").u64(2_500).u64(7).toByteArray()
-        val off = Writer().u32(1).u64(11).u64(150_000).toByteArray()
-        val read = decodeResponse(header(0, state + wordsBytes() + off + wordsBytes())).let { it.webState().also { _ -> it.end() } }
-        check(read.off == null && read.pairing == WebPairing.Paired && read.shopName == "Shop")
-        check(read.url == "https://shop.example" && read.fingerprint == "ab12 cd34" && read.code == null)
-        check(read.lastVisit == 1_700_000_000L && read.failure == null && read.retryAt == null && read.left == 40L)
-        check(read.addressesSent == 100L && read.trouble == null && read.orders == 5L && read.waiting == 1L)
-        check(read.told == 3L && read.noticesWaiting == 0L && read.refused.size == 1)
-        check(read.refused[0].order == 9L && read.refused[0].sats == 2_500L && read.refused[0].address == "bc1qweb")
-        check(read.amountOff.size == 1 && read.amountOff[0].order == 11L && read.amountOff[0].sats == 150_000L)
-        rejects("a pairing that is not defined") {
-            decodeResponse(header(0, Writer().u8(0).u8(9).toByteArray())).webState()
-        }
-
-        val call = Writer().u8(2).u8(1).u8(1).string("https://shop.example/wp-json/openbmt/v1/range")
-            .u32(1).string("X-OBM-Mac").string("00ff").string("text/plain").bytes(byteArrayOf(1, 2, 3)).toByteArray()
-        val step = decodeResponse(header(0, call)).let { it.webStep().also { _ -> it.end() } }
-        check(step.step == WebStepKind.Call && step.call!!.kind == WebCallKind.Range)
-        check(step.call!!.headers == listOf("X-OBM-Mac" to "00ff") && step.call!!.body.size == 3)
-        val idle = decodeResponse(header(0, Writer().u8(0).u8(0).toByteArray())).webStep()
-        check(idle.step == WebStepKind.Idle && idle.call == null)
-        rejects("a call step without a call") {
-            decodeResponse(header(0, Writer().u8(2).u8(0).toByteArray())).webStep()
-        }
-        rejects("an idle step with a call") {
-            decodeResponse(header(0, Writer().u8(0).u8(1).u8(0).string("u").u32(0).string("t").bytes(ByteArray(0)).toByteArray())).webStep()
-        }
-    }
-
     // ---- Shop Lightning on the owner phone ----
 
     /** The `shop_lightning_preview` request of [shopLightningEdit], as the Rust test of the same name writes it. */
@@ -1136,18 +1081,6 @@ object ProtocolDecoderTest {
             lightning = LightningAction.Remove,
         )
 
-    private fun posStateFrame(vendor: Int = 1, kind: Int = 7, subject: Int = 0): ByteArray {
-        val out = ByteArrayOutputStream()
-        out.write(Writer().u8(1).u8(vendor).string("MERCH1").u32(1).string("Bitcoin").u32(1).string("USD").toByteArray())
-        out.write(Writer().u8(1).u64(1_700_000_000).u32(2).toByteArray())
-        out.write(Writer().u8(kind).u8(subject).string("O1").string("T1").u64(5).toByteArray())
-        words(out)
-        out.write(Writer().u8(0).u8(1).bytes(ByteArray(32) { 2 }).u32(7).u64(6).toByteArray())
-        words(out)
-        out.write(Writer().u32(1).u32(4).u32(3).u32(1).u64(9).toByteArray())
-        return header(0, out.toByteArray())
-    }
-
     private fun paidCheckFrame(): ByteArray {
         val line = { sale: Long -> Writer().bytes(ByteArray(32) { 2 }).u32(sale).u64(900).u64(1_700_000_000).toByteArray() }
         val out = ByteArrayOutputStream()
@@ -1161,9 +1094,6 @@ object ProtocolDecoderTest {
         out.write(Writer().u32(3).toByteArray())
         return header(0, out.toByteArray())
     }
-
-    private fun posReplyFrame(): ByteArray =
-        header(0, Writer().bool(true).bool(false).u32(2).u32(150).u32(1).u32(0).u32(3).u64(4).toByteArray())
 
     private fun outboxFrame(kind: Int = 1): ByteArray {
         val out = ByteArrayOutputStream()

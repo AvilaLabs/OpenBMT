@@ -75,45 +75,11 @@ pub enum OpenRefused<E> {
     BadName,
     /// CR-206: the note on the sale is not plain text of 1 to 64 characters.
     BadNote,
-    /// CR-245: the till's reference on the sale does not fit.
-    BadReference,
     /// CR-03: the next index could not be stored, so no address was handed
     /// out.
     AddressNotStored(StoreFault<E>),
     /// CR-40: another write failed.
     Store(StoreFault<E>),
-}
-
-/// Why a request from the till was not started (CR-268).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum TillStartRefused<E> {
-    /// CR-266: no such request waits, or it lapsed.
-    NotWaiting,
-    /// CR-268: opening the sale was refused, for the reason of a sale typed
-    /// at the counter. The request still waits.
-    Open(OpenRefused<E>),
-}
-
-impl<E> TillStartRefused<E> {
-    /// The rule the refusal belongs to.
-    pub fn rule(&self) -> &'static str {
-        match self {
-            Self::NotWaiting => "CR-266",
-            Self::Open(e) => e.rule(),
-        }
-    }
-}
-
-impl<E: fmt::Display> fmt::Display for TillStartRefused<E> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::NotWaiting => write!(
-                f,
-                "CR-266: no request from the till waits for this sale, or it lapsed"
-            ),
-            Self::Open(e) => write!(f, "{e}"),
-        }
-    }
 }
 
 impl<E> OpenRefused<E> {
@@ -133,7 +99,6 @@ impl<E> OpenRefused<E> {
             Self::NoAddress | Self::AddressInUse => "CR-02",
             Self::BadName => "CR-61",
             Self::BadNote => "CR-206",
-            Self::BadReference => "CR-245",
             Self::AddressNotStored(_) => "CR-03",
             Self::Store(_) => "CR-40",
         }
@@ -190,10 +155,6 @@ impl<E: fmt::Display> fmt::Display for OpenRefused<E> {
             Self::BadNote => write!(
                 f,
                 "a note is plain text of 1 to 64 characters with no control character"
-            ),
-            Self::BadReference => write!(
-                f,
-                "a reference is 1 to 32 characters of letters, digits and - _ / # ."
             ),
             Self::AddressNotStored(e) => write!(
                 f,
@@ -408,17 +369,13 @@ impl<E: fmt::Display> fmt::Display for NoteRefused<E> {
 
 impl<E: fmt::Debug + fmt::Display> std::error::Error for NoteRefused<E> {}
 
-/// Why a bill, a tab or a reference was refused (CR-245 to CR-253).
+/// Why a bill or a tab was refused (CR-246 to CR-253).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BillRefused<E> {
     /// CR-78: the counter has no sale with this index.
     UnknownSale(u32),
     /// CR-246: the counter has no bill with this number.
     UnknownBill(u32),
-    /// CR-245: the reference is not 1 to 32 characters of the allowed ones.
-    BadReference,
-    /// CR-245: the sale or the bill has a reference already.
-    AlreadyReferenced,
     /// CR-246: the amount is nothing, or more than the largest amount.
     BadAmount,
     /// CR-253: 256 bills are open already.
@@ -466,7 +423,6 @@ impl<E> BillRefused<E> {
         match self {
             Self::UnknownSale(_) => "CR-78",
             Self::UnknownBill(_) | Self::BadAmount | Self::NotOpen => "CR-246",
-            Self::BadReference | Self::AlreadyReferenced => "CR-245",
             Self::TooManyOpen | Self::TooManyParts => "CR-253",
             Self::SaleInABill(_) | Self::SaleEnded | Self::OtherCurrency => "CR-248",
             Self::NotATab | Self::BelowReceived { .. } => "CR-251",
@@ -484,11 +440,6 @@ impl<E: fmt::Display> fmt::Display for BillRefused<E> {
         match self {
             Self::UnknownSale(i) => write!(f, "there is no sale with index {i}"),
             Self::UnknownBill(n) => write!(f, "there is no bill with number {n}"),
-            Self::BadReference => write!(
-                f,
-                "a reference is 1 to 32 characters of letters, digits and - _ / # ."
-            ),
-            Self::AlreadyReferenced => write!(f, "it has a reference already"),
             Self::BadAmount => write!(f, "a bill is for more than nothing and a limited amount"),
             Self::TooManyOpen => write!(f, "256 bills are open already"),
             Self::TooManyParts => write!(f, "the bill has 32 parts already"),

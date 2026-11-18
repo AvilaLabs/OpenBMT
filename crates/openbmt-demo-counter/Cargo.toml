@@ -21,6 +21,5 @@ openbmt-counter-node = { path = "../openbmt-counter-node", default-features = fa
 openbmt-demo = { path = "../openbmt-demo", default-features = false }
 openbmt-kernel-random = { path = "../openbmt-kernel-random" }
 openbmt-net-io = { path = "../openbmt-net-io" }
-openbmt-pos = { path = "../openbmt-pos" }
 openbmt-watch = { path = "../openbmt-watch" }
 bitcoin = { version = "=0.32.8", default-features = false, features = ["std"] }

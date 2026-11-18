@@ -27,8 +27,8 @@ object Giving {
     fun endsAsGift(place: Place, state: SaleState): Boolean = isGiving(place) && SaleModel.isPaid(state)
 
     /**
-     * GV-13: whether the home screens offer the steps of a till that sells: the requests from the Box till and the
-     * cashier's lock. Each stays in the settings.
+     * GV-13: whether the home screens offer the steps of a till that sells: the cashier's lock. It stays in the
+     * settings.
      */
     fun homeOffersTillSteps(place: Place): Boolean = !isGiving(place)
 

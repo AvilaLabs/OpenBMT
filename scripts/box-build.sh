@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
-# The Box binary, built the way packaging/box/Dockerfile builds it, with the
-# directories of the build mapped to fixed names so that the binary does not
-# depend on where the checkout or the cargo registry is (it embeds the paths of
-# its dependencies' sources otherwise). Two builds of one commit give the same
+# The Box binary, built with the directories of the build mapped to fixed
+# names so that the binary does not depend on where the checkout or the cargo
+# registry is (it embeds the paths of its dependencies' sources otherwise). Two builds of one commit give the same
 # binary; scripts/repro-check.sh checks that.
 #
 # Usage: scripts/box-build.sh        (CARGO_TARGET_DIR picks the target directory)

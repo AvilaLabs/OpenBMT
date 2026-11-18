@@ -44,8 +44,6 @@ const SOURCES = {
   },
   // The page's controller for the owner's home (../web2): Controller.kt and Screens.kt are the owner's.
   "../web2/owner-controller.js": { "Controller.kt": "apps/owner-android/src/android/Controller.kt", "Screens.kt": "apps/owner-android/src/android/Screens.kt" },
-  // The page's register view (../web2): the part of the owner's till screen that says what was read.
-  "../web2/register-views.js": { "PosScreen.kt": "apps/owner-android/src/android/PosScreen.kt" },
 };
 
 /** The comments of a JS file that name a Kotlin line: [file, line, name]. */

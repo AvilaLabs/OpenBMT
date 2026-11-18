@@ -24,24 +24,9 @@ fn identity(n: u8) -> Option<Identity> {
     Identity::from_secret_bytes(&[n; 32]).ok()
 }
 
-/// The key of the shop's Box in the record that has one.
-pub fn demo_box() -> Option<Identity> {
-    identity(4)
-}
-
 /// The pairing record of the demo counter on regtest, as its bytes, or
 /// `None` when a key could not be made.
 pub fn demo_record() -> Option<Vec<u8>> {
-    record(false)
-}
-
-/// The same record for a shop that has a Box (the Box is in the settings),
-/// which is the one that sends the counter the requests of the shop's till.
-pub fn demo_record_with_box() -> Option<Vec<u8>> {
-    record(true)
-}
-
-fn record(with_box: bool) -> Option<Vec<u8>> {
     let owner = identity(1)?;
     let approver = identity(2)?;
     let counter = identity(3)?;
@@ -53,11 +38,6 @@ fn record(with_box: bool) -> Option<Vec<u8>> {
     settings.min_sale_sats = 0;
     settings.devices.insert(counter.device_id());
     settings.counters.insert(counter.device_id(), 10_000);
-    if with_box {
-        let shop_box = demo_box()?.device_id();
-        settings.devices.insert(shop_box);
-        settings.boxes.insert(shop_box);
-    }
     let signed = SignedSettings {
         owner_sig: settings.sign(&owner),
         approver_sig: Some(settings.sign(&approver)),
@@ -109,16 +89,6 @@ mod tests {
             batch.scripts.first(),
             Some(&wallet.receive_script(0).expect("a script"))
         );
-    }
-
-    #[test]
-    fn the_record_with_a_box_names_the_box_in_its_settings() {
-        let bytes = demo_record_with_box().expect("a record");
-        let record = PairingRecord::from_bytes(&bytes).expect("it reads back");
-        let shop_box = demo_box().expect("a key").device_id();
-        assert!(record.settings.settings.boxes.contains(&shop_box));
-        let plain = PairingRecord::from_bytes(&demo_record().expect("a record")).expect("reads");
-        assert!(plain.settings.settings.boxes.is_empty());
     }
 
     #[test]

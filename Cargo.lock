@@ -260,33 +260,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "curve25519-dalek"
-version = "4.1.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "97fb8b7c4503de7d6ae7b42ab72a5a59857b4c937ec27a3d4539dba95b5ab2be"
-dependencies = [
- "cfg-if",
- "cpufeatures",
- "curve25519-dalek-derive",
- "digest",
- "fiat-crypto",
- "rustc_version",
- "subtle",
- "zeroize",
-]
-
-[[package]]
-name = "curve25519-dalek-derive"
-version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f46882e17999c6cc590af592290432be3bce0428cb0d5f8b6715e4dc7b383eb3"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.119",
-]
-
-[[package]]
 name = "deranged"
 version = "0.5.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -308,34 +281,6 @@ name = "dnssec-prover"
 version = "0.6.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d9468f1a08c50bd1e5ad91b151e11ce8e806f8fa1c1eb9b07f66c7011de45a2e"
-
-[[package]]
-name = "ed25519"
-version = "2.2.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "115531babc129696a58c64a4fef0a8bf9e9698629fb97e9e40767d235cfbcd53"
-dependencies = [
- "signature",
-]
-
-[[package]]
-name = "ed25519-dalek"
-version = "2.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "70e796c081cee67dc755e1a36a0a172b897fab85fc3f6bc48307991f64e4eca9"
-dependencies = [
- "curve25519-dalek",
- "ed25519",
- "sha2",
- "subtle",
- "zeroize",
-]
-
-[[package]]
-name = "fiat-crypto"
-version = "0.2.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "28dea519a9695b9977216879a3ebfddf92f1c08c05d984f8996aecd6ecdc811d"
 
 [[package]]
 name = "find-msvc-tools"
@@ -627,12 +572,9 @@ name = "openbmt-box"
 version = "0.1.0"
 dependencies = [
  "openbmt-core",
- "openbmt-counter",
  "openbmt-courier",
  "openbmt-link",
  "openbmt-net-io",
- "openbmt-pos",
- "openbmt-pos-readers",
 ]
 
 [[package]]
@@ -669,7 +611,6 @@ dependencies = [
  "openbmt-net-io",
  "openbmt-owner",
  "openbmt-owner-node",
- "openbmt-pos",
  "openbmt-qr",
  "openbmt-rates",
  "openbmt-signer",
@@ -688,7 +629,6 @@ dependencies = [
  "openbmt-lightning-node",
  "openbmt-link",
  "openbmt-net-io",
- "openbmt-pos",
  "openbmt-watch",
  "tokio",
 ]
@@ -727,7 +667,6 @@ dependencies = [
  "openbmt-demo",
  "openbmt-kernel-random",
  "openbmt-net-io",
- "openbmt-pos",
  "openbmt-watch",
 ]
 
@@ -745,7 +684,6 @@ dependencies = [
  "openbmt-owner",
  "openbmt-owner-ffi",
  "openbmt-owner-node",
- "openbmt-pos",
  "openbmt-watch",
 ]
 
@@ -858,7 +796,6 @@ dependencies = [
  "bip39",
  "bitcoin",
  "chacha20poly1305",
- "ed25519-dalek",
  "openbmt-approver",
  "openbmt-bbqr",
  "openbmt-core",
@@ -911,33 +848,12 @@ dependencies = [
  "openbmt-net",
  "openbmt-net-io",
  "openbmt-owner",
- "openbmt-pos",
- "openbmt-pos-readers",
  "openbmt-rates",
  "openbmt-requests",
  "openbmt-session",
  "openbmt-signer",
  "openbmt-spend",
  "openbmt-watch",
-]
-
-[[package]]
-name = "openbmt-pos"
-version = "0.1.0"
-dependencies = [
- "bitcoin",
- "openbmt-core",
- "openbmt-counter",
-]
-
-[[package]]
-name = "openbmt-pos-readers"
-version = "0.1.0"
-dependencies = [
- "openbmt-core",
- "openbmt-counter",
- "openbmt-json",
- "openbmt-pos",
 ]
 
 [[package]]
@@ -1093,15 +1009,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ec0be4795e2f6a28069bec0b5ff3e2ac9bafc99e6a9a7dc3547996c5c816922c"
 
 [[package]]
-name = "rustc_version"
-version = "0.4.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cfcb3a22ef46e85b45de6ee7e79d063319ebb6594faafcf1c225ea92ab6e9b92"
-dependencies = [
- "semver",
-]
-
-[[package]]
 name = "secp256k1"
 version = "0.29.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1120,12 +1027,6 @@ checksum = "d4387882333d3aa8cb20530a17c69a3752e97837832f34f6dccc760e715001d9"
 dependencies = [
  "cc",
 ]
-
-[[package]]
-name = "semver"
-version = "1.0.28"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8a7852d02fc848982e0c167ef163aaff9cd91dc640ba85e263cb1ce46fae51cd"
 
 [[package]]
 name = "serde"
@@ -1171,27 +1072,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "sha2"
-version = "0.10.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a7507d819769d01a365ab707794a4084392c824f54a7a6a7862f8c3d0892b283"
-dependencies = [
- "cfg-if",
- "cpufeatures",
- "digest",
-]
-
-[[package]]
 name = "shlex"
 version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f8fadd59c855ef2080decdef8ff161eb6661b86933c9d82e5ba29dc602a55aba"
-
-[[package]]
-name = "signature"
-version = "2.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "77549399552de45a898a580c1b41d445bf730df867cc44e6c0233bbc4b8329de"
 
 [[package]]
 name = "socket2"

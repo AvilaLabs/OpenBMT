@@ -83,24 +83,11 @@ const key = (k) => ({ key: k, preventDefault() {} });
 const labels = (list) => list.map((x) => x.textContent);
 
 test_words: {
-  assert.deepEqual(Shell.BAR.map((t) => t.name), ['Customer', 'Café', 'With your register', 'When something goes wrong']);
-  assert.deepEqual(Shell.BAR[2].menu, ['Your register sends the amount', 'Square', 'Clover']);
-  assert.deepEqual(Shell.BAR[3].menu, ['A short payment', 'A cancelled payment']);
-  assert.deepEqual(Shell.SCENARIOS, ['Customer', 'Café', 'Your register sends the amount', 'Square', 'Clover', 'A short payment', 'A cancelled payment']);
+  assert.deepEqual(Shell.BAR.map((t) => t.name), ['Customer', 'Café', 'When something goes wrong']);
+  assert.deepEqual(Shell.BAR[2].menu, ['A short payment', 'A cancelled payment']);
+  assert.deepEqual(Shell.SCENARIOS, ['Customer', 'Café', 'A short payment', 'A cancelled payment']);
   assert.equal(Shell.CARDS.Customer.heading, 'You paid a shop in bitcoin.');
   assert.equal(Shell.CARDS['Café'].heading, 'That is a day at the counter.');
-  assert.equal(Shell.CARDS.Square.heading, 'An earlier manual Square style illustration.');
-  assert.deepEqual(Shell.CARDS.Square.lines, [
-    'The cashier rang a separate sale on a Square style screen and the counter.',
-    'This hand built illustration is not a supported Square or OpenBMT tender integration.',
-    'Reconcile the two records manually; no order closes automatically.',
-  ]);
-  assert.equal(Shell.CARDS.Clover.heading, 'That is a sale with Clover.');
-  assert.deepEqual(Shell.CARDS.Clover.lines, [
-    'The cashier rang it up on Clover and on the counter.',
-    'The order was closed as Bitcoin.',
-    'The owner\'s phone matched the two, and would raise an alert if they did not match.',
-  ]);
   assert.equal(Shell.CARDS['Something goes wrong'].heading, 'A short payment never turns green.');
   assert.equal(Shell.CARDS.Cancelled.heading, 'A cancelled payment turns red.');
   assert.deepEqual(Shell.CARDS.Cancelled.lines, [
@@ -117,11 +104,11 @@ test_bar: {
   const chosen = [];
   shell.onScenario = (name) => chosen.push(name);
   const tabs = [...shell.tabs.values()];
-  assert.deepEqual(tabs.map((t) => t.label.textContent), ['Customer', 'Café', 'With your register', 'When something goes wrong']);
+  assert.deepEqual(tabs.map((t) => t.label.textContent), ['Customer', 'Café', 'When something goes wrong']);
   // The select: a place for each scenario without a menu, and an optgroup of items for each menu.
   const groups = shell.scenSel.children.filter((c) => c.tag === 'optgroup');
-  assert.deepEqual(groups.map((g) => g.label), ['With your register', 'When something goes wrong']);
-  assert.deepEqual(groups.map((g) => labels(g.children)), [Shell.BAR[2].menu, Shell.BAR[3].menu]);
+  assert.deepEqual(groups.map((g) => g.label), ['When something goes wrong']);
+  assert.deepEqual(groups.map((g) => labels(g.children)), [Shell.BAR[2].menu]);
   assert.deepEqual(labels(shell.scenSel.children.filter((c) => c.tag === 'option' && c.value)), ['Customer', 'Café']);
 
   // A tab without a menu names its scenario; it has no menu and no chevron.
@@ -130,44 +117,29 @@ test_bar: {
   assert.deepEqual(chosen, ['Customer', 'Café']);
   assert.equal(tabs[0].list, undefined);
 
-  // "With your register": the label opens the choice screen; the chevron beside it opens the menu.
-  tabs[2].label.click();
-  assert.equal(chosen.at(-1), 'With your register');
-  assert.ok(tabs[2].list.hidden, 'a click on the label opens no menu');
-  const chev = tabs[2].tab.children.find((c) => c.classes.has('tab-chev'));
-  assert.ok(chev, 'a chevron of its own');
-  chev.click();
-  assert.ok(!tabs[2].list.hidden, 'the chevron opens the menu');
-  assert.equal(chev.getAttribute('aria-expanded'), 'true');
-  assert.deepEqual(labels([...tabs[2].items.values()]), Shell.BAR[2].menu);
-  // Picking an item starts that sub-scenario and closes the menu.
-  tabs[2].items.get('Clover').click();
-  assert.equal(chosen.at(-1), 'Clover');
-  assert.ok(tabs[2].list.hidden);
-
   // "When something goes wrong": the label opens the menu (a click, or Enter, which is a click), and carries the chevron.
-  assert.ok(tabs[3].label.classes.has('chevron'));
-  tabs[3].label.click();
-  assert.ok(!tabs[3].list.hidden);
-  assert.equal(chosen.length, 5 - 1, 'opening a menu starts nothing');
-  tabs[3].label.click();
-  assert.ok(tabs[3].list.hidden, 'a second click closes it');
+  assert.ok(tabs[2].label.classes.has('chevron'));
+  tabs[2].label.click();
+  assert.ok(!tabs[2].list.hidden);
+  assert.equal(chosen.length, 2, 'opening a menu starts nothing');
+  tabs[2].label.click();
+  assert.ok(tabs[2].list.hidden, 'a second click closes it');
   // Arrow down opens it from the keyboard and moves to the first item; arrows move, Esc closes and gives the focus back.
-  for (const f of tabs[3].label.handlers.keydown || []) f(key('ArrowDown'));
-  assert.ok(!tabs[3].list.hidden);
-  assert.equal(document.activeElement, tabs[3].items.get('A short payment'));
-  for (const f of tabs[3].items.get('A short payment').handlers.keydown) f(key('ArrowDown'));
-  assert.equal(document.activeElement, tabs[3].items.get('A cancelled payment'));
-  for (const f of tabs[3].items.get('A cancelled payment').handlers.keydown) f(key('ArrowDown'));
-  assert.equal(document.activeElement, tabs[3].items.get('A short payment'), 'the arrows wrap');
-  for (const f of tabs[3].items.get('A short payment').handlers.keydown) f(key('Escape'));
-  assert.ok(tabs[3].list.hidden);
-  assert.equal(document.activeElement, tabs[3].label);
+  for (const f of tabs[2].label.handlers.keydown || []) f(key('ArrowDown'));
+  assert.ok(!tabs[2].list.hidden);
+  assert.equal(document.activeElement, tabs[2].items.get('A short payment'));
+  for (const f of tabs[2].items.get('A short payment').handlers.keydown) f(key('ArrowDown'));
+  assert.equal(document.activeElement, tabs[2].items.get('A cancelled payment'));
+  for (const f of tabs[2].items.get('A cancelled payment').handlers.keydown) f(key('ArrowDown'));
+  assert.equal(document.activeElement, tabs[2].items.get('A short payment'), 'the arrows wrap');
+  for (const f of tabs[2].items.get('A short payment').handlers.keydown) f(key('Escape'));
+  assert.ok(tabs[2].list.hidden);
+  assert.equal(document.activeElement, tabs[2].label);
   // A click elsewhere on the page closes an open menu.
-  tabs[3].label.click();
+  tabs[2].label.click();
   for (const f of docHandlers.click) f({ target: new Node_('div') });
-  assert.ok(tabs[3].list.hidden);
-  tabs[3].items.get('A cancelled payment').click();
+  assert.ok(tabs[2].list.hidden);
+  tabs[2].items.get('A cancelled payment').click();
   assert.equal(chosen.at(-1), 'A cancelled payment');
 
   // The current scenario and sub-scenario are marked, and only those.
@@ -179,13 +151,6 @@ test_bar: {
   assert.deepEqual(current(), ['When something goes wrong', 'A cancelled payment']);
   assert.equal(shell.scenSel.value, 'A cancelled payment');
   assert.equal(shell.leaf, 'A cancelled payment');
-  // The register's choice screen: its tab is marked, no item is, and the select shows the tab's name.
-  shell.scenario('With your register');
-  assert.deepEqual(current(), ['With your register']);
-  assert.equal(shell.scenSel.value, '');
-  assert.equal(shell.scenHold.textContent, 'With your register');
-  shell.scenario(null);
-  assert.deepEqual(current(), []);
   // A change of the select names the scenario.
   shell.scenSel.value = 'A short payment';
   for (const f of shell.scenSel.handlers.change) f();
@@ -202,9 +167,6 @@ test_cards_and_inert_end: {
   const device = [{ id: 'counter', caption: 'The shop\'s counter', sizes: [{ size: { width: 100, height: 100 } }] }];
   const cards = {
     Customer: ['Customer', undefined, 'Customer'], 'Café': ['Café', undefined, 'Café'],
-    'Your register sends the amount': ['With your register', 'Your register sends the amount', 'Register sends'],
-    Square: ['With your register', 'Square', 'Square'],
-    Clover: ['With your register', 'Clover', 'Clover'],
     'A short payment': ['When something goes wrong', 'A short payment', 'Something goes wrong'],
     'A cancelled payment': ['When something goes wrong', 'A cancelled payment', 'Cancelled'],
   };
@@ -322,7 +284,7 @@ test_choice_and_start: {
   const roles = [
     { name: 'As a customer', what: 'a', go: 'Start', onPick: () => picked.push(1) },
     { name: 'A café', what: 'b', go: 'Start', onPick: () => picked.push(2) },
-    { name: 'With your register', what: 'c', go: 'Start', onPick: () => picked.push(3) },
+    { name: 'A third choice', what: 'c', go: 'Start', onPick: () => picked.push(3) },
     { name: 'When something goes wrong', what: 'd', go: 'Start', onPick: () => picked.push(4) },
   ];
   const plays = [];
@@ -334,11 +296,6 @@ test_choice_and_start: {
   assert.deepEqual(picked, [3]);
   shell.start(roles, snap);
   assert.deepEqual(plays, ['snap'], 'it plays after Start over');
-  // The register's choice shows the scenario bar and has no Back.
-  shell.choice(roles.slice(0, 2), { title: 'With your register', lede: 'x' });
-  assert.equal(shell.demo.hidden, false, 'the bar is shown');
-  assert.equal(named(app, 'Back').length, 0);
-  assert.equal(app.all((x) => x.classes.has('chooser')).length, 1);
 }
 
 // ---- The counter's own state on the real modules. ----
@@ -480,102 +437,5 @@ test_cancelled_payment: {
   c.showHome();
 }
 
-// The register's choice screen: three cards, with the words of the brief; Square and Clover are told apart by name.
-test_register_choice: {
-  globalThis.OpenBmtChrome = require('../ui/chrome.js');
-  globalThis.OpenBmtRegisterViews = require('../web2/register-views.js');
-  globalThis.OpenBmtCounterController = require('../web2/counter-controller.js');
-  globalThis.OpenBmtOwnerController = require('../web2/owner-controller.js');
-  globalThis.OpenBmtOneChain = require('../web2/one-chain.js');
-  const RG = require('../web2/register.js');
-  let choice = null;
-  const stub = { root: { querySelector: () => null }, scenario() {}, choice(cards, opts) { choice = { cards, opts }; } };
-  RG.open(stub, { stopRun() {}, clock: {}, flow: {}, ownerFlow: {} });
-  assert.deepEqual(choice.cards.map((x) => x.name), ['Your register sends the amount', 'Square', 'Clover']);
-  assert.equal(choice.cards[0].what, 'Odoo, with the OpenBMT module. The register sends the amount to the counter, so nothing is typed twice.');
-  assert.equal(choice.cards[1].what, 'Illustrative manual flow only. This hand-built screen is not a supported OpenBMT tender for Square, and it does not close Square orders automatically.');
-  assert.equal(choice.cards[2].what, 'The cashier rings it up on Clover, types the amount on the counter, then closes the order as Bitcoin. The owner\'s phone checks that the two match.');
-  assert.equal(choice.opts.title, 'With your register');
-}
-
-test_register_views: {
-  const RV = require('../web2/register-views.js');
-  const text = (n) => n.textContent;
-  const buttons = (n) => n.all((x) => x.tag === 'button');
-  const landscape = RV.LANDSCAPE;
-  assert.deepEqual([landscape.width, landscape.height], [962, 601], 'the counter tablet, turned landscape');
-  // The sale screen: six item tiles, the ticket, and the large Charge button.
-  const sale = RV.register({ screen: 'sale' }, landscape);
-  assert.deepEqual(labels(buttons(sale)).slice(0, 6), ['Coffee 4.00', 'Bagel 4.00', 'Juice 5.00', 'Muffin 3.50', 'Tea 3.00', 'Cookie 2.50']);
-  const body = text(sale);
-  for (const w of ['Order 1042', 'Total 8.00 USD']) assert.ok(body.includes(w), w);
-  assert.equal(sale.all((x) => x.tag === 'div' && x.textContent === 'Coffee 4.00').length, 1, 'the ticket line');
-  assert.equal(sale.all((x) => x.tag === 'div' && x.textContent === 'Bagel 4.00').length, 1);
-  assert.deepEqual(labels(buttons(sale)).slice(6), ['Charge 8.00 USD']);
-  assert.ok(!body.includes('Paid with Bitcoin'));
-  let charged = 0;
-  const live = RV.register({ screen: 'sale', taps: { charge: () => { charged++; } } }, landscape);
-  buttons(live).find((b) => text(b) === 'Charge 8.00 USD').click();
-  assert.equal(charged, 1);
-  // The tender screen: three large buttons, only Bitcoin a target, and the line under them.
-  let bitcoin = 0;
-  const tender = RV.register({ screen: 'tender', taps: { bitcoin: () => { bitcoin++; } } }, landscape);
-  assert.ok(text(tender).includes('How is it paid?'));
-  assert.deepEqual(labels(buttons(tender)), ['Cash', 'Card', 'Bitcoin']);
-  assert.ok(text(tender).includes('Bitcoin is a payment type the shop added.'));
-  for (const b of buttons(tender)) b.click();
-  assert.equal(bitcoin, 1, 'only Bitcoin does anything');
-  // Once the sale is paid the ticket says so and the tender screen has closed.
-  const paid = RV.register({ screen: 'paid' }, landscape);
-  assert.ok(text(paid).includes('Paid with Bitcoin'));
-  assert.ok(!text(paid).includes('How is it paid?'));
-  assert.deepEqual(labels(buttons(paid)).filter((x) => x.startsWith('Charge')), [], 'no Charge once it is paid');
-  // Square Register: the search, the tabs, six tiles with no price, the cart, Charge $8.00, the bar.
-  const sq = RV.register({ kind: 'square', screen: 'sale' }, landscape);
-  const sqText = text(sq);
-  for (const w of ['Search', 'Favorites', 'Drinks', 'Bakery', 'All items', 'Coffee', 'Bagel', 'Juice', 'Muffin', 'Tea', 'Cookie', '2 items',
-    'Tax', '$0.00', 'Checkout', 'Inventory', 'Transactions', 'Notifications', 'More']) assert.ok(sqText.includes(w), w);
-  assert.deepEqual(labels(buttons(sq)), ['Save cart', 'Charge $8.00']);
-  assert.equal(sq.all((x) => x.tag === 'div' && x.textContent === 'Coffee $4.00').length, 1, 'the cart line');
-  assert.ok(!sqText.includes('Order 1042') && !sqText.includes('Charge 8.00 USD'), 'nothing of the plain register');
-  let sqCharged = 0;
-  buttons(RV.register({ kind: 'square', screen: 'sale', taps: { charge: () => { sqCharged++; } } }, landscape)).find((b) => text(b) === 'Charge $8.00').click();
-  assert.equal(sqCharged, 1);
-  // Square's payment screen: a legacy illustration explicitly labeled as a mock, not a supported tender.
-  let sqType = 0;
-  const sqPay = RV.register({ kind: 'square', screen: 'tender', taps: { bitcoin: () => { sqType++; } } }, landscape);
-  assert.deepEqual(labels(buttons(sqPay)), ['Cash', 'Bitcoin', 'Gift card', 'Other payment types', 'OpenBMT · mock']);
-  for (const w of ['$8.00', 'Select payment', 'Custom payment methods · illustrative mock', 'Hand-built illustration only. No supported Square tender connection is present.']) assert.ok(text(sqPay).includes(w), w);
-  for (const b of buttons(sqPay)) b.click();
-  assert.equal(sqType, 1, 'only the illustrative mock target does anything');
-  const sqDone = RV.register({ kind: 'square', screen: 'paid' }, landscape);
-  for (const w of ['$8.00', 'All done']) assert.ok(text(sqDone).includes(w), w);
-  assert.deepEqual(labels(buttons(sqDone)), ['New sale']);
-  // Clover Station: the top bar, the order, the categories, the quantities, the six cards, the strip.
-  const cl = RV.register({ kind: 'clover', screen: 'sale' }, landscape);
-  const clText = text(cl);
-  for (const w of ['Register', 'Scan barcode or search', 'ORDERS', 'Dine in order', 'Subtotal', 'Tax', 'Total', 'Fast pay with cash', 'Drinks', 'Bakery', 'Breakfast',
-    'QTY', 'CUSTOM', 'Coffee', 'Latte', 'Tea', 'Juice', 'Bagel', 'Muffin', '$3.50', 'ALEX']) assert.ok(clText.includes(w), w);
-  assert.deepEqual(labels(buttons(cl)), ['$5.00', '$10.00', '$20.00', 'Custom', 'Save', 'Pay']);
-  let clPaid = 0;
-  buttons(RV.register({ kind: 'clover', screen: 'sale', taps: { charge: () => { clPaid++; } } }, landscape)).find((b) => text(b) === 'Pay').click();
-  assert.equal(clPaid, 1);
-  let clType = 0;
-  const clPay = RV.register({ kind: 'clover', screen: 'tender', taps: { bitcoin: () => { clType++; } } }, landscape);
-  assert.deepEqual(labels(buttons(clPay)), ['Cash', 'Credit/Debit', 'Bitcoin', 'Gift card']);
-  assert.ok(text(clPay).includes('$8.00'));
-  for (const b of buttons(clPay)) b.click();
-  assert.equal(clType, 1, 'only Bitcoin does anything');
-  const clDone = RV.register({ kind: 'clover', screen: 'paid' }, landscape);
-  assert.ok(text(clDone).includes('Paid') && text(clDone).includes('$8.00'));
-  assert.deepEqual(labels(buttons(clDone)), ['No receipt', 'Print']);
-  // Both draw in the narrow window's size too.
-  for (const kind of ['square', 'clover']) for (const screen of ['sale', 'tender', 'paid']) assert.ok(RV.register({ kind, screen }, { width: 601, height: 962, density: 4 / 3 }));
-  assert.equal(RV.SQUARE_CHARGE, 'Charge $8.00');
-  assert.equal(RV.CLOVER_PAY, 'Pay');
-  // The tablet's own size is the fallback for a narrow window.
-  assert.ok(text(RV.register({ screen: 'sale' }, { width: 601, height: 962, density: 4 / 3 })).includes('Total 8.00 USD'));
-}
-
 c.stopNode();
-console.log('scenario: ok (bar and menus, opening screen, inert end and summary, cards; short payment; cancelled payment red; register screens)');
+console.log('scenario: ok (bar and menus, opening screen, inert end and summary, cards; short payment; cancelled payment red)');

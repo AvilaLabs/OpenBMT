@@ -16,7 +16,6 @@
 //! | `settings` | the signed settings in force (`OBMS`) |
 //! | `paired-with` | `OBM~`, 1, the welcome and the first settings the Box was paired with, each as a length (4, LE) and its bytes (BX-16) |
 //! | `link-inbox`, `link-outbox` | the message numbers (LK-40) |
-//! | `pos.token` | the Box's own POS sign-in (BX-41); erased by BX-23 |
 //!
 //! Paired means `roots` is there. It is the last file a welcome writes, so
 //! a crash during pairing leaves the Box unpaired, never half paired. A Box
@@ -48,12 +47,8 @@ pub const ROOTS_FILE: &str = "roots";
 pub const SETTINGS_FILE: &str = "settings";
 /// The welcome and first settings the Box was paired with (BX-16).
 pub const PAIRED_WITH_FILE: &str = "paired-with";
-/// The Box's own POS sign-in (BX-41), erased by BX-23.
-pub const POS_TOKEN_FILE: &str = "pos.token";
 /// Seconds an invitation is good for on the Box's clock (BX-12).
 pub const INVITE_SECS: u64 = 30 * 60;
-/// Longest POS token the Box stores, in bytes (BX-41).
-pub const MAX_TOKEN_BYTES: usize = 1_024;
 /// Most members the relay holds (LK-21), and so the most the device list
 /// and the owner may come to.
 pub const MAX_MEMBERS: usize = 64;
@@ -142,14 +137,6 @@ pub enum BoxError {
     NotPaired,
     /// The settings in force no longer list this Box (BX-23).
     TurnedOff,
-    /// The POS token file can be read by its group or by others (BX-41).
-    TokenMode {
-        /// The permission bits the file has.
-        mode: u32,
-    },
-    /// The POS token is empty, too long or holds a control character
-    /// (BX-41).
-    BadToken(&'static str),
 }
 
 impl fmt::Display for BoxError {
@@ -183,12 +170,6 @@ impl fmt::Display for BoxError {
             ),
             Self::NotPaired => write!(f, "BX-21: this Box is not paired"),
             Self::TurnedOff => write!(f, "BX-23: the settings no longer list this Box"),
-            Self::TokenMode { mode } => write!(
-                f,
-                "BX-41: {POS_TOKEN_FILE} can be read by its group or by others \
-                 (mode {mode:04o}): the Box does not read the POS until it is mode 0600"
-            ),
-            Self::BadToken(why) => write!(f, "BX-41: the POS token is {why}"),
         }
     }
 }
@@ -208,9 +189,6 @@ fn io_err(file: &'static str, op: &'static str) -> impl FnOnce(io::Error) -> Box
 pub struct SettingsTaken {
     /// The settings no longer list this Box: it is off.
     pub turned_off: bool,
-    /// When the Box was turned off, why the POS token could not be erased,
-    /// if it could not.
-    pub token_error: Option<io::ErrorKind>,
     /// The Box held these very settings already (BX-63): nothing was stored
     /// and nothing changed.
     pub unchanged: bool,
@@ -272,23 +250,6 @@ fn check_stored(signed: &SignedSettings, roots: &BoxRoots) -> Result<(), Setting
     let mut basis = signed.settings.clone();
     basis.version = basis.version.saturating_sub(1);
     signed.verify(roots, Some(&basis)).map(|_| ())
-}
-
-/// The token as stored: one line, trimmed, 1 to [`MAX_TOKEN_BYTES`] bytes,
-/// no control character (BX-41).
-fn check_token(text: &str) -> Result<String, BoxError> {
-    let token = text.trim();
-    if token.is_empty() {
-        Err(BoxError::BadToken("empty"))
-    } else if token.len() > MAX_TOKEN_BYTES {
-        Err(BoxError::BadToken("too long"))
-    } else if token.chars().any(char::is_control) {
-        Err(BoxError::BadToken(
-            "more than one line or holds a control character",
-        ))
-    } else {
-        Ok(token.to_string())
-    }
 }
 
 fn damaged(file: &'static str, why: &'static str) -> BoxError {
@@ -681,7 +642,7 @@ impl<F: BoxFiles> BoxCore<F> {
     /// Take new signed settings (BX-21): they must check against the pinned
     /// roots and carry a higher version than the ones held. They are stored
     /// before they take effect. Settings that no longer list this Box turn
-    /// it off and erase its POS token (BX-23).
+    /// it off (BX-23).
     pub fn take_settings(&mut self, settings: &[u8]) -> Result<SettingsTaken, BoxError> {
         let pairing = self.pairing.as_ref().ok_or(BoxError::NotPaired)?;
         // The owner sends the settings in force again from time to time
@@ -690,7 +651,6 @@ impl<F: BoxFiles> BoxCore<F> {
         if self.holds_settings(settings) {
             return Ok(SettingsTaken {
                 turned_off: false,
-                token_error: None,
                 unchanged: true,
             });
         }
@@ -735,14 +695,8 @@ impl<F: BoxFiles> BoxCore<F> {
         if let Some(p) = self.pairing.as_mut() {
             p.signed = signed;
         }
-        let token_error = if listed {
-            None
-        } else {
-            self.erase_pos_token().err().map(|e| e.kind())
-        };
         Ok(SettingsTaken {
             turned_off: !listed,
-            token_error,
             unchanged: false,
         })
     }
@@ -759,54 +713,6 @@ impl<F: BoxFiles> BoxCore<F> {
         }
         matches!(pairing.roots, BoxRoots::OwnWallet { .. })
             && ConfirmedSettings::from_bytes(bytes).is_ok_and(|c| c.signed.to_bytes() == held)
-    }
-
-    /// Store the POS token (BX-41) in `pos.token`, whole, in a file only the
-    /// Box's user can read. Only a paired Box that the settings list takes
-    /// one. The token is one line without control characters, at most
-    /// [`MAX_TOKEN_BYTES`] long; surrounding spaces are cut off.
-    pub fn store_pos_token(&mut self, token: &str) -> Result<(), BoxError> {
-        if self.pairing.is_none() {
-            return Err(BoxError::NotPaired);
-        }
-        if self.turned_off() {
-            return Err(BoxError::TurnedOff);
-        }
-        let token = check_token(token)?;
-        self.files
-            .write(POS_TOKEN_FILE, token.as_bytes())
-            .map_err(io_err(POS_TOKEN_FILE, "write"))
-    }
-
-    /// Read the POS token (BX-41). `None` while the Box is unpaired or
-    /// turned off, or when there is no token. A file that its group or
-    /// others can read is refused with a named error, and the token is not
-    /// read; a file that is not a token is refused too.
-    pub fn read_pos_token(&self) -> Result<Option<String>, BoxError> {
-        if self.pairing.is_none() || self.turned_off() {
-            return Ok(None);
-        }
-        let Some(mode) = self
-            .files
-            .mode(POS_TOKEN_FILE)
-            .map_err(io_err(POS_TOKEN_FILE, "read"))?
-        else {
-            return Ok(None);
-        };
-        if mode & 0o077 != 0 {
-            return Err(BoxError::TokenMode { mode });
-        }
-        let Some(bytes) = read_file(&self.files, POS_TOKEN_FILE)? else {
-            return Ok(None);
-        };
-        let text = String::from_utf8(bytes).map_err(|_| BoxError::BadToken("not text"))?;
-        check_token(&text).map(Some)
-    }
-
-    /// Erase the POS token from storage (BX-23). Nothing to do if there is
-    /// none.
-    pub fn erase_pos_token(&mut self) -> io::Result<()> {
-        self.files.remove(POS_TOKEN_FILE)
     }
 
     /// The relay's member list (BX-22): the device list of the settings in

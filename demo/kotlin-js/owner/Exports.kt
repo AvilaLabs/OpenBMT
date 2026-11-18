@@ -8,21 +8,12 @@ import org.openbmt.owner.Books
 import org.openbmt.owner.Native
 import org.openbmt.owner.OwnerNetwork
 import org.openbmt.owner.OwnerNode
-import org.openbmt.owner.PosAlert
-import org.openbmt.owner.PosAlertKey
-import org.openbmt.owner.PosAlertKind
-import org.openbmt.owner.PosSetup
-import org.openbmt.owner.PosState
-import org.openbmt.owner.PosSubject
-import org.openbmt.owner.PosVendor
-import org.openbmt.owner.Words
 import org.openbmt.owner.StartConfig
 import org.openbmt.owner.ViewKind
 import org.openbmt.owner.app.AppWords
 import org.openbmt.owner.app.BooksModel
 import org.openbmt.owner.app.OwnerLook
 import org.openbmt.owner.app.OwnerModel
-import org.openbmt.owner.app.PosLines
 import org.openbmt.owner.app.RequestForm
 import org.openbmt.owner.app.RequestModel
 import org.openbmt.owner.app.RequestWords
@@ -212,20 +203,6 @@ object OwnerFlowDemo {
             shown(status), extra.toTypedArray(), balance.lead, balance.amount, balance.checked, "Spend", footer,
             OwnerLook.WAITING_TITLE, rows.map { it.title }.toTypedArray(), rows.map { it.count }.toTypedArray(), titles, subs, signature,
         )
-    }
-
-    /**
-     * PosScreen.kt showTill: the two lines of the till screen that say what was read, as PosLines writes them: when the
-     * till was last read, and the counts of matches and alerts. The line that names the till's vendor is not here: the
-     * demo's register is no vendor's. [lastReadAt] is 0 for never.
-     */
-    fun tillLines(now: Double, lastReadAt: Double, matches: Double, byOrder: Double, alerts: Int): Array<String> {
-        val setup = PosSetup(PosVendor.Square, "", listOf("Bitcoin"), listOf("USD"))
-        val none = Words(0, 0, "", "", "", null, null, null, null)
-        val open = List(alerts) { PosAlert(PosAlertKey(PosAlertKind.TenderWithoutPayment, PosSubject.Tender("", "")), 0L, none) }
-        val at = if (lastReadAt > 0.0) lastReadAt.toLong() else null
-        val state = PosState(setup, at, open, 0L, 0L, matches.toLong(), byOrder.toLong(), 0L)
-        return arrayOf(PosLines.lastRead(now.toLong(), at), PosLines.counts(state))
     }
 
     /** Stop the node. */

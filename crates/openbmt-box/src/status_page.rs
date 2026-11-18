@@ -24,7 +24,6 @@ use openbmt_link::os_random;
 
 use crate::say::{ConsoleAnswer, PageAnswer};
 use crate::state::{BoxError, BoxStatus};
-use crate::till::same_bytes;
 
 /// Most bytes of the request line and the headers (BX-54).
 pub const MAX_HEAD: usize = 8 * 1024;
@@ -132,6 +131,12 @@ impl SetupCode {
         };
         same_bytes(&bare, &self.chars)
     }
+}
+
+/// Whether two byte strings are equal, taking the same time for any two of
+/// the same length.
+fn same_bytes(a: &[u8], b: &[u8]) -> bool {
+    a.len() == b.len() && a.iter().zip(b).fold(0u8, |d, (x, y)| d | (x ^ y)) == 0
 }
 
 /// The limits of a page. The defaults are the ones in the rules.

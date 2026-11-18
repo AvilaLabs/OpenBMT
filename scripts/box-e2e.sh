@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 # The Box, paired and used over TCP: the invitation, the claim, the welcome,
-# the device list, the Box's relay and the POS on the Box (docs/BOX-RULES.md
-# sections 1 to 5).
+# the device list and the Box's relay (docs/BOX-RULES.md sections 1 to 5).
 #
 # Question: does a Box that starts with nothing offer nothing to a stranger,
 # pair from an invitation typed into it and a welcome made by the Key app,
@@ -9,11 +8,7 @@
 # the devices on its list and refuse the others, follow new settings (a device
 # taken off the list loses its mailbox), keep its key and its members across a
 # restart, refuse a second process on its directory, turn itself off when the
-# settings drop it, and refuse a mistyped or a different invitation? And, with
-# a POS connector, does it refuse a readable token file, match the counters'
-# paid notices to the POS and tell the owner, refuse a notice from a device
-# that is not a counter, close an order once across a restart, close none for
-# a sale never paid, and run none of it while unpaired?
+# settings drop it, and refuse a mistyped or a different invitation?
 #
 # No Bitcoin Core is needed. The Box is the `openbmt-box` binary. The Key app
 # and the owner phone are the `box_pair` example of `openbmt-box`, which uses
@@ -21,12 +16,7 @@
 # the claim, builds the first settings (the Box listed as a Box, signed by both
 # roots) and sends the welcome. The script carries nothing between the two:
 # the invitation is typed into the Box's console (its standard input), and
-# everything else goes through the Box's TCP port. Steps 10 to 14 need a Box
-# with a test POS connector, which the `openbmt-box` binary does not carry (it
-# reads Square and Clover over curl, step 16): they run
-# `box_pair pos-box`, the same Box library with a connector made of files in a
-# directory (the line format is in the example's header), and the counters'
-# notices are sent by `box_pair notice`.
+# everything else goes through the Box's TCP port.
 #
 # The steps (printed as a table at the end):
 #   1. A stranger can say hello to an unpaired Box and gets "no claim"; it
@@ -41,36 +31,18 @@
 #   5. A restart on the same directory: still paired, the same key, the same
 #      members.
 #   6. A second `openbmt-box` on the same directory is refused.
-#   7. Settings that drop the Box: its state is "turned off", its members are
-#      empty and its POS token file is erased.
+#   7. Settings that drop the Box: its state is "turned off" and its members
+#      are empty.
 #   9. A stranger sends welcomes while an invitation is open: refused, the
 #      same claim is still offered, and the real welcome then still pairs.
 #   8. On a second Box: an invitation typed with one character changed is
 #      refused by its check, and a different valid invitation makes the Key
 #      app side reject the claim.
-#  10. On a Box with the test POS: a token file that others can read is
-#      refused by name and the relay keeps working; at mode 0600 the POS is
-#      read, and the console's `pos-token` stores a token at mode 0600.
-#  11. Two paid notices from a counter (opened, paid) and an order in the POS:
-#      the Box matches them and the owner receives a signed POS notice that
-#      says so; a notice from a device that is not on the list is refused.
-#  12. A connector that can close: a sale only opened closes nothing; a paid
-#      sale closes its order once, the owner is told, and after a restart of
-#      the Box and a final notice the connector is not called again.
-#  13. A sale that was never paid closes no order.
-#  14. An unpaired Box with a token in place gives the connector no token and
-#      reads nothing.
 #  15. A Box run with --no-console (no standard input, an invitation only
 #      from a file), ended by SIGKILL after the invitation, the welcome, the
 #      mailboxes, a message and new settings: every restart finds the same
 #      key and the right state with no error line, a message accepted before
 #      a kill is read after it (BX-52), and SIGTERM ends it with exit 143.
-#  16. A Box set up for Square with `pos-setup` and a fake curl (a script that
-#      prints a Square reply and a status) named by the curl-path setting: the
-#      sale the counter reported matches the order, the owner is told, curl is
-#      run only for searches and ListPayments, the token is on curl's standard input and in no
-#      argument, environment or log; with a curl path that is not there the
-#      Box's notes say curl is not installed on this Box (BX-44 to BX-49).
 #  17. A Box started with --status-page: GET / answers with the security
 #      headers and words that say it is waiting for an invitation; another
 #      path is 404 and another method 405; the setup code is printed after
@@ -119,8 +91,6 @@ K3="$BASE/keyapp3"
 K4="$BASE/keyapp4"
 B3="$BASE/box3"
 B4="$BASE/box4"
-PD="$BASE/pos1"
-PD2="$BASE/pos2"
 
 say() { printf '\n== %s\n' "$*"; }
 note() { printf '      %s\n' "$*"; }
@@ -137,9 +107,6 @@ notrun() { RESULT[$1]="NOT RUN"; MESSAGE[$1]=$2; printf 'NOT RUN  step %s: %s\n'
 mkdir -p "$B1" "$B2" "$B3" "$B4" "$K1" "$K2" "$K3" "$K4"
 declare -A PID LOG FDN
 PID[1]=; PID[2]=
-# What a Box is started with: the binary by default, `box_pair pos-box` and a
-# directory for the test POS in steps 10 to 14.
-RUN=(); EXTRA=()
 FDN[1]=3; FDN[2]=4
 LAST=
 
@@ -199,11 +166,10 @@ start_box() { # n data-dir port
   rm -f "$fifo"
   mkfifo "$fifo"
   if [ "$n" = 1 ]; then exec 3<>"$fifo"; else exec 4<>"$fifo"; fi
-  if [ "${#RUN[@]}" = 0 ]; then RUN=("$BOX_BIN"); fi
   if [ "$n" = 1 ]; then
-    "${RUN[@]}" "$2" "127.0.0.1:$3" "${EXTRA[@]}" <&3 >"${LOG[$n]}" 2>&1 &
+    "$BOX_BIN" "$2" "127.0.0.1:$3" <&3 >"${LOG[$n]}" 2>&1 &
   else
-    "${RUN[@]}" "$2" "127.0.0.1:$3" "${EXTRA[@]}" <&4 >"${LOG[$n]}" 2>&1 &
+    "$BOX_BIN" "$2" "127.0.0.1:$3" <&4 >"${LOG[$n]}" 2>&1 &
   fi
   PID[$n]=$!
   for _ in $(seq 1 40); do
@@ -279,8 +245,6 @@ await_line() { # n command prefix pattern seconds
   done
   return 1
 }
-# How many lines a file has (0 when it is not there).
-lines_in() { if [ -e "$1" ]; then wc -l <"$1"; else echo 0; fi; }
 
 # ---- 1 ---------------------------------------------------------------------------
 
@@ -409,17 +373,16 @@ fi
 # ---- 7 ---------------------------------------------------------------------------
 
 say "7. Settings that drop the Box"
-printf 'token' >"$B1/pos.token"
 SET3=$(pair settings "$K1" "$A" 3 drop-box)
 note "$SET3"
 if await_state 1 "turned off" 20; then OFF=yes; else OFF=; fi
 N7=$(member_count 1)
 note "members after: $N7"
-if [ -n "$OFF" ] && [ "$N7" = 0 ] && [ ! -e "$B1/pos.token" ] &&
+if [ -n "$OFF" ] && [ "$N7" = 0 ] &&
   grep -q '^refused' <<<"$(pair mailbox "$K1" "$A" c1)"; then
-  pass 7 "the state is turned off, the member list is empty, pos.token is erased and a mailbox is refused"
+  pass 7 "the state is turned off, the member list is empty and a mailbox is refused"
 else
-  bad 7 "turned off: ${OFF:-no}; members $N7; pos.token present: $([ -e "$B1/pos.token" ] && echo yes || echo no)"
+  bad 7 "turned off: ${OFF:-no}; members $N7"
 fi
 stop_box 1
 
@@ -480,142 +443,6 @@ else
 fi
 stop_box 2
 
-
-# ---- 10 --------------------------------------------------------------------------
-
-say "10. The POS token file, and the relay while the POS is off"
-RUN=("$PAIR_BIN" pos-box)
-EXTRA=("$PD")
-A3="127.0.0.1:$PORT2"
-start_box 2 "$B3" "$PORT2" || die "the Box with the test POS did not start: $(cat "${LOG[2]}")"
-INV10=$(pair invite "$K4")
-ask 2 "invite $INV10" 'invitation' || true
-pair claim "$K4" "$A3" >/dev/null
-WELCOME10=$(pair welcome "$K4" "$A3")
-await_state 2 paired 10 || true
-S10=$(state_of 2)
-# A token file that its group and others can read.
-printf 'pos-token-test' >"$B3/pos.token"
-chmod 644 "$B3/pos.token"
-if await_line 2 pos 'pos: reading:' 'mode 0644' 10; then REFUSED10=$LAST; else REFUSED10="none: $LAST"; fi
-note "$REFUSED10"
-MB10=$(pair mailbox "$K4" "$A3" c1)
-TOKEN_SEEN_EARLY=$(cat "$PD/token.txt" 2>/dev/null)
-chmod 600 "$B3/pos.token"
-if await_line 2 pos 'pos: reading:' 'reading: yes' 10; then READING10=yes; else READING10=no; fi
-# The console's own command stores a token at mode 0600.
-rm -f "$B3/pos.token"
-echo pos-token >&"${FDN[2]}"
-echo sk_test_second >&"${FDN[2]}"
-sleep 1
-MODE10=$(stat -c %a "$B3/pos.token" 2>/dev/null)
-if [ "$S10" = paired ] && grep -q 'BX-41' <<<"$REFUSED10" && grep -q '^mailbox made' <<<"$MB10" &&
-  [ "$TOKEN_SEEN_EARLY" != set ] && [ "$READING10" = yes ] && [ "$MODE10" = 600 ] &&
-  [ "$(cat "$PD/token.txt" 2>/dev/null)" = set ]; then
-  pass 10 "a token file at mode 0644 was refused by name (BX-41) with the relay still making mailboxes and the connector given no token; at 0600 the POS was read; pos-token stored a token at mode $MODE10"
-else
-  bad 10 "state '$S10'; refused: $REFUSED10; mailbox: $MB10; token given early: $TOKEN_SEEN_EARLY; reading after chmod: $READING10; mode after pos-token: $MODE10"
-fi
-
-# ---- 11 --------------------------------------------------------------------------
-
-say "11. A paid notice, a match, and a message to the owner"
-MBO11=$(pair mailbox "$K4" "$A3" owner)
-pair pos-order "$PD" o1 closed 1250 bitcoin >/dev/null
-N1=$(pair notice "$K4" "$A3" c1 1 opened 1250)
-N2=$(pair notice "$K4" "$A3" c1 1 paid 1250)
-note "$N1 / $N2"
-if await_line 2 pos 'pos: matches:' 'matches: 1' 15; then MATCHED=yes; else MATCHED=no; fi
-RECV11=$(pair posrecv "$K4" "$A3")
-note "$RECV11"
-# A device that is not on the list sends a notice, once both of the
-# counter's notices are counted.
-await_line 2 pos 'pos: notices:' '2 taken' 15 || true
-TAKEN_BEFORE=$(ask 2 pos 'pos: notices:' && printf '%s' "$LAST")
-STRANGER11=$(pair notice "$K4" "$A3" stranger 9 paid 500)
-sleep 1
-TAKEN_AFTER=$(ask 2 pos 'pos: notices:' && printf '%s' "$LAST")
-note "stranger: $STRANGER11"
-note "$TAKEN_BEFORE -> $TAKEN_AFTER"
-if [ "$MATCHED" = yes ] && grep -q 'tender t-o1 matches sale 1' <<<"$RECV11" &&
-  grep -q 'signature good' <<<"$RECV11" && grep -q '^refused' <<<"$STRANGER11" &&
-  [ "$TAKEN_BEFORE" = "$TAKEN_AFTER" ] && grep -q '2 taken, 0 refused' <<<"$TAKEN_AFTER"; then
-  pass 11 "the Box took the counter's two notices, matched the paid sale to the order in the POS and the owner opened a signed POS notice saying so; a notice from a device not on the list was refused and changed nothing ($TAKEN_AFTER)"
-else
-  bad 11 "matched: $MATCHED; owner read: $RECV11; stranger: $STRANGER11; notices '$TAKEN_BEFORE' -> '$TAKEN_AFTER'"
-fi
-
-# ---- 12 --------------------------------------------------------------------------
-
-say "12. Closing an order, once, across a restart"
-pair pos-close-on "$PD" >/dev/null
-pair pos-order "$PD" o2 open 777 none >/dev/null
-OPENED12=$(pair notice "$K4" "$A3" c1 2 opened 777)
-sleep 3
-note "$OPENED12"
-CALLS_OPENED=$(lines_in "$PD/calls.txt")
-PAID12=$(pair notice "$K4" "$A3" c1 2 paid 777)
-for _ in $(seq 1 30); do
-  [ "$(lines_in "$PD/closes.txt")" -ge 1 ] && break
-  sleep 0.5
-done
-note "$PAID12"
-CLOSES_1=$(lines_in "$PD/closes.txt")
-CALLS_1=$(lines_in "$PD/calls.txt")
-RECV12=$(pair posrecv "$K4" "$A3")
-note "$RECV12"
-stop_box 2
-start_box 2 "$B3" "$PORT2" || die "the Box with the test POS did not start again: $(cat "${LOG[2]}")"
-S12=$(state_of 2)
-FINAL12=$(pair notice "$K4" "$A3" c1 2 final 777)
-sleep 4
-CLOSES_2=$(lines_in "$PD/closes.txt")
-CALLS_2=$(lines_in "$PD/calls.txt")
-note "calls: opened-only $CALLS_OPENED, after paid $CALLS_1, after restart and final $CALLS_2; closes $CLOSES_1 -> $CLOSES_2"
-if [ "$CALLS_OPENED" = 0 ] && [ "$CLOSES_1" = 1 ] && [ "$CALLS_1" = 1 ] && [ "$S12" = paired ] &&
-  grep -q 'order o2 was closed for sale 2' <<<"$RECV12" && [ "$CLOSES_2" = 1 ] && [ "$CALLS_2" = 1 ]; then
-  pass 12 "a sale only opened closed nothing; the paid sale closed order o2 once and the owner was told; after a restart and a final notice the connector had still been called once"
-else
-  bad 12 "calls after opened $CALLS_OPENED, after paid $CALLS_1, at the end $CALLS_2; closes $CLOSES_1 -> $CLOSES_2; state '$S12'; owner read: $RECV12"
-fi
-
-# ---- 13 --------------------------------------------------------------------------
-
-say "13. A sale never paid closes nothing"
-pair pos-order "$PD" o3 open 888 none >/dev/null
-OPENED13=$(pair notice "$K4" "$A3" c1 3 opened 888)
-sleep 4
-CALLS_3=$(lines_in "$PD/calls.txt")
-CLOSES_3=$(lines_in "$PD/closes.txt")
-O3=$(grep '^o3 ' "$PD/orders.txt")
-note "calls $CALLS_3, closes $CLOSES_3, order: $O3"
-if [ "$CALLS_3" = 1 ] && [ "$CLOSES_3" = 1 ] && grep -q '^o3 open ' <<<"$O3"; then
-  pass 13 "a sale that was only opened, with an open order of its amount in the POS, closed no order: the connector was still called once and o3 is still open"
-else
-  bad 13 "calls $CALLS_3, closes $CLOSES_3, order o3: $O3"
-fi
-stop_box 2
-
-# ---- 14 --------------------------------------------------------------------------
-
-say "14. An unpaired Box runs no POS"
-mkdir -p "$PD2"
-pair pos-order "$PD2" p1 closed 100 bitcoin >/dev/null
-printf 'pos-token-test' >"$B4/pos.token"
-chmod 600 "$B4/pos.token"
-EXTRA=("$PD2")
-start_box 2 "$B4" "$PORT2" || die "the unpaired Box with the test POS did not start: $(cat "${LOG[2]}")"
-sleep 4
-S14=$(state_of 2)
-ask 2 pos 'pos: reading:' || true
-READING14=$LAST
-note "state $S14; $READING14"
-if [ "$S14" = unpaired ] && grep -q 'reading: no' <<<"$READING14" && [ "$(cat "$PD2/token.txt" 2>/dev/null)" != set ]; then
-  pass 14 "the unpaired Box with a token file in place read nothing and gave the connector no token"
-else
-  bad 14 "state '$S14'; $READING14; token file: $(cat "$PD2/token.txt" 2>/dev/null)"
-fi
-stop_box 2
 
 # ---- 15 --------------------------------------------------------------------------
 
@@ -704,111 +531,6 @@ else
   bad 15 "exit after SIGTERM $RC15; claim: $CLAIM5; welcome: $WELCOME5; recv: $RECV5; problems: ${NC_BAD:-none}"
 fi
 if [ -n "$NC_PID" ]; then kill9_nc; fi
-
-# ---- 16 --------------------------------------------------------------------------
-
-say "16. A Square vendor read over a fake curl, named by the curl-path setting"
-B6="$BASE/box6"
-K6="$BASE/keyapp6"
-FC="$BASE/fakecurl"
-mkdir -p "$B6" "$K6" "$FC"
-A6="127.0.0.1:$PORT2"
-TOKEN16=e2e-square-token-xyz
-# The fake curl: it keeps what it was given (the arguments, the standard
-# input and the environment) and prints a Square reply with an order that
-# has a Bitcoin tender of 1250 at the time now, then the status 200, as
-# curl's --write-out would.
-cat >"$FC/curl" <<EOF
-#!/bin/sh
-d='$FC'
-echo x >> "\$d/calls"
-for a in "\$@"; do printf '%s\n' "\$a"; done >> "\$d/args"
-/bin/cat >> "\$d/stdin"
-/usr/bin/env > "\$d/env"
-case " \$* " in
-  *"/v2/payments?"*)
-    printf '{"payments":[{"id":"PE2E1","status":"COMPLETED","source_type":"EXTERNAL","external_details":{"type":"OTHER","source":"Bitcoin"}}]}200'
-    exit 0 ;;
-esac
-now=\$(/bin/date -u +%Y-%m-%dT%H:%M:%SZ)
-printf '{"orders":[{"id":"SQE2E1","location_id":"LOC16","state":"COMPLETED","created_at":"%s","updated_at":"%s","closed_at":"%s","total_money":{"amount":1250,"currency":"USD"},"tenders":[{"id":"TE2E1","type":"OTHER","created_at":"%s","note":"Bitcoin","amount_money":{"amount":1250,"currency":"USD"},"payment_id":"PE2E1"}]}]}200' "\$now" "\$now" "\$now" "\$now"
-EOF
-chmod 755 "$FC/curl"
-RUN=("$BOX_BIN")
-EXTRA=()
-start_box 2 "$B6" "$PORT2" || die "the Box for step 16 did not start: $(cat "${LOG[2]}")"
-INV16=$(pair invite "$K6")
-ask 2 "invite $INV16" 'invitation' || true
-pair claim "$K6" "$A6" >/dev/null
-WELCOME16=$(pair welcome "$K6" "$A6")
-await_state 2 paired 10 || true
-S16=$(state_of 2)
-# The setup line: the vendor, its location, the currency, the exact name of
-# the Bitcoin tender, and the path of the fake curl.
-printf '%s\n' pos-setup "vendor=square|location=LOC16|currency=USD|tenders=Bitcoin|curl=$FC/curl" >&"${FDN[2]}"
-for _ in $(seq 1 20); do
-  grep -q '^pos-setup: square' "${LOG[2]}" && break
-  sleep 0.25
-done
-SETUP16=$(grep '^pos-setup: ' "${LOG[2]}" | tail -1)
-# The setup is used from the next start.
-stop_box 2
-start_box 2 "$B6" "$PORT2" || die "the Box for step 16 did not start again: $(cat "${LOG[2]}")"
-await_state 2 paired 10 || true
-pair mailbox "$K6" "$A6" c1 >/dev/null
-pair mailbox "$K6" "$A6" owner >/dev/null
-# The counter's two notices come first, while the Box has no token; the
-# token comes after them, so that the first reading has the sale to match.
-N1_16=$(pair notice "$K6" "$A6" c1 1 opened 1250)
-N2_16=$(pair notice "$K6" "$A6" c1 1 paid 1250)
-sleep 1
-printf '%s' "$TOKEN16" >"$B6/pos.token"
-chmod 600 "$B6/pos.token"
-if await_line 2 pos 'pos: matches:' 'matches: 1' 20; then MATCHED16=yes; else MATCHED16=no; fi
-RECV16=$(pair posrecv "$K6" "$A6")
-note "$RECV16"
-CALLS16=$(lines_in "$FC/calls")
-ARGS16=$(cat "$FC/args" 2>/dev/null)
-STDIN16=$(cat "$FC/stdin" 2>/dev/null)
-ENV16=$(cat "$FC/env" 2>/dev/null)
-SEARCHES16=$(grep -c -e '^https://connect.squareup.com/v2/orders/search$' -e '^https://connect.squareup.com/v2/payments?' "$FC/args" 2>/dev/null)
-PAYMENTS16=$(grep -c '^https://connect.squareup.com/v2/payments?' "$FC/args" 2>/dev/null)
-URLS16=$(grep -c '^https://' "$FC/args" 2>/dev/null)
-note "curl was run $CALLS16 times; searches and payments $SEARCHES16 of $URLS16 URLs, payments $PAYMENTS16"
-TOKEN_IN_ARGS=no; grep -q -- "$TOKEN16" <<<"$ARGS16" && TOKEN_IN_ARGS=yes
-TOKEN_IN_ENV=no; grep -q -- "$TOKEN16" <<<"$ENV16" && TOKEN_IN_ENV=yes
-TOKEN_ON_STDIN=no; grep -q -- "Authorization: Bearer $TOKEN16" <<<"$STDIN16" && TOKEN_ON_STDIN=yes
-TOKEN_IN_LOG=no
-# The token is in no log the Box wrote either.
-grep -q -- "$TOKEN16" "${LOG[2]}" && TOKEN_IN_LOG=yes
-# A curl that is not there: the same setup with another path.
-stop_box 2
-start_box 2 "$B6" "$PORT2" || die "the Box for step 16 did not start for the second time: $(cat "${LOG[2]}")"
-printf '%s\n' pos-setup "vendor=square|location=LOC16|currency=USD|tenders=Bitcoin|curl=$FC/no-such-curl" >&"${FDN[2]}"
-for _ in $(seq 1 20); do
-  [ "$(grep -c '^pos-setup: square' "${LOG[2]}")" -ge 1 ] && break
-  sleep 0.25
-done
-stop_box 2
-start_box 2 "$B6" "$PORT2" || die "the Box for step 16 did not start for the third time: $(cat "${LOG[2]}")"
-NOCURL16=no
-for _ in $(seq 1 20); do
-  ask 2 notes 'note: ' || true
-  if grep -q 'curl is not installed on this Box' "${LOG[2]}"; then NOCURL16=yes; break; fi
-  sleep 0.5
-done
-note "no curl: $NOCURL16"
-if [ "$S16" = paired ] && [ "$WELCOME16" = welcomed ] && [ "$SETUP16" = "pos-setup: square" ] &&
-  [ "$MATCHED16" = yes ] && grep -q 'matches sale 1' <<<"$RECV16" && grep -q 'signature good' <<<"$RECV16" &&
-  [ "$CALLS16" -ge 2 ] && [ "$PAYMENTS16" -ge 1 ] && [ "$SEARCHES16" = "$URLS16" ] && [ "$URLS16" -ge 2 ] &&
-  grep -q -- '^--proto$' <<<"$ARGS16" && grep -q -- '^=https$' <<<"$ARGS16" &&
-  [ "$TOKEN_IN_ARGS" = no ] && [ "$TOKEN_IN_ENV" = no ] && [ "$TOKEN_ON_STDIN" = yes ] &&
-  [ "$TOKEN_IN_LOG" = no ] && [ "$NOCURL16" = yes ]; then
-  pass 16 "a Box set up for Square with a fake curl named by the curl-path setting read the POS with $CALLS16 curl runs, each a search of orders or a ListPayments and nothing else, with the token on curl's standard input only; the counter's sale matched the order and the owner was told; with a curl path that is not there the notes said curl is not installed on this Box"
-else
-  bad 16 "state '$S16'; setup '$SETUP16'; matched $MATCHED16; owner read: $RECV16; curl calls $CALLS16, reads $SEARCHES16 of $URLS16 (payments $PAYMENTS16); token in args $TOKEN_IN_ARGS, in env $TOKEN_IN_ENV, on stdin $TOKEN_ON_STDIN, in log $TOKEN_IN_LOG; no curl: $NOCURL16"
-fi
-stop_box 2
 
 # ---- 17 --------------------------------------------------------------------------
 
@@ -903,8 +625,6 @@ say "18. The phones' libraries pair a real Box"
 [ -z "${PID[2]:-}" ] || stop_box 2 || true
 B8="$BASE/box8"
 mkdir -p "$B8"
-RUN=()
-EXTRA=()
 PH_BAD=
 start_box 2 "$B8" "$PORT2" || die "the Box did not start: $(cat "${LOG[2]}")"
 FP8=$(sed -n 's/^fingerprint: //p' "${LOG[2]}")
@@ -948,7 +668,7 @@ stop_box 2 || true
 say "Result"
 failed=0
 notrun=0
-for n in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18; do
+for n in 1 2 3 4 5 6 7 8 9 15 17 18; do
   printf '%s  step %s\n' "${RESULT[$n]:-FAIL}" "$n"
   case "${RESULT[$n]:-FAIL}" in
     PASS) ;;

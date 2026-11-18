@@ -34,16 +34,8 @@ handles are never given out twice.
 | Queue | `queue`, `queue_refund`, `cancel`, `requeue`, `cash_out`, `sign_batch`, `queue_settings`, `settings_preview` |
 | Link | `link_state`, `clear_alert`, `refund_notes`, `dismiss_refund_note` |
 | Upkeep | `notes`, `rescan`, `recover_key1`, `archive_paid` |
-| Till | `pos_state`, `pos_setup`, `pos_remove`, `pos_request`, `pos_reply`, `pos_acknowledge` |
 | Key ceremony | `ceremony_make_key1`, `ceremony_read_answer`, `ceremony_build_wallet`, `ceremony_finish`, `ceremony_open`, `ceremony_stage`, `ceremony_defaults` |
 | Background watch | `watch_make_key`, `watch_named`, `watch_settings_preview`, `watch_export`, `watch_start`, `watch_step`, `watch_stop` |
-
-The till ops (`docs/OWNER-COINS-RULES.md`, OC-30 to OC-37) match the shop's
-orders against the counters' sales on the owner's phone. The app does the
-HTTP: `pos_request` gives the request to send (without the sign-in, which is
-the app's), `pos_reply` takes the status and the body of the answer, parses
-it, stores the ledger and says whether another page is wanted. That is why
-a request may be 9 MiB: a till page is at most 8 MiB.
 
 `settings` is the signed settings the node holds as in force, decoded, for a
 read-only view (none until the first settings are taken). `outbox` lists the

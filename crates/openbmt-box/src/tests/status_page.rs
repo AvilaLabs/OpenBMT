@@ -533,7 +533,7 @@ fn bx_55_the_page_is_one_self_contained_document() {
 fn bx_55_the_last_note_is_shown_in_words() {
     let mut v = view(BoxStatus::Paired);
     v.last_note = Some(crate::say::note_words(
-        "BX-23: the POS token could not be erased: permission denied",
+        "the Box's link files: LK-53: link-inbox does not read back",
     ));
     let page = render_home(&v, "box.local", None);
     assert!(page.contains("Last thing the Box noted"));
@@ -1146,8 +1146,8 @@ fn hex(bytes: &[u8]) -> String {
 }
 
 /// What must not be on any page, in the forms a page might show it.
-fn secrets(r: &BoxRunner, token: &str) -> Vec<String> {
-    let mut out = vec![token.to_string()];
+fn secrets(r: &BoxRunner) -> Vec<String> {
+    let mut out = Vec::new();
     let inv = invitation(5).to_text();
     out.push(inv.clone());
     out.push(inv.replace('-', ""));
@@ -1179,8 +1179,7 @@ fn bx_59_no_page_in_any_state_holds_a_secret() {
     let dir = TempDir::new("nosecret");
     let (mut r, _) = start(&dir);
     let addr = serve_page(&mut r, PageConfig::default());
-    let token = "pos-token-SECRET-4711";
-    let secrets = secrets(&r, token);
+    let secrets = secrets(&r);
     let page = || http(addr, &get(&host_of(addr))).2;
 
     // Unpaired.
@@ -1191,13 +1190,12 @@ fn bx_59_no_page_in_any_state_holds_a_secret() {
     assert_no_secret(&page(), &secrets, "invitation open");
     let (_, _, answer) = post_invitation(addr, &invitation(5).to_text());
     assert_no_secret(&answer, &secrets, "the answer to a second invitation");
-    // Paired, holding the POS token.
+    // Paired.
     let s = sign_both(settings_with(1, &r.device_id()));
     let mut c = connect(&r);
     let claim = openbmt_core::boxpair::Claim::from_bytes(&c.claim().unwrap()).unwrap();
     let welcome = openbmt_core::boxpair::Welcome::make(&invitation(5), &claim, roots());
     c.welcome(&welcome.to_bytes(), &s.to_bytes()).unwrap();
-    r.store_pos_token(token).unwrap();
     assert_no_secret(&page(), &secrets, "paired");
     let (_, _, answer) = post_invitation(addr, &invitation(6).to_text());
     assert_no_secret(&answer, &secrets, "the answer to a post when paired");
@@ -1225,10 +1223,10 @@ fn bx_59_the_words_of_a_note_show_no_detail_and_no_foreign_text() {
         Who::BoxKeeper,
         "Try again.",
     );
-    words.detail = Some("token pos-token-SECRET-4711".into());
+    words.detail = Some("secret SECRET-4711".into());
     words.quoted = Some(openbmt_core::say::Quoted::new(
         "The vendor said",
-        "pos-token-SECRET-4711",
+        "SECRET-4711",
     ));
     let mut v = view(BoxStatus::Paired);
     v.last_note = Some(words);

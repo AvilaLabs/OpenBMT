@@ -423,10 +423,7 @@ impl<P: OwnerPort> OwnerNode<P> {
     /// The desk index of every request, for the allocation of the next
     /// (RQ-03).
     pub fn request_indexes(&self) -> BTreeSet<u32> {
-        let mut taken = self.requests.indexes();
-        // WO-12: an address given to a store is never given to a request.
-        taken.extend(self.web.indexes());
-        taken
+        self.requests.indexes()
     }
 
     /// The app gives the shop's settings, its time zone and the newest rate
@@ -886,22 +883,17 @@ impl<P: OwnerPort> OwnerNode<P> {
         if self.requests.state.is_err() {
             return;
         }
-        // WO-12: a payment to an address given to a store is kept before its
-        // order is taken, so that the order's request finds it.
-        let web_scripts = self.web_script_map();
         let Ok(loaded) = &self.requests.state else {
             return;
         };
         // RQ-04: each request's address is its own wallet's, which may be one
         // the shop pinned before.
-        let mut by_script: BTreeMap<ScriptBuf, u32> = web_scripts;
-        by_script.extend(
-            loaded
-                .book
-                .requests()
-                .iter()
-                .filter_map(|r| Some((self.request_script(r)?, r.address_index))),
-        );
+        let by_script: BTreeMap<ScriptBuf, u32> = loaded
+            .book
+            .requests()
+            .iter()
+            .filter_map(|r| Some((self.request_script(r)?, r.address_index)))
+            .collect();
         if by_script.is_empty() {
             return;
         }
@@ -1074,15 +1066,8 @@ impl<P: OwnerPort> OwnerNode<P> {
             .iter()
             .map(|r| (r.address_index, r.number))
             .collect();
-        let web = self.web.indexes();
         let mut by_request: BTreeMap<u64, Vec<Arrival>> = BTreeMap::new();
-        let mut orphans: Vec<PendingArrival> = Vec::new();
         for a in &due {
-            if !by_index.contains_key(&a.index) && web.contains(&a.index) {
-                // WO-12: paid to an address given to a store whose order was
-                // not taken yet: it waits for the order.
-                orphans.push(*a);
-            }
             if let Some(number) = by_index.get(&a.index) {
                 by_request.entry(*number).or_default().push(Arrival {
                     txid: a.txid,
@@ -1098,7 +1083,6 @@ impl<P: OwnerPort> OwnerNode<P> {
         let mut next = loaded.clone();
         let mut waiting: Vec<PendingArrival> = rest;
         let mut full: Vec<String> = Vec::new();
-        waiting.extend(orphans);
         for (number, arrivals) in &by_request {
             // RQ-15: a request holds a limited number of payments; the book
             // refuses the whole call past it, so only as many as there is

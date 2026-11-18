@@ -109,20 +109,6 @@ The labels the rules name and the lines of the page.
 | homeLine | A new wallet waits |
 | compare | Compare this address with the first address on the new wallet's own screen: the stick's result, its Check words I wrote mode, or the signer. Not with the owner phone. |
 
-## A sale from the till (CR-266 to CR-271)
-
-The labels of the card on Home and of the line on a started sale.
-
-| Key | Text |
-|---|---|
-| card | From the till |
-| amount | Amount |
-| reference | Till reference |
-| minutesLeft | Minutes left |
-| start | Start |
-| notNow | Not now |
-| cancelled | The till cancelled this sale |
-
 ## The starter line's payments (CR-273, CR-274)
 
 The labels of the cards on Home and of the day's payments on

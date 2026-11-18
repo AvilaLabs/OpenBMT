@@ -6,8 +6,7 @@
 # Artifacts compared: for each of the Key, Owner and Counter apps the signed
 # APK, the unsigned aligned APK (the stage before signing), classes.dex, and
 # every stripped native library in the APK; and the Box binary
-# (scripts/box-build.sh: cargo build --release -p openbmt-box, as
-# packaging/box/Dockerfile does). The APKs are signed with one local RSA test
+# (scripts/box-build.sh: cargo build --release -p openbmt-box). The APKs are signed with one local RSA test
 # key per app, made by the first build and kept in $REPRO_DIR/keys (not the
 # usual test keys: an RSA PKCS#1 v1.5 signature is deterministic, an ECDSA one
 # is not, so an EC key can never give a matching signed APK). A signed-APK

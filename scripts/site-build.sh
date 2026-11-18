@@ -18,7 +18,7 @@ mdbook build
 rm -rf dist/site
 mkdir -p dist/site/ui dist/site/fonts dist/site/sounds
 # The page, its scripts and style, with the repository's paths written as the site's.
-for f in shell.js shell.css wallet.js payment-code.js questions.js sound.js customer.js one-chain.js counter-controller.js owner-controller.js register-views.js register.js live.js counter-host.mjs owner-host.mjs; do
+for f in shell.js shell.css wallet.js payment-code.js questions.js sound.js customer.js one-chain.js counter-controller.js owner-controller.js live.js counter-host.mjs owner-host.mjs; do
     cp "demo/web2/$f" dist/site/
 done
 sed -e 's#\.\./\.\./dist/kotlin-js/counter/#./#g' -e 's#\.\./\.\./dist/demo-counter/#./#g' \
@@ -37,7 +37,7 @@ cp demo/web2/sounds/* dist/site/sounds/
 cp demo/web/favicon.svg dist/site/
 cp demo/web/fonts/ubuntu-latin-*.woff2 demo/web/fonts/UBUNTU-FONT-LICENCE.txt dist/site/fonts/
 cp dist/kotlin-js/counter/counter-model.mjs dist/site/
-cp dist/demo-counter/counter.wasm dist/demo-counter/counter-record.bin dist/demo-counter/counter-record-box.bin dist/site/
+cp dist/demo-counter/counter.wasm dist/demo-counter/counter-record.bin dist/site/
 cp dist/kotlin-js/owner/owner-model.mjs dist/site/
 cp dist/demo-owner/owner.wasm dist/site/
 cp -R dist/handbook dist/site/handbook

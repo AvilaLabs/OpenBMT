@@ -6,7 +6,7 @@ use std::collections::BTreeSet;
 const RULES: &str = include_str!("../../../../docs/COUNTER-RULES.md");
 const REFUSALS: &str = include_str!("../refusal.rs");
 
-const TEST_SOURCES: [&str; 27] = [
+const TEST_SOURCES: [&str; 26] = [
     include_str!("bills.rs"),
     include_str!("currency.rs"),
     include_str!("encodings.rs"),
@@ -29,7 +29,6 @@ const TEST_SOURCES: [&str; 27] = [
     include_str!("states.rs"),
     include_str!("storage.rs"),
     include_str!("switch.rs"),
-    include_str!("till.rs"),
     include_str!("tips.rs"),
     include_str!("totals.rs"),
     include_str!("valuation.rs"),
@@ -39,7 +38,7 @@ const TEST_SOURCES: [&str; 27] = [
 /// Rules this crate does not test, each with the reason. The counter
 /// implements every rule except the ones that only state a limit and the
 /// ones that belong to the app it is built into.
-const NOT_HERE: [(&str, &str); 102] = [
+const NOT_HERE: [(&str, &str); 101] = [
     (
         "CR-284",
         "the library draws no notice: the node tells each sale's first turn to green or red \
@@ -288,9 +287,7 @@ const NOT_HERE: [(&str, &str); 102] = [
     ),
     (
         "CR-212",
-        "the POS reader's facts and notices are `openbmt-pos`'s, and the note goes to none of \
-         them; tested in `openbmt-pos` (`cr_212_*` in `tests/facts.rs`), and the books' side \
-         in `openbmt-books` (BK-41)",
+        "the note's side is the books': tested in `openbmt-books` (BK-41)",
     ),
     (
         "CR-213",
@@ -521,11 +518,6 @@ const NOT_HERE: [(&str, &str); 102] = [
         "CR-276",
         "the words are listed in `openbmt-counter-node`, `openbmt-counter-ffi` and the app (SC-12)",
     ),
-    (
-        "CR-254",
-        "the Paid screen is the Android app's; its tests are the app's JVM tests \
-         (`apps/counter-android`), and the library gives it the reference (`openbmt-counter-ffi`)",
-    ),
 ];
 
 /// The rule number at the start of `rest` (what follows `CR-`): every digit,
@@ -544,9 +536,9 @@ fn defined() -> BTreeSet<String> {
 }
 
 #[test]
-fn the_rules_file_defines_two_hundred_and_twenty_three_rules() {
+fn the_rules_file_defines_two_hundred_and_fifteen_rules() {
     let ids = defined();
-    assert_eq!(ids.len(), 223);
+    assert_eq!(ids.len(), 215);
     assert!(
         ids.contains("CR-01")
             && ids.contains("CR-42")
@@ -586,8 +578,6 @@ fn the_rules_file_defines_two_hundred_and_twenty_three_rules() {
             && ids.contains("CR-217")
             && ids.contains("CR-255")
             && ids.contains("CR-264")
-            && ids.contains("CR-266")
-            && ids.contains("CR-271")
             && ids.contains("CR-276")
             && ids.contains("CR-282")
             && ids.contains("CR-283")

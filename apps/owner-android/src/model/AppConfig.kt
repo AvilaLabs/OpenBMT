@@ -95,12 +95,6 @@ object AppFiles {
      */
     const val CEREMONY_FILE = "ceremony.obks"
 
-    /** The Keystore key that seals the till's token (OA-16). Its own key: removing the till does not touch the setup's. */
-    const val POS_KEY_ALIAS = "openbmt-owner-pos-token-v1"
-
-    /** The sealed read-only token of the till (OA-16). */
-    const val POS_TOKEN_FILE = "pos-token.obks"
-
     /**
      * Present when key 2 of the saved setup is held on a hardware signer, as the ceremony's pairs of keys said
      * (OA-72). It holds no secret. The setup text has no line for it, so a setup that is pasted has none.
@@ -140,7 +134,7 @@ object AppFiles {
     /** The folder of the own-wallet shop's state (the library's `own-shop` file, the allocation book and the range outbox are kept in it). */
     const val OWN_DIR = "own-shop-dir"
 
-    /** The shop's name, money and till, and whether the till steps were shown: the first screens' own file. It holds no secret. */
+    /** The shop's name and money, and whether the cue card was printed: the first screens' own file. It holds no secret. */
     const val SHOP_FILE = "shop.txt"
 
     /** The node's own folder, inside the app's `noBackupFilesDir`. */

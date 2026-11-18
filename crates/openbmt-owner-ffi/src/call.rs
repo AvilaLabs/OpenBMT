@@ -48,10 +48,6 @@
 //!   Key app's answer, build the wallet, confirm, open the finished setup,
 //!   where the setup is, and the defaults of the last two steps. They work
 //!   on no node.
-//! - 70 to 75: the till (`docs/OWNER-COINS-RULES.md`, OC-30 to OC-37): what
-//!   it shows, its settings, taking them off, the next request, the till's
-//!   answer, acknowledging an alert. The app sends the request and hands
-//!   back the answer; the node parses and matches.
 //! - 120 to 126: a hardware signer as key 2 (`docs/SESSION-RULES.md`, AS-90 to
 //!   AS-99): the wallet written for it, the session built with the spends
 //!   apart, the file for the signer, taking what it returns, and the record
@@ -75,12 +71,6 @@
 //!   due, stop a series, the state Home shows, and the line that asks a
 //!   customer for an address. Every call is given the time, the shop's
 //!   offset from UTC and the newest rate.
-//! - 227 to 233: the owner phone's web orders (`docs/WEB-ORDER-RULES.md`,
-//!   WO-05 to WO-32): make the pairing code for a store, the owner's word
-//!   that the fingerprints match, unpairing, the store's state, the next
-//!   step of a visit (which the app sends to the store) and the store's
-//!   answer to it. 233 reads a pairing code to show what is compared; it
-//!   works on no node.
 //! - 235: the limit and the stop the owner phone's own record holds, given to
 //!   the node for the starter line it sends to the counters (LK-79, SS-32,
 //!   SS-38).
@@ -199,10 +189,6 @@ use crate::paid_check_views::{
     PaidAlarmView, PaidArrivedView, PaidCheckView, PaidClearArgs, PaidDayArgs, PaidDayView,
     PaidSaleLineView,
 };
-use crate::pos_views::{
-    PosAckArgs, PosAlertKey, PosAlertKind, PosAlertView, PosMethodView, PosReplyArgs, PosReplyView,
-    PosRequestView, PosSetupView, PosStateView, PosSubjectView, PosVendorView,
-};
 use crate::price::{
     self, AgreedPriceInView, AgreedPriceView, PriceArgs, PriceForArgs, PriceReplyView,
     PriceSourceView,
@@ -249,11 +235,6 @@ use crate::views::{
     TakenView, ViewKind, WordsView,
 };
 use crate::watch::{self, WatchEntry, WatchStart, WatchStepView};
-use crate::web_orders::{
-    self, WebAmountOffView, WebCallKindView, WebCallView, WebCodeView, WebHeaderView, WebOutcome,
-    WebPairArgs, WebPairView, WebPairingKind, WebRefusedView, WebReplyArgs, WebStateView,
-    WebStepArgs, WebStepKind, WebStepView,
-};
 
 /// The first four bytes of a request.
 pub const REQUEST_MAGIC: [u8; 4] = *b"OBMk";
@@ -664,20 +645,6 @@ fn build_ops() -> Vec<Op> {
         op(61, "rescan", Node, |c, ()| c.entry()?.rescan()),
         op(62, "recover_key1", Node, |c, ()| c.entry()?.recover_key1()),
         op(63, "archive_paid", Node, |c, ()| c.entry()?.archive_paid()),
-        op(70, "pos_state", Node, |c, ()| c.entry()?.pos_state()),
-        op(71, "pos_setup", Node, |c, a: PosSetupView| {
-            c.entry()?.pos_setup(a)
-        }),
-        op(72, "pos_remove", Node, |c, ()| c.entry()?.pos_remove()),
-        op(73, "pos_request", Node, |c, now: u64| {
-            c.entry()?.pos_request(now)
-        }),
-        op(74, "pos_reply", Node, |c, a: PosReplyArgs| {
-            c.entry()?.pos_reply(a)
-        }),
-        op(75, "pos_acknowledge", Node, |c, a: PosAckArgs| {
-            c.entry()?.pos_acknowledge(a)
-        }),
         op(80, "ceremony_make_key1", Zero, |_, a: Key1Args| {
             ceremony::make_key1(a)
         }),
@@ -1098,27 +1065,6 @@ fn build_ops() -> Vec<Op> {
             Node,
             |c, a: RequestReturnArgs| c.entry()?.request_return_ask(a),
         ),
-        op(227, "web_pair_start", Node, |c, a: WebPairArgs| {
-            c.entry()?.web_pair_start(a)
-        }),
-        op(228, "web_pair_confirm", Node, |c, ask: RequestAsk| {
-            c.entry()?.web_pair_confirm(ask)
-        }),
-        op(229, "web_unpair", Node, |c, ask: RequestAsk| {
-            c.entry()?.web_unpair(ask)
-        }),
-        op(230, "web_state", Node, |c, ask: RequestAsk| {
-            c.entry()?.web_state(ask)
-        }),
-        op(231, "web_step", Node, |c, a: WebStepArgs| {
-            c.entry()?.web_step(a)
-        }),
-        op(232, "web_reply", Node, |c, a: WebReplyArgs| {
-            c.entry()?.web_reply(a)
-        }),
-        op(233, "web_code_read", Zero, |_, text: String| {
-            web_orders::read_code(text)
-        }),
         op(234, "request_read", Node, |c, a: RequestNumberArgs| {
             c.entry()?.request_read(a)
         }),
@@ -1416,18 +1362,6 @@ fn definitions() -> Vec<TypeDef> {
         SettingsHeldView::define(),
         OutboxKind::define(),
         OutboxRow::define(),
-        PosVendorView::define(),
-        PosSetupView::define(),
-        PosMethodView::define(),
-        PosRequestView::define(),
-        PosReplyArgs::define(),
-        PosAlertKind::define(),
-        PosSubjectView::define(),
-        PosAlertKey::define(),
-        PosAckArgs::define(),
-        PosAlertView::define(),
-        PosReplyView::define(),
-        PosStateView::define(),
         CounterScanView::define(),
         CounterConfirmArgs::define(),
         CounterQueuedView::define(),
@@ -1552,21 +1486,6 @@ fn definitions() -> Vec<TypeDef> {
         RequestReturnAddedView::define(),
         RequestRepeatsView::define(),
         RequestStateView::define(),
-        WebPairArgs::define(),
-        WebPairView::define(),
-        WebCodeView::define(),
-        WebPairingKind::define(),
-        WebRefusedView::define(),
-        WebAmountOffView::define(),
-        WebStateView::define(),
-        WebStepArgs::define(),
-        WebStepKind::define(),
-        WebCallKindView::define(),
-        WebHeaderView::define(),
-        WebCallView::define(),
-        WebStepView::define(),
-        WebOutcome::define(),
-        WebReplyArgs::define(),
         RequestStatusView::define(),
         RequestEndView::define(),
         PaymentAfterView::define(),
@@ -1637,9 +1556,8 @@ pub fn protocol_description() -> String {
          elements; `list<u8>` is the bytes type. `option<T>` is a flag byte 0\n\
          or 1 and then the value. An enum is a tag byte and then the fields of\n\
          its variant. A record is its fields in the order given. A request is\n\
-         at most 9437184 bytes (9 MiB: the body of a till answer is at\n\
-         most 8 MiB), is read completely before anything is done,\n\
-         and is refused when bytes are left over.\n\
+         at most 9437184 bytes (9 MiB), is read completely before anything\n\
+         is done, and is refused when bytes are left over.\n\
          \n\
          Times are seconds since 1970. Money is in satoshis. A device\n\
          identity and a session number are 32 bytes. A transaction ID is hex\n\

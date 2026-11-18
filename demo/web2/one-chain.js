@@ -43,17 +43,9 @@
       heartbeat() {
         return counter.heartbeat();
       },
-      /** The record of the demo counter's pairing, for the counter's node; [withBox] for a shop that has a Box. */
-      record(withBox = false) {
-        return counter.record(withBox);
-      },
-      /** The shop's Box asks the counter for a sale of [amountMinor] for the till; the till's sale as hex. */
-      tillRequest(amountMinor) {
-        return counter.tillRequest(amountMinor);
-      },
-      /** The owner's phone reads the register: the text of the order and the sale in, the matcher's verdict out. */
-      registerVerdict(request) {
-        return owner.registerVerdict(request);
+      /** The record of the demo counter's pairing, for the counter's node. */
+      record() {
+        return counter.record();
       },
     };
   }

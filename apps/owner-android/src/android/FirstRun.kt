@@ -2,16 +2,12 @@ package org.openbmt.owner.app
 
 import android.graphics.drawable.GradientDrawable
 import android.content.Intent
-import android.text.Editable
 import android.text.InputType
-import android.text.TextWatcher
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
-import android.widget.EditText
 import android.widget.LinearLayout
-import android.widget.RadioGroup
 import android.widget.TextView
 import java.io.IOException
 import java.util.Locale
@@ -26,10 +22,10 @@ import org.openbmt.owner.OwnerNode
 import org.openbmt.owner.Place
 import org.openbmt.owner.ShopCurrency
 
-// The first run of the owner app (docs/DESIGN.md section 2.1): the welcome, the practice shop, the shop, the
-// till, where the money goes, the hardware wallet's guide, the instant limit and the first sale. Every sentence is in FirstRunWords. The practice shop lives in memory only: it
-// writes no file, sends nothing and calls nothing in the library. The shop's screens keep the name, the money and
-// the till in the shop file of the app's folder, which holds no secret. Back on every screen returns to the
+// The first run of the owner app (docs/DESIGN.md section 2.1): the welcome, the practice shop, the shop, where the
+// money goes, the hardware wallet's guide, the instant limit and the first sale. Every sentence is in FirstRunWords. The practice shop lives in memory only: it
+// writes no file, sends nothing and calls nothing in the library. The shop's screens keep the name and the money in
+// the shop file of the app's folder, which holds no secret. Back on every screen returns to the
 // step before, with what was entered.
 
 /** The state of the first run, made when it is first needed from the shop file and the phone's country. */
@@ -53,7 +49,6 @@ internal fun Controller.showFirstRun() {
         FirstRunStep.Before -> showBefore(r)
         FirstRunStep.Place -> showPlace(r)
         FirstRunStep.Shop -> showShop(r)
-        FirstRunStep.Till -> showTillChoice(r)
         FirstRunStep.Money -> showMoney(r)
         FirstRunStep.Hardware -> showHardware(r)
         FirstRunStep.Helper -> showHelper(r)
@@ -301,54 +296,6 @@ private fun Controller.showShop(r: FirstRun) {
     )
 }
 
-// ---- how you take payments now ----------------------------------------------------------------------------------------------
-
-private fun Controller.showTillChoice(r: FirstRun) {
-    val search = ui.field(FirstRunWords.tillSearch).also { it.setText(r.query) }
-    val list = Slot(act, 4)
-    val next = ui.primary(FirstRunWords.tillNext) {}
-    val msg = Slot(act)
-    fun fill() {
-        val tills = Till.search(r.query)
-        val group: RadioGroup = ui.choice(tills.map { it.title }, tills.indexOf(r.till))
-        group.setOnCheckedChangeListener { _, _ ->
-            tills.getOrNull(ui.chosen(group))?.let { r.till = it }
-            next.isEnabled = r.till != null
-        }
-        list.show(group)
-        next.isEnabled = r.till != null
-    }
-    search.addTextChangedListener(
-        object : TextWatcher {
-            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
-
-            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
-
-            override fun afterTextChanged(s: Editable?) {
-                r.query = s?.toString() ?: ""
-                fill()
-            }
-        },
-    )
-    fill()
-    next.setOnClickListener {
-        val t = r.till ?: return@setOnClickListener
-        try {
-            // A new till is a new set of steps: they are shown again after the first counter.
-            val held = shopFile.load()
-            shopFile.save(held.with(till = t, stepsShown = held.stepsShown && held.till == t, cardPrinted = held.cardPrinted && held.till == t))
-            r.next()
-            showFirstRun()
-        } catch (e: IOException) {
-            msg.show(ui.words(AppWords.fileNotSaved(e.message)))
-        }
-    }
-    stepScreen(
-        FirstRunWords.shopTitle, listOf(ui.tillPicture(), heading(FirstRunWords.tillTitle), para(FirstRunWords.tillText), line(FirstRunWords.tillReads, muted = true), search, list, msg),
-        listOf(next), { r.back(); showFirstRun() },
-    )
-}
-
 // ---- where the money goes ----------------------------------------------------------------------------------------------------
 
 private fun Controller.showMoney(r: FirstRun) {
@@ -538,7 +485,7 @@ private fun Controller.showFirstSale(r: FirstRun) {
 
 /**
  * The first run ends here (DESIGN 2.1): the counter takes bitcoin, and what is still to do is the home checklist's, listed as
- * plain lines. The button ends the first run and goes on to the till steps once, then home.
+ * plain lines. The button ends the first run and goes home.
  */
 private fun Controller.showReady(r: FirstRun) {
     val views = ArrayList<View>()
@@ -560,13 +507,13 @@ private fun Controller.showReady(r: FirstRun) {
     stepScreen(FirstRunWords.shopTitle, views, actions, { r.back(); showFirstRun() })
 }
 
-/** The first run is over: its state is let go, and the till steps (once) and home follow. */
+/** The first run is over: its state is let go, and home follows. */
 private fun Controller.endFirstRun() {
     firstRun = null
     starter.firstRun = null
     resume.clear()
     forgetStep()
-    afterFirstCounter()
+    showHome()
 }
 
 /** The shop's paid sales as the books count them; null when the node cannot say. */
@@ -711,31 +658,12 @@ private fun Controller.showNotYet(r: FirstRun) {
     )
 }
 
-// ---- the till steps ------------------------------------------------------------------------------------------------------------
+// ---- the staff cue card ------------------------------------------------------------------------------------
 
-/** The steps for [till]: after the first counter, and from Settings at any time. [back] is where Done and Back lead. */
-internal fun Controller.showTillSteps(till: Till, back: () -> Unit) {
-    val page = TillStepsPage.of(till)
-    val views = ArrayList<View>()
-    views.add(heading(page.title))
-    for (l in page.lines) {
-        views.add(
-            when (l.kind) {
-                TillStepsPage.Kind.Step -> ui.text(l.text, 16f)
-                TillStepsPage.Kind.Small -> line(l.text, muted = true)
-                TillStepsPage.Kind.Body -> para(l.text)
-            },
-        )
-    }
-    views.add(ui.secondary(FirstRunWords.cardOpen) { showCueCard { showTillSteps(till, back) } })
-    stepScreen(page.title, views, listOf(ui.primary(FirstRunWords.tillStepsDone) { back() }), back)
-}
-
-/** The staff cue card for the chosen till, to print. [back] is where Back leads. */
+/** The staff cue card, to print. [back] is where Back leads. */
 internal fun Controller.showCueCard(back: () -> Unit) {
     val held = shopFile.load()
-    val till = held.till ?: return back()
-    val card = CueCard.of(till, held.name)
+    val card = CueCard.of(held.name)
     val msg = Slot(act)
     val views = ArrayList<View>()
     views.add(heading(card.title))
@@ -759,24 +687,4 @@ internal fun Controller.showCueCard(back: () -> Unit) {
         if (!sent) msg.show(line(FirstRunWords.cardPrintFailed, bold = true))
     }
     stepScreen(FirstRunWords.cardScreenTitle, views, listOf(print), back)
-}
-
-/** What follows the first counter: the steps for the chosen till once, then home. */
-internal fun Controller.afterFirstCounter() {
-    val held = shopFile.load()
-    val till = held.till
-    if (till == null || held.stepsShown) return showHome()
-    try {
-        shopFile.save(held.with(stepsShown = true))
-    } catch (_: IOException) {
-        // The steps are shown now; at worst they are shown once more.
-    }
-    showTillSteps(till) { showHome() }
-}
-
-/** The Settings row for the till steps: named for the chosen till, or null when none was chosen. */
-internal fun Controller.tillStepsRow(back: () -> Unit): RowItem? {
-    val till = shopFile.load().till ?: return null
-    val title = if (till.listed) FirstRunWords.with(FirstRunWords.tillStepsTitle, till.title) else FirstRunWords.tillTitle
-    return RowItem(title) { showTillSteps(till, back) }
 }
