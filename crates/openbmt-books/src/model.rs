@@ -1,6 +1,5 @@
 //! The model: sales, disposals, returns and what the caller supplies.
 
-use std::collections::BTreeMap;
 use std::fmt;
 
 use openbmt_core::identity::{tagged_hash, DeviceId};
@@ -139,17 +138,6 @@ impl Counting {
             Self::NoFunds => "no funds",
         }
     }
-}
-
-/// What the POS was told (CR-32).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PosMark {
-    /// Nothing is recorded.
-    NotRecorded = 0,
-    /// The POS was told the sale is paid.
-    Paid = 1,
-    /// The POS was told the sale is not paid any more.
-    Unpaid = 2,
 }
 
 /// A payment that arrived after the sale ended.
@@ -332,15 +320,10 @@ pub struct Sale {
     pub dust_sats: u64,
     /// Overrides on the sale.
     pub overrides: Vec<OverrideNote>,
-    /// What the POS was told.
-    pub pos: PosMark,
     /// BK-32: how the sale was paid.
     pub payment_mode: PaymentMode,
     /// BK-41: the note on the sale, as the counter wrote it.
     pub note: Option<String>,
-    /// BK-43: the till's reference, as the counter wrote it: the first one
-    /// the records name stands.
-    pub till_reference: Option<String>,
 }
 
 impl SaleState {
@@ -449,35 +432,6 @@ pub struct CashReturn {
     pub minor: u64,
 }
 
-/// BK-10: what the POS match knows of each sale, given by the caller.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct PosFacts {
-    tax: BTreeMap<SaleKey, u64>,
-}
-
-impl PosFacts {
-    /// No facts.
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// The sales tax of a sale, in minor units. A second call for the same
-    /// sale replaces the first.
-    pub fn insert_tax(&mut self, sale: SaleKey, tax_minor: u64) {
-        self.tax.insert(sale, tax_minor);
-    }
-
-    /// The tax given for a sale.
-    pub fn tax(&self, sale: &SaleKey) -> Option<u64> {
-        self.tax.get(sale).copied()
-    }
-
-    /// Every sale with a tax amount.
-    pub fn iter(&self) -> impl Iterator<Item = (&SaleKey, &u64)> {
-        self.tax.iter()
-    }
-}
-
 /// BK-44: which bill: the counter's key and the bill's number.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct BillKey {
@@ -526,8 +480,6 @@ pub struct Bill {
     pub amount_minor: u64,
     /// The currency.
     pub currency: Currency,
-    /// BK-43: the till's reference, the first the records name.
-    pub reference: Option<String>,
     /// The parts, in the order the records give them.
     pub parts: Vec<BillPartNote>,
     /// How it ended, when it did.

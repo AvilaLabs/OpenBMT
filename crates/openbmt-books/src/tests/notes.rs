@@ -56,10 +56,7 @@ fn bk_41_the_full_ledger_has_the_note_in_the_column_sale_note() {
         .lines()
         .find(|l| l.starts_with("Type,"))
         .expect("header");
-    assert!(
-        header.contains(",Tips,Sale note,Till reference,"),
-        "{header}"
-    );
+    assert!(header.contains(",Tips,Sale note,Bill number,"), "{header}");
     let rows: Vec<&str> = ledger.lines().filter(|l| l.starts_with("sale,")).collect();
     assert_eq!(rows.len(), 3);
     // A comma puts the note in quotes, and a formula is made text (BK-21).

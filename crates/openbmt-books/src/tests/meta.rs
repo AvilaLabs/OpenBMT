@@ -46,13 +46,17 @@ fn sources() -> String {
 #[test]
 fn the_rules_file_defines_its_rules() {
     let ids = defined();
-    assert_eq!(ids.len(), 49, "{ids:?}");
+    assert_eq!(ids.len(), 45, "{ids:?}");
     assert!(ids.contains("BK-01") && ids.contains("BK-49"));
     let numbers: Vec<u32> = ids
         .iter()
         .map(|i| i[3..].parse().expect("a number"))
         .collect();
-    assert_eq!(numbers, (1..=49).collect::<Vec<u32>>());
+    // BK-43 and BK-46 to BK-48 are not rules of this file.
+    let want: Vec<u32> = (1..=49)
+        .filter(|n| *n != 43 && !(46..=48).contains(n))
+        .collect();
+    assert_eq!(numbers, want);
 }
 
 #[test]
@@ -94,7 +98,6 @@ fn every_rule_the_code_names_exists() {
         include_str!("../model.rs"),
         include_str!("../money.rs"),
         include_str!("../sealed.rs"),
-        include_str!("../till.rs"),
         include_str!("../value.rs"),
     ] {
         for (at, _) in file.match_indices("BK-") {

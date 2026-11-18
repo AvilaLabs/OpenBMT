@@ -6,8 +6,7 @@ use openbmt_core::identity::DeviceId;
 use openbmt_core::wire::{self, DecodeError, Reader};
 use openbmt_counter::refund::refund_text_ok;
 use openbmt_counter::{
-    reference_ok, BillEnd, BillKind, Currency, PartWay, RateSource, Role, MAX_FINAL_PAYMENTS,
-    MAX_NAME_BYTES,
+    BillEnd, BillKind, Currency, PartWay, RateSource, Role, MAX_FINAL_PAYMENTS, MAX_NAME_BYTES,
 };
 
 use crate::books::{
@@ -16,8 +15,8 @@ use crate::books::{
 use crate::date::MAX_UNIX;
 use crate::model::{
     Basis, Bill, BillEndNote, BillKey, BillPartNote, CashReturn, Disposal, DisposalKind,
-    LatePayment, LightningPayment, OverrideNote, Payment, PaymentList, PaymentMode, PosMark, Sale,
-    SaleId, SaleKey, SaleState, TipNote,
+    LatePayment, LightningPayment, OverrideNote, Payment, PaymentList, PaymentMode, Sale, SaleId,
+    SaleKey, SaleState, TipNote,
 };
 use crate::value::{UnknownField, Value};
 
@@ -37,18 +36,18 @@ const VERSION_TIPS: u8 = 3;
 /// its note.
 const VERSION_NOTES: u8 = 4;
 
-/// BK-45: the version of a bundle that holds a sale's reference or a bill.
-/// Every sale in it ends with its payment mode, its tip and its note, as in
-/// version 4, and then its reference; the bills follow the returns.
+/// BK-45: the version of a bundle that holds a bill. Every sale in it ends
+/// with its payment mode, its tip and its note, as in version 4; the bills
+/// follow the returns.
 const VERSION_BILLS: u8 = 5;
 
-/// Fewest bytes a sale takes (it is 133), for the count check.
-const MIN_SALE: usize = 130;
+/// Fewest bytes a sale takes (it is 132), for the count check.
+const MIN_SALE: usize = 129;
 const MIN_DISPOSAL: usize = 8 + 1 + 3 + 8 + 2;
 const MIN_RETURN: usize = 8 + 36 + 8;
 /// Fewest bytes a bill takes: counter, number, time, kind, amount, currency,
-/// reference flag, part count and end flag.
-const MIN_BILL: usize = 32 + 4 + 8 + 1 + 8 + 3 + 1 + 1 + 1;
+/// part count and end flag.
+const MIN_BILL: usize = 32 + 4 + 8 + 1 + 8 + 3 + 1 + 1;
 
 fn put_u32(out: &mut Vec<u8>, n: usize) {
     // Every list is bounded far below the u32 limit when it is built.
@@ -303,36 +302,12 @@ fn get_note(r: &mut Reader<'_>) -> Result<Option<String>, DecodeError> {
     Ok(Some(note))
 }
 
-fn put_reference(out: &mut Vec<u8>, reference: &Option<String>) {
-    match reference {
-        Some(r) => {
-            out.push(1);
-            put_text(out, r);
-        }
-        None => out.push(0),
-    }
-}
-
-fn get_reference(r: &mut Reader<'_>) -> Result<Option<String>, DecodeError> {
-    if !r.flag()? {
-        return Ok(None);
-    }
-    let text = get_text(r)?;
-    if !reference_ok(&text) {
-        return Err(DecodeError::NonCanonical(
-            "a reference is not 1 to 32 characters of the allowed ones",
-        ));
-    }
-    Ok(Some(text))
-}
-
 /// Which optional fields end every sale of a bundle.
 #[derive(Clone, Copy)]
 struct SaleFields {
     mode: bool,
     tips: bool,
     notes: bool,
-    references: bool,
 }
 
 fn put_sale(out: &mut Vec<u8>, s: &Sale, f: SaleFields) {
@@ -372,7 +347,6 @@ fn put_sale(out: &mut Vec<u8>, s: &Sale, f: SaleFields) {
         put_text(out, &o.name);
         out.extend_from_slice(&o.sats.to_le_bytes());
     }
-    out.push(s.pos as u8);
     if f.mode {
         put_mode(out, &s.payment_mode);
     }
@@ -381,9 +355,6 @@ fn put_sale(out: &mut Vec<u8>, s: &Sale, f: SaleFields) {
     }
     if f.notes {
         put_note(out, &s.note);
-    }
-    if f.references {
-        put_reference(out, &s.till_reference);
     }
 }
 
@@ -449,12 +420,6 @@ fn get_sale(r: &mut Reader<'_>, f: SaleFields) -> Result<Sale, DecodeError> {
             sats: r.u64_le()?,
         });
     }
-    let pos = match r.u8()? {
-        0 => PosMark::NotRecorded,
-        1 => PosMark::Paid,
-        2 => PosMark::Unpaid,
-        _ => return Err(DecodeError::NonCanonical("a POS mark is not known")),
-    };
     let payment_mode = if f.mode {
         get_mode(r)?
     } else {
@@ -462,11 +427,6 @@ fn get_sale(r: &mut Reader<'_>, f: SaleFields) -> Result<Sale, DecodeError> {
     };
     let tip = if f.tips { get_tip(r)? } else { None };
     let note = if f.notes { get_note(r)? } else { None };
-    let till_reference = if f.references {
-        get_reference(r)?
-    } else {
-        None
-    };
     if tip
         .as_ref()
         .is_some_and(|t| amount_minor.checked_add(t.minor).is_none())
@@ -512,10 +472,8 @@ fn get_sale(r: &mut Reader<'_>, f: SaleFields) -> Result<Sale, DecodeError> {
         surplus_owed_sats,
         dust_sats,
         overrides,
-        pos,
         payment_mode,
         note,
-        till_reference,
     })
 }
 
@@ -526,7 +484,6 @@ fn put_bill(out: &mut Vec<u8>, b: &Bill) {
     out.push(b.kind.to_u8());
     out.extend_from_slice(&b.amount_minor.to_le_bytes());
     out.extend_from_slice(&b.currency.code());
-    put_reference(out, &b.reference);
     out.push(u8::try_from(b.parts.len()).unwrap_or(u8::MAX));
     for p in &b.parts {
         match p {
@@ -562,7 +519,6 @@ fn get_bill(r: &mut Reader<'_>) -> Result<Bill, DecodeError> {
         return Err(DecodeError::NonCanonical("a bill is for nothing"));
     }
     let currency = get_currency(r)?;
-    let reference = get_reference(r)?;
     let n = usize::from(r.u8()?);
     if n > MAX_BILL_PARTS {
         return Err(DecodeError::TooLarge);
@@ -611,7 +567,6 @@ fn get_bill(r: &mut Reader<'_>) -> Result<Bill, DecodeError> {
         kind,
         amount_minor,
         currency,
-        reference,
         parts,
         ended,
     })
@@ -662,11 +617,9 @@ impl Books {
         // the payment mode of every sale too. BK-42: version 4 only when a
         // sale carries a note, and then every sale holds its mode, its tip
         // and its note.
-        // BK-45: version 5 when a sale or a bill has a reference or a bill
-        // exists, and then every sale ends with its mode, tip, note and
-        // reference, and the bills follow the returns.
-        let with_bills =
-            !self.bills.is_empty() || self.sales.iter().any(|s| s.till_reference.is_some());
+        // BK-45: version 5 when a bill exists, and then every sale ends with
+        // its mode, tip and note, and the bills follow the returns.
+        let with_bills = !self.bills.is_empty();
         let with_notes = with_bills || self.sales.iter().any(|s| s.note.is_some());
         let with_tips = with_notes || self.sales.iter().any(|s| s.tip.is_some());
         let with_mode = with_tips
@@ -693,7 +646,6 @@ impl Books {
             mode: with_mode,
             tips: with_tips,
             notes: with_notes,
-            references: with_bills,
         };
         for s in &self.sales {
             put_sale(&mut out, s, fields);
@@ -737,7 +689,6 @@ impl Books {
             mode: with_mode,
             tips: with_tips,
             notes: with_notes,
-            references: with_bills,
         };
         let high_water = get_marks(&mut r)?;
         let n = r.count(MAX_SALES, MIN_SALE)?;
@@ -803,10 +754,10 @@ impl Books {
                 "a version 4 bundle holds no sale with a note",
             ));
         }
-        // A version 5 bundle holds a reference or a bill, for the same reason.
-        if with_bills && bills.is_empty() && !sales.iter().any(|s| s.till_reference.is_some()) {
+        // A version 5 bundle holds a bill, for the same reason.
+        if with_bills && bills.is_empty() {
             return Err(DecodeError::NonCanonical(
-                "a version 5 bundle holds no reference and no bill",
+                "a version 5 bundle holds no bill",
             ));
         }
         // A bill's counter is listed, and each part that is a sale names a

@@ -184,7 +184,6 @@ fn sc_01_no_variant_is_missing() {
     ] {
         wanted.push(open_name(&e).to_string());
     }
-    wanted.extend(crate::till::till_words().into_iter().map(|(n, _)| n));
     for name in &wanted {
         assert!(names.contains(name), "{name} has no words");
     }

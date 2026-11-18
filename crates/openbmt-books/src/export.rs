@@ -1,6 +1,6 @@
 //! The two CSV exports (BK-17 to BK-22).
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 
 use openbmt_counter::Currency;
 
@@ -130,18 +130,6 @@ impl Books {
     /// calendar month, oldest first. Lines hold the opaque sale ID only.
     pub fn accounting_export(&self) -> Result<Vec<(YearMonth, String)>, ExportError> {
         let mut lines: Vec<Line> = Vec::new();
-        // BK-43: a sale that is a part of a bill with a reference and has none
-        // of its own carries the bill's, since it is the till's own number.
-        let mut bill_refs: BTreeMap<SaleKey, &str> = BTreeMap::new();
-        for bill in &self.bills {
-            if let Some(r) = &bill.reference {
-                for part in &bill.parts {
-                    if let BillPartNote::Sale(key) = part {
-                        bill_refs.insert(*key, r);
-                    }
-                }
-            }
-        }
         for sale in &self.sales {
             if sale.counting() != Counting::Counted {
                 continue;
@@ -151,18 +139,9 @@ impl Books {
             };
             // BK-38: the line is what the sale was paid, the amount and the
             // tip together; the tip is on a line of its own in the ledger.
-            // BK-43: the reference follows the opaque sale ID.
-            let description = match sale
-                .till_reference
-                .as_deref()
-                .or_else(|| bill_refs.get(&sale.key).copied())
-            {
-                Some(r) => format!("Sale {} ref {r}", sale.id),
-                None => format!("Sale {}", sale.id),
-            };
             lines.push(Line {
                 at,
-                description,
+                description: format!("Sale {}", sale.id),
                 negative: false,
                 minor: sale.due_minor().ok_or(ExportError::Overflow)?,
                 currency: sale.currency,
@@ -318,7 +297,7 @@ impl Books {
     }
 }
 
-const LEDGER_COLUMNS: [&str; 37] = [
+const LEDGER_COLUMNS: [&str; 36] = [
     "Type",
     "Sale ID",
     "Counter",
@@ -350,7 +329,6 @@ const LEDGER_COLUMNS: [&str; 37] = [
     "Lightning settled (UTC)",
     "Tips",
     "Sale note",
-    "Till reference",
     "Bill number",
     "Bill received in bitcoin",
     "Bill received another way",
@@ -507,9 +485,6 @@ fn sale_row(sale: &Sale) -> Result<Vec<Cell>, ExportError> {
     if let Some(note) = &sale.note {
         set(&mut row, 30, Cell::text(note.clone()));
     }
-    if let Some(reference) = &sale.till_reference {
-        set(&mut row, 31, Cell::text(reference.clone()));
-    }
     let names: Vec<&str> = sale.overrides.iter().map(|o| o.name.as_str()).collect();
     if !names.is_empty() {
         set(&mut row, 20, Cell::text(names.join("; ")));
@@ -519,7 +494,7 @@ fn sale_row(sale: &Sale) -> Result<Vec<Cell>, ExportError> {
 
 impl Books {
     /// BK-44: the line of one bill in the full ledger: its number, state,
-    /// amount, reference, what it received in bitcoin, what it received
+    /// amount, what it received in bitcoin, what it received
     /// another way (the cashier's word) and what was left unpaid when it was
     /// closed short, and the opaque IDs of its sales.
     fn bill_row(&self, bill: &Bill) -> Result<Vec<Cell>, ExportError> {
@@ -570,16 +545,13 @@ impl Books {
                 )),
             );
         }
-        if let Some(reference) = &bill.reference {
-            set(&mut row, 31, Cell::text(reference.clone()));
-        }
-        set(&mut row, 32, Cell::Number(bill.key.number.to_string()));
-        set(&mut row, 33, Cell::Number(format_minor(bitcoin, currency)));
-        set(&mut row, 34, Cell::Number(format_minor(other, currency)));
+        set(&mut row, 31, Cell::Number(bill.key.number.to_string()));
+        set(&mut row, 32, Cell::Number(format_minor(bitcoin, currency)));
+        set(&mut row, 33, Cell::Number(format_minor(other, currency)));
         if let Some(e) = bill.ended.filter(|e| e.unpaid_minor > 0) {
             set(
                 &mut row,
-                35,
+                34,
                 Cell::Number(format_minor(e.unpaid_minor, currency)),
             );
         }
@@ -592,7 +564,7 @@ impl Books {
             })
             .collect();
         if !ids.is_empty() {
-            set(&mut row, 36, Cell::text(ids.join(" ")));
+            set(&mut row, 35, Cell::text(ids.join(" ")));
         }
         Ok(row)
     }
@@ -670,11 +642,6 @@ fn note_cell(sale: &Sale) -> Cell {
     }
     for o in &sale.overrides {
         parts.push(format!("{} override for {} sats", o.role.text(), o.sats));
-    }
-    match sale.pos {
-        crate::model::PosMark::NotRecorded => {}
-        crate::model::PosMark::Paid => parts.push("the POS was told paid".to_string()),
-        crate::model::PosMark::Unpaid => parts.push("the POS was told not paid".to_string()),
     }
     if parts.is_empty() {
         Cell::Empty

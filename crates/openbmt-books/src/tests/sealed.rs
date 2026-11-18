@@ -7,8 +7,7 @@ use super::outflow::fee;
 use crate::sealed::seal_with;
 use crate::{
     decode_export_header, open_export, seal_export, write_whole, Books, CashReturn, Disposal,
-    DisposalKind, KdfParams, OpenError, PosFacts, RandomFailed, SealError, MAGIC_BUNDLE,
-    MAGIC_EXPORT,
+    DisposalKind, KdfParams, OpenError, RandomFailed, SealError, MAGIC_BUNDLE, MAGIC_EXPORT,
 };
 
 const SMALL: KdfParams = KdfParams {
@@ -28,11 +27,7 @@ fn salt_of(byte: u8) -> impl FnOnce(&mut [u8; 16]) -> Result<(), RandomFailed> {
 /// Books with every kind of line.
 fn full_books() -> Books {
     let kit = rich_kit();
-    let mut facts = PosFacts::new();
-    facts.insert_tax(kit.key(0), 148);
     kit.books()
-        .with_pos_facts(&facts)
-        .expect("facts")
         .with_disposals(vec![
             Disposal {
                 at: FEB_2_NOON + 10,

@@ -78,8 +78,8 @@ impl UnknownField {
                 "wait until the sale is final: the final record carries it",
             ),
             Self::SalesTax => (
-                "the counter does not know the order's tax",
-                "pass the tax of the POS match as PosFacts",
+                "the counter's records carry no sales tax",
+                "nothing in this app supplies it; take it from the shop's own accounts",
             ),
             Self::SatsNotRecorded => (
                 "no event records the satoshis received for this sale",

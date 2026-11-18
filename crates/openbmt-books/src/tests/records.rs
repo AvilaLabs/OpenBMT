@@ -400,9 +400,8 @@ fn bk_19_the_full_ledger_shows_the_sources_the_value_the_time_and_the_transactio
     );
     // The cells after the quoted ones are counted from the end, before the
     // four of the payment mode (BK-32), the one of the tip (BK-38), the
-    // one of the note (BK-41) and the six of the reference and the bills
-    // (BK-43, BK-44).
-    let tail = &r0[r0.len() - 16..r0.len() - 12];
+    // one of the note (BK-41) and the five of the bills (BK-44).
+    let tail = &r0[r0.len() - 15..r0.len() - 11];
     assert_eq!(tail[0], "2025-02-01T01:06:40Z", "first seen");
     assert_eq!(tail[1], "3000000", "last quote sats");
     assert_eq!(tail[2], "6166666", "last quote rate");

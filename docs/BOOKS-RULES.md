@@ -60,14 +60,14 @@ Nothing here says what a merchant owes. It writes down what the records say.
   never requoted), the time funds were first recorded, the satoshis
   received (BK-09), the late payments with their transaction IDs (the
   payment hash, for an invoice settled late over Lightning, CR-117), any
-  surplus owed and dust, any override with the person's role and name, and
-  what the POS was told. Once the sale is final, the final record adds the
+  surplus owed and dust, and any override with the person's role and name.
+  Once the sale is final, the final record adds the
   transactions that paid it with what each paid, the earliest time one of
   them was first seen, and what the satoshis received were worth in the
   shop's currency by the sale's own quotes: the value at first seen. A
   field the records do not carry is never made up. It is an explicit
   unknown that says why it is unknown and what would supply it: the sales
-  tax (unless BK-10 supplies it), the address, and, for a sale that is not
+  tax (BK-10), the address, and, for a sale that is not
   final, the value at first seen and the transaction IDs of a payment that
   was not late ("the sale is not final; the final record names its
   transactions"). A conflict that replaces the payment makes the final
@@ -103,10 +103,8 @@ Nothing here says what a merchant owes. It writes down what the records say.
   among them, the records do not say, and the amount is unknown. For a sale
   that was only accepted at once the amount is unknown, with the amount put
   at risk shown beside it.
-- **BK-10.** Sales tax comes only from the optional `PosFacts` the caller
-  passes (a tax amount in minor units for a counter's sale index, from the
-  POS match). A tax amount for a sale that is not in the books refuses the
-  build. Without it the sales tax is unknown.
+- **BK-10.** The sales tax of every sale is unknown: the records carry none
+  and nothing in the app supplies it.
 - **BK-11.** The high-water mark of a counter is the highest sale index any
   of its events names (the sale index is the receive index the counter
   stored before it handed out the address, CR-03), or none when the counter
@@ -370,7 +368,7 @@ later (`docs/COUNTER-RULES.md`, CR-206).
 - **No check of refunds against receipts.** A refund is not tested against
   what was received for the sale. That is the owner phone's assertion (§2.4).
 - **No tax inside the accounting CSV.** It has three columns. Whether the
-  counter's amount includes sales tax is the POS's fact, not the records'.
+  counter's amount includes sales tax is not in the records.
 - **No privacy from the file's holder.** The opaque ID (BK-07) is not a secret.
   The full ledger and the header of the encrypted file show counter keys,
   and the full ledger shows transaction IDs.
@@ -378,51 +376,19 @@ later (`docs/COUNTER-RULES.md`, CR-206).
   place, the time and the passphrase is for the app.
 - **No clock, no network, no randomness of its own.**
 
-## 13. Bills, the till's reference and the till's own payments
+## 13. Bills
 
-A counter can take one bill in several parts and carry the till's reference
-on a sale or a bill (`docs/COUNTER-RULES.md` §25). The books show both, and a
-separate step matches the till's own list of payments against what arrived,
-so a check closed as bitcoin with nothing behind it is found. Status:
-specification, written before the code.
+A counter can take one bill in several parts (`docs/COUNTER-RULES.md` §25).
+The books show it. Status: specification, written before the code.
 
-- **BK-43.** A sale or a bill holds its reference when a `Sale` record with
-  tag 25 names it (CR-245); when there are two for one, the first stands,
-  since the counter takes no second one. The full ledger (BK-19) has it in a
-  column "Till reference" after "Sale note", empty when there is none. The
-  accounting export (BK-17) holds the reference in the description, after
-  the opaque sale ID, since it is the shop's own number and reveals no
-  payment.
 - **BK-44.** A bill is folded from its records (CR-247) as a sale is: its
-  number, kind, amount and currency, its reference, its parts (bitcoin parts
-  by their sales, parts paid another way by their amount and way) and how it
-  ended. The full ledger has one line per bill after the sales, with what it
+  number, kind, amount and currency, its parts (bitcoin parts by their
+  sales, parts paid another way by their amount and way) and how it ended.
+  The full ledger has one line per bill after the sales, with what it
   received in bitcoin, what it received another way, what was left unpaid
   when it was closed short, and the opaque IDs of its sales. A part paid
   another way is the cashier's word and is written as such; it is never an
   income line of the accounting export, which counts bitcoin only (BK-17).
-- **BK-45.** The bundle (BK-28) is version 5 when at least one sale or bill
-  has a reference or one bill exists: version 4's fields, then each sale's
-  reference (0, or 1 and the text), then the bills. A bundle with neither is
-  written as before; versions 1 to 4 still read. Reading is strict, as BK-42
-  says.
-- **BK-46.** The till's own payments are read from a CSV file the till
-  exports. The owner says once, per till, which column holds the reference,
-  the amount, the payment type and the time, and which payment type means
-  bitcoin; the mapping is kept with the books' settings. A file is at most
-  8 MiB and 100,000 lines, RFC 4180 (BK-20), UTF-8; one that does not read
-  is refused whole, naming the line.
-- **BK-47.** The match takes the lines whose payment type is bitcoin and
-  the sales and bills of the same days, and pairs them by reference. It
-  gives four lists: matched (same reference, amounts equal to the minor
-  unit); amount differs (same reference, different amount); the till's
-  line with no paid sale or bill behind it (a check closed as bitcoin that
-  bitcoin did not pay); and a paid sale or bill whose reference is in no
-  line of the file. A line or a sale with no reference goes to its own
-  list, to be matched by hand. The match changes no record and no total; it
-  is a report, kept until the owner clears it.
-- **BK-48.** The library does the reading and the matching (`openbmt-books`,
-  no network, no clock of its own). The owner app's part is picking the
-  file, the mapping screen and showing the lists, with words under
-  `docs/SCREEN-RULES.md`. The library gives the words of a file that does
-  not read, one for each cause, naming the line (BK-46).
+- **BK-45.** The bundle (BK-28) is version 5 when at least one bill exists:
+  version 4's fields, then the bills. A bundle with none is written as
+  before; versions 1 to 4 still read. Reading is strict, as BK-42 says.

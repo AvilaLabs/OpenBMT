@@ -12,8 +12,8 @@ use crate::date::{Date, MAX_OFFSET_MINUTES, MAX_UNIX, MIN_OFFSET_MINUTES};
 use crate::error::BooksError;
 use crate::model::{
     Bill, BillEndNote, BillKey, BillPartNote, CashReturn, Counting, Disposal, DisposalKind,
-    LatePayment, LightningPayment, OverrideNote, Payment, PaymentList, PaymentMode, PosFacts,
-    PosMark, Sale, SaleId, SaleKey, SaleState, StaffNote, TipNote,
+    LatePayment, LightningPayment, OverrideNote, Payment, PaymentList, PaymentMode, Sale, SaleId,
+    SaleKey, SaleState, StaffNote, TipNote,
 };
 use crate::value::{UnknownField, Value};
 
@@ -122,10 +122,8 @@ fn new_sale(key: SaleKey, event: &Event) -> Option<Sale> {
         surplus_owed_sats: 0,
         dust_sats: 0,
         overrides: Vec::new(),
-        pos: PosMark::NotRecorded,
         payment_mode: PaymentMode::OnChain,
         note: None,
-        till_reference: None,
     })
 }
 
@@ -209,7 +207,6 @@ fn fold_bill(
                 kind: *kind,
                 amount_minor: amount.0,
                 currency: *currency,
-                reference: None,
                 parts: Vec::new(),
                 ended: None,
             },
@@ -219,11 +216,6 @@ fn fold_bill(
     let bill = bills
         .get_mut(&number)
         .ok_or_else(|| bad_bill(counter, seq, "a record is for a bill that was never opened"))?;
-    if let Event::BillReferenced { reference, .. } = event {
-        // BK-43: the first reference stands.
-        bill.reference.get_or_insert_with(|| reference.clone());
-        return Ok(());
-    }
     if bill.ended.is_some() {
         return Err(bad_bill(counter, seq, "a bill changes after it ended"));
     }
@@ -299,16 +291,8 @@ fn fold(sale: &mut Sale, pending: &mut Pending, event: &Event) -> Result<(), Boo
         // BK-41: the note is the owner's; a second record for the same sale
         // is a retry, and the last one stands.
         Event::Noted { note, .. } => sale.note = Some(note.clone()),
-        // BK-43: the counter takes no second reference; if two records name
-        // one sale, the first stands.
-        Event::Referenced { reference, .. } => {
-            sale.till_reference.get_or_insert_with(|| reference.clone());
-        }
-        // CR-268: read before the sale opens, by the caller.
-        Event::TillSale { .. } => {}
         // The records of a bill are folded by `fold_bill`.
-        Event::BillReferenced { .. }
-        | Event::BillOpened { .. }
+        Event::BillOpened { .. }
         | Event::BillAmount { .. }
         | Event::BillPartPaid { .. }
         | Event::BillEnded { .. }
@@ -438,14 +422,14 @@ fn fold(sale: &mut Sale, pending: &mut Pending, event: &Event) -> Result<(), Boo
             sale.state = SaleState::Reopened;
             sale.reached_final = false;
         }
-        Event::PosPaid { .. } => sale.pos = PosMark::Paid,
-        Event::PosUnpaid { .. } => sale.pos = PosMark::Unpaid,
         // BK-02: a request and a withdrawal are asks, not money; they are
         // not a disposal and change nothing here. A cash refund becomes a
         // return line where the events are read.
         Event::RefundRequested { .. }
         | Event::RefundWithdrawn { .. }
-        | Event::RefundPaidInCash { .. } => {}
+        | Event::RefundPaidInCash { .. }
+        | Event::PosPaid { .. }
+        | Event::PosUnpaid { .. } => {}
     }
     Ok(())
 }
@@ -582,11 +566,6 @@ impl Books {
                     }
                     continue;
                 }
-                // CR-268: the till's sale is written before the sale opens and
-                // changes nothing the books keep.
-                if let Event::TillSale { .. } = event {
-                    continue;
-                }
                 let index = event.index();
                 let key = SaleKey {
                     counter: *counter,
@@ -644,22 +623,6 @@ impl Books {
         books.returns.sort_by_key(|r| r.at);
         books.check_return_sums()?;
         Ok(books)
-    }
-
-    /// BK-10: add the sales tax the POS match gave. A tax amount for a sale
-    /// that is not in the books refuses it.
-    pub fn with_pos_facts(mut self, facts: &PosFacts) -> Result<Self, BooksError> {
-        for (key, _) in facts.iter() {
-            if self.sale(key).is_none() {
-                return Err(BooksError::SaleNotInBooks { sale: *key });
-            }
-        }
-        for sale in &mut self.sales {
-            if let Some(tax) = facts.tax(&sale.key) {
-                sale.sales_tax_minor = Value::Known(tax);
-            }
-        }
-        Ok(self)
     }
 
     /// BK-12, BK-14: set the disposals. They are kept in time order. A
@@ -864,9 +827,6 @@ fn event_time(event: &Event) -> Option<u64> {
         Event::Opened { at, .. }
         | Event::Requoted { at, .. }
         | Event::Noted { at, .. }
-        | Event::Referenced { at, .. }
-        | Event::TillSale { at, .. }
-        | Event::BillReferenced { at, .. }
         | Event::BillOpened { at, .. }
         | Event::BillAmount { at, .. }
         | Event::BillPartPaid { at, .. }

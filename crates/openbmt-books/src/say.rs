@@ -472,7 +472,6 @@ pub fn all_words() -> Vec<(String, Words)> {
     ] {
         add(&format!("OpenError::{n}"), e.words());
     }
-    all.extend(crate::till::till_words());
     all
 }
 

@@ -6,8 +6,8 @@ use super::fixture::*;
 use super::outflow::fee;
 use crate::csv::{push_row, render, Cell};
 use crate::{
-    format_minor, Books, CashReturn, Disposal, DisposalKind, ExportError, PosFacts,
-    RevealsPayments, SaleId, YearMonth, LEDGER_WARNING,
+    format_minor, Books, CashReturn, Disposal, DisposalKind, ExportError, RevealsPayments, SaleId,
+    YearMonth, LEDGER_WARNING,
 };
 
 const ADDRESSES: [&str; 2] = [
@@ -125,12 +125,8 @@ fn bk_17_more_than_one_currency_refuses_the_export() {
 #[test]
 fn bk_18_the_accounting_export_never_holds_a_txid_an_address_or_sats() {
     let kit = rich_kit();
-    let mut facts = PosFacts::new();
-    facts.insert_tax(kit.key(0), 148);
     let books = kit
         .books()
-        .with_pos_facts(&facts)
-        .expect("facts")
         .with_disposals(vec![
             Disposal {
                 at: FEB_2_NOON + 10,
@@ -236,31 +232,12 @@ fn bk_19_the_full_ledger_has_every_sale_and_every_unknown_with_its_next_step() {
         !ledger.contains("rate source:"),
         "every sale has its rate source"
     );
-    assert!(ledger.contains("Next: pass the tax of the POS match as PosFacts"));
+    assert!(ledger.contains("Next: nothing in this app supplies it"));
     assert!(ledger.contains("overpaid: 1111117 sats owed to the customer"));
     assert!(ledger.contains("accepted at once with 4321987 sats at risk"));
     assert!(ledger.contains("manager override for"));
-    assert!(ledger.contains("the POS was told paid"));
     assert!(ledger.contains("1111117"));
     assert!(ledger.contains("sats arrived below the dust line"));
-}
-
-#[test]
-fn bk_19_the_ledger_shows_tax_when_the_pos_facts_gave_it() {
-    let kit = rich_kit();
-    let mut facts = PosFacts::new();
-    facts.insert_tax(kit.key(0), 148);
-    let ledger = kit
-        .books()
-        .with_pos_facts(&facts)
-        .expect("facts")
-        .full_ledger(RevealsPayments::Acknowledged)
-        .expect("ledger");
-    let row = ledger
-        .lines()
-        .find(|l| l.starts_with("sale,") && l.contains(",final,counted,2025-01-31T"))
-        .expect("sale 0 row");
-    assert_eq!(row.split(',').nth(10), Some("1.48"));
 }
 
 #[test]

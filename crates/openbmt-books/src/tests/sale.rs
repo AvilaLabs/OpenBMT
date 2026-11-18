@@ -4,9 +4,7 @@ use openbmt_core::identity::tagged_hash;
 use openbmt_counter::Event;
 
 use super::fixture::*;
-use crate::{
-    BooksError, Counting, PosFacts, PosMark, SaleId, SaleState, Settlement, UnknownField, Value,
-};
+use crate::{Counting, SaleId, SaleState, Settlement, UnknownField, Value};
 
 fn state_of(kit: &Kit, index: u32) -> SaleState {
     kit.books().sale(&kit.key(index)).expect("sale").state
@@ -95,7 +93,6 @@ fn bk_06_the_fields_the_records_carry_are_known() {
     assert_eq!(late.late_payments[0].txid, TXID_LATE);
     let o = books.sale(&kit.key(5)).expect("sale");
     assert_eq!(o.overrides[0].name, NASTY_NAME);
-    assert_eq!(o.pos, PosMark::Paid);
     let d = books.sale(&kit.key(7)).expect("sale");
     assert_eq!(d.dust_sats, SATS_DUST);
 }
@@ -297,28 +294,15 @@ fn bk_09_a_late_payment_beside_a_confirmation_makes_the_sum_unknown() {
 }
 
 #[test]
-fn bk_10_sales_tax_comes_only_from_the_pos_facts() {
+fn bk_10_the_sales_tax_of_every_sale_is_unknown() {
     let kit = rich_kit();
-    let mut facts = PosFacts::new();
-    facts.insert_tax(kit.key(0), 148);
-    let books = kit.books().with_pos_facts(&facts).expect("facts");
-    assert_eq!(
-        books.sale(&kit.key(0)).expect("sale").sales_tax_minor,
-        Value::Known(148)
-    );
-    assert_eq!(
-        books.sale(&kit.key(5)).expect("sale").sales_tax_minor,
-        Value::Unknown(UnknownField::SalesTax)
-    );
-}
-
-#[test]
-fn bk_10_a_tax_for_a_sale_not_in_the_books_is_refused() {
-    let kit = rich_kit();
-    let mut facts = PosFacts::new();
-    facts.insert_tax(kit.key(99), 1);
-    let err = kit.books().with_pos_facts(&facts).expect_err("refused");
-    assert_eq!(err, BooksError::SaleNotInBooks { sale: kit.key(99) });
+    let books = kit.books();
+    for key in [kit.key(0), kit.key(5)] {
+        assert_eq!(
+            books.sale(&key).expect("sale").sales_tax_minor,
+            Value::Unknown(UnknownField::SalesTax)
+        );
+    }
 }
 
 #[test]

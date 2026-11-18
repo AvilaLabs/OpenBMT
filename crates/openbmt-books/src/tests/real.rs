@@ -484,7 +484,7 @@ fn bk_06_a_real_run_leaves_unknown_only_what_the_records_still_do_not_carry() {
     ));
     assert!(ledger.contains("value at first seen: the sale is not final"));
     assert!(ledger.contains("address: the records carry the sale index, not the address"));
-    assert!(ledger.contains("sales tax: the counter does not know the order's tax"));
+    assert!(ledger.contains("sales tax: the counter's records carry no sales tax"));
     assert!(!ledger.contains("rate source:"));
 }
 

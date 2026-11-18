@@ -21,8 +21,6 @@
 //! 6. [`bundle`]: the books as a framed byte string (`OBM6`).
 //! 7. [`sealed`]: the encrypted export file (`OBMY`).
 //! 8. [`fsio`]: the file helper [`write_whole`].
-//! 9. [`till`]: the till's own payments read from its CSV and matched
-//!    against the books by reference (BK-46, BK-47).
 //!
 //! This crate has had internal review only. No independent security audit
 //! has been done yet.
@@ -50,7 +48,6 @@ pub mod model;
 mod money;
 pub mod say;
 pub mod sealed;
-pub mod till;
 pub mod value;
 
 #[cfg(test)]
@@ -64,16 +61,12 @@ pub use export::{RevealsPayments, LEDGER_WARNING};
 pub use fsio::write_whole;
 pub use model::{
     Basis, Bill, BillEndNote, BillKey, BillPartNote, CashReturn, Counting, Disposal, DisposalKind,
-    LatePayment, LightningPayment, OverrideNote, Payment, PaymentList, PaymentMode, PosFacts,
-    PosMark, Sale, SaleId, SaleKey, SaleState, Settlement, StaffNote, TipNote,
+    LatePayment, LightningPayment, OverrideNote, Payment, PaymentList, PaymentMode, Sale, SaleId,
+    SaleKey, SaleState, Settlement, StaffNote, TipNote,
 };
 pub use money::{format_minor, minor_digits};
 pub use sealed::{
     decode_export_header, open_export, seal_export, ExportHeader, KdfParams, RandomFailed,
     MAGIC_EXPORT,
-};
-pub use till::{
-    read_till_csv, MappingError, TillCsvError, TillCsvProblem, TillItem, TillItemKey, TillLine,
-    TillMapping, TillMatch, TillPair, MAX_TILL_BYTES, MAX_TILL_LINES,
 };
 pub use value::{Unknown, UnknownField, Value};
