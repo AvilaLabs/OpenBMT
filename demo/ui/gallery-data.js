@@ -92,9 +92,9 @@
     },
     newSale: { entry: "24.50 USD", price: "Bitcoin is priced at 73,554.18 USD, from 3 price sources.", words: counterWords },
     unpaid,
-    // CR-286: while the invoice is waited for, the Lightning line has the ring of the 6 seconds beside its words.
+    // CR-113: while the invoice is waited for, the sale says so.
     lightningWaiting: Object.assign({}, unpaid, {
-      extra: [lightningWaiting], lnRingAt: 0, lnRingSecs: 4, lnRingTotal: 6, lnRingLabel: "4 s",
+      extra: [lightningWaiting],
     }),
     partPaid: Object.assign({}, unpaid, {
       says: partPaid, stillHeading: "Still to pay", amountBig: "4.42 USD", amountSmall: "6,000 sats to send",

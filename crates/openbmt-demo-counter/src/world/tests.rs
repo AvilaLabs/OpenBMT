@@ -32,7 +32,7 @@ fn start_fields(record: &[u8]) -> Vec<u8> {
     put_bytes(&mut f, dir.to_str().expect("UTF-8").as_bytes());
     f.extend_from_slice(&T0.to_le_bytes());
     put_bytes(&mut f, record);
-    f.extend_from_slice(&[0, 0, 0, 0, 0]);
+    f.extend_from_slice(&[0, 0, 0, 0]);
     f
 }
 

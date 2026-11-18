@@ -27,7 +27,6 @@ been done yet.** Do not use it with real funds.
 | `HeaderStore::accept` | Check a header (parent, bits, work, time, clock) and hold it. Says whether it extended the chain, sits beside it or changed it. | WR-05 to WR-07 |
 | `HeaderStore::to_bytes`, `from_bytes` | The stored form of the best chain, and a read that checks every header again. | WR-08 |
 | `HeaderStore::tip`, `header_at`, `locator` | The tip, the header at a height, and the block locator for peers. | WR-07 |
-| `verify_box_proof` | Header, partial merkle tree, coinbase and payment in full, all checked. Returns a `ProvenPayment`. | WR-10 to WR-16, WR-01 |
 | `payments_in_block` | A full block, checked, and every payment in it to one script. | WR-20 to WR-23, WR-30, WR-01 |
 | `spends_in_block` | A full block, checked, and which of its transactions spend given coins. | WR-20, WR-21, WR-42 |
 | `WellFormedBlock` | The block checks that need no chain, kept so that `payments` and `spends` can both be asked of one block. | WR-20, WR-21 |
@@ -49,7 +48,7 @@ a person".
 |---|---|
 | WR-01 to WR-03 | `src/chain.rs` |
 | WR-04 to WR-08 | `src/headers.rs` |
-| WR-10 to WR-16 | `src/proof.rs`: `verify_box_proof`, `extract_tree` |
+| `ProvenPayment` | `src/proof.rs` |
 | WR-20 to WR-23 | `src/block.rs` |
 | WR-30 to WR-34, WR-40, WR-42 to WR-46 | `src/sale.rs` |
 | WR-41 | `src/netgroup.rs` |
@@ -59,20 +58,6 @@ a person".
 
 Some choices worth knowing:
 
-- The proof is read with `bitcoin::MerkleBlock` through
-  `consensus::deserialize`, which refuses bytes left over. The size checks
-  come first.
-- `PartialMerkleTree::extract_matches` does most of WR-12: it limits the
-  transaction count to 16,666, refuses more hashes than transactions, runs
-  out of bits or hashes, leaves a hash or a flag byte unused, and refuses a
-  node with two equal children. This crate adds a count of at least 2, spare
-  bits after the last flag bit that must be zero (so a proof has one
-  encoding), and the comparison of the root with the header's.
-- A proof must prove exactly two transactions, the first at position 0
-  (WR-13), and the coinbase must be a real coinbase with the proven ID
-  (WR-14). With WR-16 this closes the depth attack: a tree read one level
-  too deep or too short shows inner nodes as transactions, and an inner node
-  is the hash of 64 bytes.
 - The chain is asked last, so that the refusal for a bad proof or block
   never depends on the chain's state.
 - A block that repeats its last transactions has the merkle root of the
@@ -158,14 +143,8 @@ storing the time `behind` began.
 `cargo test -p openbmt-watch`. There is at least one test for every rule ID
 (a test checks this against the rules file), named `wr_NN_...`, and every
 refusal and health problem is checked to name a rule of the file. Blocks are
-real: the tests mine headers on regtest difficulty, build blocks with their
-merkle roots and make proofs with `PartialMerkleTree`, or write a proof byte
-by byte when the library would never build it. The attacks on the proof have
-a test each: a proof without the coinbase, a proof for three transactions, a
-wrong coinbase, a coinbase that is not one, a payment that is a coinbase,
-64-byte transactions, a duplicated last pair, a wrong root, a header that was
-never mined, a header not on the chain, a trailing byte, an oversize proof,
-and the depth attack. A header chain that the tests can change simulates
+real: the tests mine headers on regtest difficulty and build blocks with their
+merkle roots. A header chain that the tests can change simulates
 reorgs. The header store is tested on 4,043 real mainnet headers that cross
-two retargets (`src/tests/data`), and on mined regtest headers. Fuzz targets `watch_box_proof`, `watch_block` and `watch_header_store` are in `fuzz/` at
+two retargets (`src/tests/data`), and on mined regtest headers. Fuzz targets `watch_block` and `watch_header_store` are in `fuzz/` at
 the repository root.

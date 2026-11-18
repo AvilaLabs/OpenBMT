@@ -318,7 +318,6 @@
         paidLines: data.paidLabels.map((label, i) => ({ label, value: data.paidValues[i] })),
         stillHeading: data.stillHeading, ringSecs: data.ringSecs, ringTotal: data.ringTotal, ringLabel: data.ringLabel,
         seen: data.seen, pulse: data.pulse, live,
-        lnRingSecs: data.lnRingSecs, lnRingTotal: data.lnRingTotal, lnRingLabel: data.lnRingLabel, lnRingAt: data.lnRingAt,
         extra: Array.from(data.extra), request: false, flash: flash || null,
         buttons: { requote: data.requote, cancel: data.cancel, override: data.override },
         // CR-283: the line and the button, from the model.

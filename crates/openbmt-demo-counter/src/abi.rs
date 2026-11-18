@@ -7,14 +7,6 @@
 //!   protocol, answered as `ptr << 32 | len`;
 //! - `counter_record() -> u64`: the pairing record the demo counter starts
 //!   from, in the same form;
-//! - `lightning_record() -> u64`: the saved connection to the pretend Lightning
-//!   node, as the counter's `start` takes it, in the same form;
-//! - `lightning_answer(ptr, len) -> u64`: the pretend node answers a request
-//!   of the counter's own driver: the text at `ptr` is the method, a line
-//!   break, the path, a line break and the body; the reply is the HTTP status
-//!   as two bytes (little-endian) and the body;
-//! - `lightning_pay(ptr, len) -> u64`: a customer pays the invoice written at
-//!   `ptr` on the pretend node; text, `ok:` and the sats, or `err:` and why;
 //! - `counter_record_with_box() -> u64`: the same record for a shop with a
 //!   Box, which is the sender of the till's requests;
 //! - `counter_till_request(amount_minor) -> u64`: the Box tells the running
@@ -200,51 +192,4 @@ pub extern "C" fn chain_mine() -> u64 {
 pub extern "C" fn chain_heartbeat() -> u64 {
     openbmt_kernel_random::set_host_fill(page_random);
     give(crate::world::heartbeat(crate::now()).unwrap_or_default())
-}
-
-/// The saved connection to the pretend Lightning node; empty when it could not
-/// be made.
-#[no_mangle]
-pub extern "C" fn lightning_record() -> u64 {
-    give(crate::lightning::record().unwrap_or_default())
-}
-
-/// The pretend Lightning node answers the request of `len` bytes at `ptr`
-/// (freed here): the method, a line break, the path, a line break, the body.
-///
-/// # Safety
-/// `ptr` and `len` must be exactly a buffer from `demo_alloc`, not yet freed.
-#[no_mangle]
-pub unsafe extern "C" fn lightning_answer(ptr: *mut u8, len: usize) -> u64 {
-    // SAFETY: the contract is the caller's, as for `take`.
-    let request = unsafe { take(ptr, len) };
-    let text = String::from_utf8_lossy(&request);
-    let mut parts = text.splitn(3, '\n');
-    let (method, path, body) = (
-        parts.next().unwrap_or_default(),
-        parts.next().unwrap_or_default(),
-        parts.next().unwrap_or_default(),
-    );
-    let (status, reply) = crate::lightning::answer(method, path, body, crate::now());
-    let mut out = status.to_le_bytes().to_vec();
-    out.extend_from_slice(&reply);
-    give(out)
-}
-
-/// A customer pays the invoice of `len` bytes at `ptr` (freed here).
-///
-/// # Safety
-/// `ptr` and `len` must be exactly a buffer from `demo_alloc`, not yet freed.
-#[no_mangle]
-pub unsafe extern "C" fn lightning_pay(ptr: *mut u8, len: usize) -> u64 {
-    // SAFETY: the contract is the caller's, as for `take`.
-    let invoice = unsafe { take(ptr, len) };
-    let text = match std::str::from_utf8(&invoice) {
-        Ok(invoice) => match crate::lightning::pay(invoice, crate::now()) {
-            Ok(sats) => format!("ok:{sats}"),
-            Err(e) => format!("err:{e}"),
-        },
-        Err(_) => "err:the invoice is not text".to_string(),
-    };
-    give(text.into_bytes())
 }

@@ -84,8 +84,6 @@
     },
   };
   const AMOUNT = "800";
-  // The café's second sale, a meal over the counter's instant limit.
-  const MEAL = "2000";
   // What a short payment sends of the 8.00 sale (10,877 sats at the demo's price).
   const SHORT = 6000;
   const groups = (n) => Number(n).toLocaleString("en-US");
@@ -236,20 +234,6 @@
     return keys.startsWith(typed) ? keys[typed.length] : "C";
   }
 
-  /** The Lightning invoice the sale's code carries (the counter adds it a pump or two after the sale opens), or null. */
-  function invoiceOf(data) {
-    const read = data && data.copyUri && PC.parse(data.copyUri);
-    return read && read.lightning ? read.lightning : null;
-  }
-
-  /** The seconds a real counter waits for the shop's node to give an invoice, run at once. */
-  function waitForInvoice() {
-    for (let i = 0; i < 20 && !invoiceOf(run.controller.saleData()); i++) {
-      clock.skip(1);
-      pump(run);
-    }
-  }
-
   /** The wait line while the counter checks a payment the customer sent. */
   const sentLine = (what) => shell.say(what, ["The counter checks it itself. This takes a few seconds."]);
 
@@ -305,58 +289,7 @@
         aim("Done");
         S.on = { home: go };
       }, auto() { c().showHome(); } },
-      // The second sale: a meal over the instant limit, paid over Lightning, which is final at once.
       { step: 3, enter() {
-        shell.say("Next customer: a meal of 20.00 USD.",
-          ["That is over this counter's instant limit of $10. Tap ", { b: "New sale" }, "."]);
-        shell.questions(QS.merchant.bigger);
-        aim("New sale");
-        S.on = { newSale: go };
-      }, auto() { c().showNewSale(); } },
-      { step: 3, enter() {
-        shell.say("The meal comes to 20.00 USD.", ["Type the amount, then tap ", { b: "Open the sale" }, "."]);
-        aim(nextTap(flow.entryMinor(), MEAL));
-        S.on = { entry: (e) => aim(nextTap(e.minor, MEAL)), sale: go };
-      }, auto() { for (const key of MEAL) c().press(key); c().openEntered(); } },
-      { step: 3, enter() {
-        aim(null);
-        // The code carries its Lightning invoice a pump or two after the sale opens.
-        const show = (data) => {
-          const read = PC.parse(data.copyUri);
-          if (read.address) {
-            shell.say("The counter shows a code with two ways to pay: on-chain and Lightning.",
-              ["This customer pays with Lightning. Tap ", { b: "The customer pays" }, "."]);
-          } else {
-            // CR-283: over the instant limit the code is the invoice alone, as Lightning is final at once.
-            shell.say("Over the instant limit, the counter shows the Lightning code first.",
-              ["Lightning is final at once, so nothing waits for a block. Tap ", { b: "The customer pays" }, "."]);
-          }
-          shell.actor({
-            who: "The customer", line: `Pays ${groups(read.sats)} sats over Lightning.`, button: "The customer pays",
-            onTap() {
-              run.host.payLightning(invoiceOf(run.controller.saleData()));
-              spendActor();
-              shell.say("The customer paid over Lightning.", ["The counter asks the shop's own Lightning node. This takes a moment."]);
-            },
-          });
-          S.on = { sale: (d) => { if (d.isPaid) go(); } };
-        };
-        const now = run.controller.saleData();
-        if (invoiceOf(now)) show(now);
-        else {
-          // CR-113: the on-chain code shows at once, and the invoice joins it when the node sends it.
-          shell.say("The counter shows a code for this sale.", ["The Lightning code follows as soon as the shop's node sends the invoice."]);
-          S.on = { sale: (d) => { if (invoiceOf(d)) show(d); } };
-        }
-      }, auto() { waitForInvoice(); run.host.payLightning(invoiceOf(run.controller.saleData())); waitForPaid(); } },
-      { step: 3, enter() {
-        shell.actor(null);
-        shell.say("Paid at once. Lightning is final, so the limit does not apply.",
-          ["Paid on-chain, a sale over the limit waits for a block, about ten minutes, unless the owner raised the limit. The next sale can start while it waits. Tap ", { b: "Done" }, "."]);
-        aim("Done");
-        S.on = { home: go };
-      }, auto() { c().showHome(); } },
-      { step: 4, enter() {
         aim(null);
         // The owner's phone is drawn from the owner model's own state (owner-controller.js); the counter rests.
         shell.light("owner", { counter: "Ready for the next sale." });
@@ -366,7 +299,7 @@
         shell.questions(QS.merchant.owner);
         S.on = null;
       } },
-      { step: 4, enter() {
+      { step: 3, enter() {
         // A block holds the payment, on the one pretend chain: both modules take it, and the owner's model has it
         // before the home is drawn again from the model.
         run.chain.mine();
@@ -495,7 +428,7 @@
   // ---- The runner: a moment ends when the model says so; a step tab replays the taps on a fresh model. ----
   const merchant = {
     scenario: "Café", card: "Café",
-    steps: ["Ring up", "The customer pays", "Hand over", "A bigger sale", "The owner's phone"],
+    steps: ["Ring up", "The customer pays", "Hand over", "The owner's phone"],
     devices: [{ id: "counter", caption: "The shop's counter", sizes: COUNTER }, { id: "owner", caption: "The owner's phone", sizes: PHONE }],
     actorAfter: "counter", moments: merchantMoments,
     setup() { run.controller.showHome(); },

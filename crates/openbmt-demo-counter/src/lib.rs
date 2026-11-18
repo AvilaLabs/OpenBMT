@@ -18,7 +18,6 @@
 
 #[cfg(target_arch = "wasm32")]
 pub mod abi;
-pub mod lightning;
 pub mod record;
 pub mod till;
 pub mod world;
@@ -53,7 +52,6 @@ pub fn call(request: &[u8]) -> Vec<u8> {
     dispatch(registry(), request)
 }
 
-/// The tests that start a node share the module's one chain, one pretend
-/// Lightning node and one clock: they take turns.
+/// The tests that start a node share the module's one chain and one clock: they take turns.
 #[cfg(test)]
 pub(crate) static ONE_AT_A_TIME: std::sync::Mutex<()> = std::sync::Mutex::new(());

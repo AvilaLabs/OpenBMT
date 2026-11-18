@@ -110,30 +110,9 @@ counter's key: the app seals it and hands it to every `start`.
 
 ## Lightning
 
-Ops 50 to 55 carry the shop's own Lightning node (CR-112 to CR-116). The
-library never opens a connection: it hands the app one request at a time
-(`ln_next`, or the first request of a test from `ln_setup`) and takes the
-answer (`ln_reply`) or the news that there was none (`ln_failed`). The app
-sends the request over HTTPS with no redirect, a body of at most 1,000,000
-bytes and the host name unchecked, and asks `ln_pin` whether the certificate
-the node showed is the pinned one before it sends a byte (CR-114). A test
-(LN-20) is run against the node the owner named in the shop's settings; when
-it passes, `ln_reply` gives the record, which the app seals and hands to
-every `start` (`StartConfig.lightning`). `ln_remove` forgets the connection
-at once. A sale's screen carries the Lightning line and, when the invoice
-has passed, the code of LN-18 as its payment; `StateView::PaidLightning` is
-a sale paid by Lightning, final at once.
-
-Ops 66 to 68 carry the shop's swap provider (CR-219, CR-225): `swap_next`
-hands out the next request for the provider's onion name (the number, the
-`host:port`, and the bytes of an HTTP/1.1 request), `swap_reply` takes the
-bytes that came back and `swap_failed` says there were none. The app sends
-the bytes to port 80 of the onion name through its own Tor, one request at a
-time, and never around it. A sale's Lightning line then also carries the
-small line for a sale with no swap (`not_for_this_sale`), the words of a swap
-that failed (`failed`), and, while the sale waits for one block, the sale's
-words are those of CR-221. The status's Lightning line carries the words of a
-claim that is stuck (CR-222) when no node connection is saved.
+A sale's screen carries the Lightning line of the shop's own Lightning node
+(Shop Lightning) and, when the invoice has passed, the code of LN-18 as its
+payment; `StateView::PaidLightning` is a sale paid by Lightning, final at once.
 
 ## Storage
 

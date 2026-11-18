@@ -5,7 +5,6 @@ import org.openbmt.app.SayWords
 import org.openbmt.app.WordsModel
 import org.openbmt.counter.CounterException
 import org.openbmt.counter.CounterNode
-import org.openbmt.counter.LnMethod
 import org.openbmt.counter.Native
 import org.openbmt.counter.StartConfig
 import org.openbmt.counter.app.AmountEntry
@@ -124,12 +123,6 @@ class SaleScreenData(
     val seen: String?,
     /** CR-286: the mark beside the time pulses, only while the check is healthy. */
     val pulse: Boolean,
-    /** CR-286: the seconds left of the wait for the Lightning invoice and the whole of it, for the ring beside the Lightning line; null when no invoice is waited for or the time is over. */
-    val lnRingSecs: Double?,
-    val lnRingTotal: Double,
-    val lnRingLabel: String?,
-    /** The place of the Lightning line among [extra], or -1 when the screen has none. */
-    val lnRingAt: Int,
     /** One text of everything the screen says: it is drawn again only when this changes. */
     val signature: String,
 )
@@ -170,39 +163,9 @@ object CounterFlowDemo {
     /** The source the sales name, in place of a price source. */
     const val DEMO_SOURCE = "demo"
 
-    // The pretend Lightning node of the page (counter-host.mjs): the saved connection it starts the counter with, and
-    // the answer it gives to a request the counter's driver hands out. Both are absent when the page has no such node.
-    private val lightningRecord: dynamic = js("(function () { var f = globalThis.openbmtLightningRecord; return f ? f() : null; })")
-    private val lightningAnswer: dynamic = js("(function (m, p, b) { var f = globalThis.openbmtLightningAnswer; return f ? f(m, p, b) : null; })")
-
-    private fun bytesOf(answer: dynamic): ByteArray? {
-        if (answer == null || answer == undefined) return null
-        val size = answer.length as Int
-        return ByteArray(size) { i -> (answer[i] as Int).toByte() }
-    }
-
-    /** Most requests of the Lightning driver answered in one turn of the pump. */
-    private const val LIGHTNING_PER_PUMP = 8
-
-    /**
-     * Controller.kt's Lightning thread, in the pump: every request the counter's driver hands out (`lnNext`) goes to the
-     * page's pretend node and its answer comes back with `lnReply`, so the counter itself makes the sale's code with the
-     * invoice, asks whether it is paid, and judges the sale.
-     */
-    private fun serveLightning(n: CounterNode, now: Long) {
-        repeat(LIGHTNING_PER_PUMP) {
-            val request = n.lnNext(now) ?: return
-            val method = if (request.method == LnMethod.Post) "POST" else "GET"
-            val answer = bytesOf(lightningAnswer(method, request.path, request.body ?: ""))
-            if (answer == null || answer.size < 2) return
-            val status = (answer[0].toInt() and 0xff) or ((answer[1].toInt() and 0xff) shl 8)
-            n.lnReply(request.id, status.toLong(), answer.copyOfRange(2, answer.size))
-        }
-    }
-
     /** Start the node on the folder [dir] from the pairing [record], and take its first events (the app pumps in a loop). */
     fun start(dir: String, now: Double, record: ByteArray) {
-        val started = CounterNode.start(StartConfig(dir, now.toLong(), record, null, lightning = bytesOf(lightningRecord())))
+        val started = CounterNode.start(StartConfig(dir, now.toLong(), record, null))
         node = started
         money = Money.of("USD")
         amounts.clear()
@@ -233,7 +196,6 @@ object CounterFlowDemo {
     /** Take the network's events; how many reports left. */
     fun pump(now: Double): Int {
         val n = running()
-        serveLightning(n, now.toLong())
         val p = n.pump(now.toLong(), 0)
         turned.addAll(p.turns)
         return p.reports.size
@@ -383,12 +345,6 @@ object CounterFlowDemo {
         val m = money ?: error("the node is not started")
         val keys = ArrayList<String>()
         val lines = ArrayList<ShownWords>()
-        // CR-116: the Lightning line is there only while a connection is saved.
-        try {
-            n.status().lightning?.words?.say()?.let { keys.add("lightning"); lines.add(shown(it)) }
-        } catch (e: CounterException) {
-            keys.add("lightning"); lines.add(shown(e.sayWords()))
-        }
         // CR-273: a stop, or a line that cannot be checked, with the library's words.
         val starter = try { n.starterState(now.toLong()) } catch (e: CounterException) { null }
         StarterModel.homeLine(starter)?.let { keys.add("starter"); lines.add(shown(it)) }
@@ -422,21 +378,9 @@ object CounterFlowDemo {
         val extra = ArrayList<SayWords>()
         s.check?.let { extra.add(it.say()) }
         for (f in s.flags) extra.add(f.say())
-        // CR-113, CR-286: while the invoice is waited for the sale says so, and the line has the ring of the 6 seconds.
+        // CR-113: while the invoice is waited for the sale says so.
         val ln = s.lightning
-        var lnRingAt = -1
-        var lnLeft: Long? = null
-        var lnTotal = 0L
-        if (ln != null && ln.waiting) {
-            lnRingAt = extra.size
-            extra.add(AppWords.lightningWaiting)
-            val left = ln.waitSecsLeft
-            val total = ln.waitSecsTotal
-            if (left != null && total != null) {
-                lnLeft = left
-                lnTotal = total
-            }
-        }
+        if (ln != null && ln.waiting) extra.add(AppWords.lightningWaiting)
         val code = SaleModel.showsCode(s.state)
         val b = SaleModel.buttons(s.state, request)
         val amount = amounts[i]
@@ -456,7 +400,7 @@ object CounterFlowDemo {
         val wait = SaleModel.wait(s.state, s.watchSecsLeft, s.watchSecsTotal, s.seenSecs, s.checkHealthy)
         val signature = listOf(
             s.state.name, shownSays.heading, shownSays.what, shownSays.next, s.receivedSats, s.needsSats, s.missingSats, s.missingMinor,
-            wait.ringSecs != null, wait.seen != null, wait.pulse, lnLeft != null, payment?.copyUri,
+            wait.ringSecs != null, wait.seen != null, wait.pulse, payment?.copyUri,
             shownExtra.joinToString("\u0002") { it.heading + it.what + it.next }, s.lightningFirst, info.reference, info.billNumber,
         ).joinToString("\u0001")
         return SaleScreenData(
@@ -491,10 +435,6 @@ object CounterFlowDemo {
             ringLabel = wait.ringSecs?.let { WaitWords.ring(it) },
             seen = wait.seen,
             pulse = wait.pulse,
-            lnRingSecs = lnLeft?.toDouble(),
-            lnRingTotal = lnTotal.toDouble(),
-            lnRingLabel = lnLeft?.let { WaitWords.ring(it) },
-            lnRingAt = lnRingAt,
             signature = signature,
         )
     }

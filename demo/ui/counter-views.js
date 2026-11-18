@@ -727,24 +727,7 @@
       setGravity(chip, Gravity.CENTER_HORIZONTAL);
       addView(words, chip, ui.margins(10));
       body.push(words);
-      (d.extra || []).forEach((w, at) => {
-        if (at === d.lnRingAt && d.lnRingSecs != null) {
-          // Controller.kt:2369 lnWaiting, CR-286: the ring of the 6 seconds for the invoice, beside the words of the Lightning line.
-          const row = LinearLayout("h");
-          setGravity(row, Gravity.CENTER_VERTICAL);
-          const ring = WaitRing(ui, ui.pal.text, 56);
-          const rp = new LayoutParams(ui.px(56), ui.px(56));
-          rp.rightMargin = ui.px(12);
-          addView(row, ring, rp);
-          addView(row, ui.notice(w), new LayoutParams(0, WRAP_CONTENT, 1));
-          const update = (n) => { if (n.lnRingSecs != null) ring.set(n.lnRingSecs, n.lnRingTotal, n.lnRingLabel); };
-          update(d);
-          if (d.live) { const was = d.live.update; d.live.update = (n) => { if (was) was(n); update(n); }; }
-          body.push(row);
-        } else {
-          body.push(ui.notice(w));
-        }
-      });
+      (d.extra || []).forEach((w) => body.push(ui.notice(w)));
       if (d.request) {
         body.push(ui.button(d.words.shareLink, tap("shareLink")));
         body.push(ui.button(d.words.shareCode, tap("shareCode")));

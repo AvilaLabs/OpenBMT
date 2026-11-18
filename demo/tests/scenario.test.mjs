@@ -1,13 +1,12 @@
 // The scenarios of the demo (demo/web2): the tabs and the ending cards of the shell on a small stand-in for the page,
-// the short-payment path on the counter's own state (PartPaid, then paid), and the café's meal paid over Lightning
-// (PaidLightning). The drawing is checked in a browser.
+// the short-payment path on the counter's own state (PartPaid, then paid). The drawing is checked in a browser.
 // Usage: node demo/tests/scenario.test.mjs   (after scripts/demo-kotlin-js.sh counter and scripts/demo-build.sh)
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import { loadCounter, invoiceOf } from '../web2/counter-host.mjs';
+import { loadCounter } from '../web2/counter-host.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.join(here, '../..');
@@ -388,43 +387,6 @@ test_short_payment: {
   c.showHome();
 }
 
-test_meal_over_lightning: {
-  const opened = sale(['2', '0', '0', '0']);
-  assert.equal(opened.amountBig, '20.00 USD');
-  until('the invoice', () => invoiceOf(last('sale').copyUri));
-  const read = PC.parse(last('sale').copyUri);
-  // 20.00 USD is over the demo's instant limit of 10 USD: the code is the invoice alone (CR-283).
-  assert.ok(read.lightning && !read.address, 'the Lightning code first');
-  assert.equal(last('sale').isPaid, false);
-  assert.equal(chain.payLightning(invoiceOf(last('sale').copyUri)), read.sats);
-  until('PaidLightning', () => last('sale').state === 'PaidLightning');
-  assert.equal(last('sale').isPaid, true);
-  assert.equal(last('sale').number, 2);
-}
-
-// CR-283: over the instant limit the sale carries the line and the button, from the model; Pay on-chain instead makes the
-// code the on-chain one, on the real module.
-test_lightning_first_line_and_button: {
-  const opened = sale(['2', '0', '0', '0']);
-  until('the invoice', () => invoiceOf(last('sale').copyUri));
-  const data = last('sale');
-  assert.equal(data.lightningFirst, true, 'the library says the code is the invoice alone');
-  assert.equal(flow.lightningLine(), 'Over the instant limit: Lightning is paid at once. On-chain waits for a block, about ten minutes.');
-  assert.equal(flow.lightningButton(), 'Pay on-chain instead');
-  assert.ok(!PC.parse(data.copyUri).address, 'no on-chain address before the button');
-  c.payOnChain();
-  second();
-  const after = last('sale');
-  assert.equal(after.lightningFirst, false, 'the line and the button go');
-  assert.match(after.copyUri, /^bitcoin:/, 'the code becomes the bitcoin: one');
-  assert.match(PC.parse(after.copyUri).address, /^bcrt1q/);
-  assert.equal(after.isPaid, false);
-  // A small sale never shows the line.
-  c.showHome();
-  assert.equal(sale(['8', '0', '0']).lightningFirst, false);
-  c.showHome();
-}
-
 // CR-286: a payment that waits shows that it is alive: the short check has its seconds left in a ring and the wait for a
 // block says how long ago the payment was seen, in the page's own clock, so a skipped wait shows its minutes truly.
 test_wait_shows_it_is_alive: {
@@ -448,8 +410,6 @@ test_wait_shows_it_is_alive: {
 
   // Over the instant limit on-chain: the wait is for a block, with how long ago the payment was seen.
   sale(['2', '0', '0', '0']);
-  until('the invoice', () => invoiceOf(last('sale').copyUri));
-  c.payOnChain();
   second();
   const big = PC.parse(last('sale').copyUri);
   chain.pay(big.address, big.sats);
@@ -618,4 +578,4 @@ test_register_views: {
 }
 
 c.stopNode();
-console.log('scenario: ok (bar and menus, opening screen, inert end and summary, cards; short payment; cancelled payment red; meal over Lightning; register screens)');
+console.log('scenario: ok (bar and menus, opening screen, inert end and summary, cards; short payment; cancelled payment red; register screens)');

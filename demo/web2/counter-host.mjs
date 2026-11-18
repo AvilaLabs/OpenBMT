@@ -2,32 +2,8 @@
 // library (crates/openbmt-demo-counter) and answers `globalThis.openbmtCounterCall(bytes)` with it, so the
 // apps' Kotlin model, compiled for the browser, runs on the code the Android app runs.
 //
-// The shop's Lightning node is a pretend one, in the module (crates/openbmt-demo-counter/src/lightning.rs): the
-// counter's own driver asks it for an invoice for each sale, as it asks the shop's own node in the app, and the sale's
-// code carries both the address and the invoice (`bitcoin:ADDRESS?amount=...&lightning=INVOICE`, BIP 321). What the
-// page needs of it:
-//   - nothing to start: this file sets `globalThis.openbmtLightningRecord` (the connection the counter starts with) and
-//     `globalThis.openbmtLightningAnswer` (the node's answer to a request of the counter), which the model's `pump`
-//     uses, so every pump of the counter also serves its Lightning requests;
-//   - `invoiceOf(code)` reads the invoice from a sale's payment code (null when the code is on-chain only; the code
-//     has no invoice until the counter has asked the node and checked the answer, a pump or two after the sale opens);
-//   - `chain.payLightning(invoice)` pays that invoice as a customer's wallet does, and returns the sats. Nothing is
-//     mined: the counter's next lookup finds the invoice settled and its own judgment turns the sale paid over Lightning
-//     (state `PaidLightning`). An invoice is paid once.
-//
 // The module asks for random numbers (`env.openbmt_random`), which are the page's `crypto.getRandomValues`.
 // The time is the page's clock, given to the module before every call.
-
-/** The invoice a sale's payment code carries (`lightning=` of BIP 321), in lower case, or null when it has none. */
-export function invoiceOf(code) {
-  // Over the instant limit the code is the invoice alone (CR-283).
-  const alone = /^lightning:(ln[a-z0-9]+)$/i.exec(String(code).trim());
-  if (alone) return alone[1].toLowerCase();
-  const query = String(code).trim().split('?')[1];
-  if (!query) return null;
-  const pair = query.split('&').map((p) => p.split('=')).find((p) => p[0].toLowerCase() === 'lightning');
-  return pair && pair[1] ? pair[1].toLowerCase() : null;
-}
 
 /** Loads the module from `bytes` (an ArrayBuffer, a Uint8Array or a compiled WebAssembly.Module) and installs the call. Returns the chain's controls. */
 export async function loadCounter(bytes, { now = () => Math.floor(Date.now() / 1000), record = null, recordWithBox = null } = {}) {
@@ -69,18 +45,6 @@ export async function loadCounter(bytes, { now = () => Math.floor(Date.now() / 1
     return Int8Array.from(take(x.counter_call(put(bytes), bytes.length)));
   };
 
-  // The pretend Lightning node: the connection the counter starts with, and its answer to a request of the counter.
-  const lightningRecord = () => {
-    tick();
-    return Int8Array.from(take(x.lightning_record()));
-  };
-  globalThis.openbmtLightningRecord = lightningRecord;
-  globalThis.openbmtLightningAnswer = (method, path, body) => {
-    tick();
-    const bytes = new TextEncoder().encode(`${method}\n${path}\n${body}`);
-    return Int8Array.from(take(x.lightning_answer(put(bytes), bytes.length)));
-  };
-
   const reply = (bytes) => {
     const s = text(bytes);
     if (!s.startsWith('ok:')) throw new Error(s.replace(/^err:/, ''));
@@ -116,12 +80,6 @@ export async function loadCounter(bytes, { now = () => Math.floor(Date.now() / 1
       tick();
       const bytes = new TextEncoder().encode(txid);
       return reply(take(x.chain_replace(put(bytes), bytes.length, 546n)));
-    },
-    /** A customer's wallet pays `invoice` (from `invoiceOf`) on the pretend Lightning node; the sats paid. */
-    payLightning(invoice) {
-      tick();
-      const bytes = new TextEncoder().encode(invoice);
-      return Number(reply(take(x.lightning_pay(put(bytes), bytes.length))));
     },
     /** The heartbeat the owner's phone would send the counter now, signed; empty when no node is running. */
     heartbeat() {
