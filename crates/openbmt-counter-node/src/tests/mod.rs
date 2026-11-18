@@ -22,6 +22,5 @@ mod settings;
 mod settle;
 mod shopln;
 mod starter;
-mod swap;
 mod switch;
 mod wallet_sig;

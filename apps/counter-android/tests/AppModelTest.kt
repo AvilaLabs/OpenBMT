@@ -1380,7 +1380,6 @@ object AppModelTest {
         ok(File(appDir, "../../docs/COUNTER-RULES.md").readText().contains("- **CR-204.**"), "CR-204 is in the rules")
     }
 
-    /** CR-219: the small line under the code when a provider is set and this sale has no swap. */
     private fun cr214ShareTests() {
         val root = Files.createTempDirectory("share").toFile()
         val folder = File(root, ShareNames.FOLDER)
@@ -1423,12 +1422,6 @@ object AppModelTest {
         throws("CR-214: a failed write leaves nothing behind") { ledger.begin { throw IOException("full") } }
         ok((folder.listFiles()?.size ?: 0) == 0 && ledger.handedOut().isEmpty(), "CR-214: a failed share adds no address")
         root.deleteRecursively()
-    }
-
-    private fun cr219SwapTests() {
-        ok(AppWords.lnNotForThisSale == "Lightning is not available for this sale.", "CR-219: the small line, as written down")
-        ok(AppWords.all().none { it.second.what == AppWords.lnNotForThisSale }, "CR-219: the small line has no heading and is not in the list of words")
-        ok(SwapLimits.MAX_BYTES == 64 * 1024 && SwapLimits.CONNECT_SECS == 60 && SwapLimits.READ_SECS == 60 && SwapLimits.PORT == 80, "CR-225: the limits of the swap transport")
     }
 
     /** CR-213 to CR-216: the request to send and the note, in the app. */
@@ -1994,7 +1987,6 @@ object AppModelTest {
         cr202TorFilesTests(screensMd?.parentFile?.parentFile?.parentFile?.let { File(it, "apps/counter-android") })
         cr203TorChoiceTests(screensMd?.parentFile?.parentFile?.parentFile?.let { File(it, "apps/counter-android") })
         cr204TorFailsTests(screensMd?.parentFile?.parentFile?.parentFile?.let { File(it, "apps/counter-android") })
-        cr219SwapTests()
         cr214ShareTests()
         cr213RequestsTests(screensMd?.parentFile?.parentFile?.parentFile?.let { File(it, "apps/counter-android") })
         cr240ConfirmChangeTests(screensMd?.parentFile?.parentFile?.parentFile?.let { File(it, "apps/counter-android") })

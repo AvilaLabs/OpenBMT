@@ -51,12 +51,6 @@
 //!   | n_refunds u32 | n_refunds * refund entry
 //!   | request u8 (0 none, else 1, 3 or 7 days) | note (flag, len u8, text)
 //!
-//! OBML | 6 | the fields of version 5, then taken_back u8 (0 to 3)
-//!
-//! Version 6 is written for a sale paid through a swap provider (CR-221).
-//! `taken_back` 1 or 2 needs a cancel recorded that can be undone; 3 needs
-//! none recorded and a person's override.
-//!
 //! Version 5 is written only for a request to send (CR-204) or a sale with a
 //! note (CR-206), and holds at least one of the two. A request has one quote,
 //! and the quote lasts the request's days instead of [`QUOTE_SECS`]. A
@@ -121,14 +115,9 @@ const SALE_VERSION_TIP: u8 = 4;
 /// The version byte of a request to send or a sale with a note (CR-204,
 /// CR-206).
 const SALE_VERSION_REQUEST: u8 = 5;
-/// The version byte of a sale that was paid over Lightning through a swap
-/// provider (CR-221): the fields of version 5, written for a sale that holds
-/// such a payment and for no other; the Lightning flag is always 1, and a
-/// request is never one.
-const SALE_VERSION_SWAP: u8 = 6;
 /// The version byte of a sale paid over the shop's own Lightning node through
 /// channels whose fundings are not all confirmed yet (SL-40), or of a sale
-/// that waits for such fundings: the fields of version 6, then the wait
+/// that waits for such fundings: the fields of version 5, then the wait
 /// (`u8`: 0 none, 1 the fundings are not confirmed, 2 one is lost), the
 /// more byte (bit 0 more fundings than listed; bit 1 a person accepted the
 /// payment with a funding of it lost, which needs an override), the count of
@@ -136,7 +125,7 @@ const SALE_VERSION_SWAP: u8 = 6;
 /// [`MAX_FUNDINGS`]) and the fundings, 32 bytes each. Written for a sale
 /// that holds such a payment, whose fundings are listed until each is
 /// confirmed, and for a sale that waits for them, which holds no payment
-/// yet; it is never a swap payment and never a request.
+/// yet; it is never a request.
 const SALE_VERSION_FUNDING: u8 = 7;
 /// The most fundings a sale lists (SL-40).
 pub const MAX_FUNDINGS: usize = 8;
@@ -304,9 +293,6 @@ pub struct Sale {
     pub(crate) late_unlisted: bool,
     pub(crate) refunds: Vec<RefundEntry>,
     pub(crate) lightning: Option<LightningPaid>,
-    /// The Lightning payment came through a swap provider (CR-221): its
-    /// claim is on the chain, to this sale's own address.
-    pub(crate) via_swap: bool,
     /// The funding transactions of the channels the Lightning payment came
     /// through that are not confirmed yet (SL-40): each leaves the list when
     /// it is confirmed, and the exposure of the sale stays counted until the
@@ -323,13 +309,6 @@ pub struct Sale {
     /// the more-fundings byte of version 7; held only by an overridden sale
     /// that lists fundings or waits with one lost.
     pub(crate) funding_lost_accepted: bool,
-    /// Why a swap sale was taken back, if it can be undone (CR-221): 1 the
-    /// lockup is spent in a block by another than the shop's claim, 2 the
-    /// claim of a sale a person accepted left the chain, 3 a person accepted
-    /// the sale after its lockup was spent, and that spend is not held
-    /// against it. 0 for none, and for a cancel that stands. Only a swap
-    /// payment holds it (version 6).
-    pub(crate) taken_back: u8,
     /// The lifetime of a request to send; none for a sale shown at the till
     /// (CR-204).
     pub(crate) request: Option<RequestDays>,
@@ -374,7 +353,6 @@ impl Sale {
             reopened: false,
             refund_reopened: false,
             cancel_recorded: false,
-            taken_back: 0,
             exposure_counted: false,
             exposure_released: false,
             ended: None,
@@ -387,7 +365,6 @@ impl Sale {
             late_unlisted: false,
             refunds: Vec::new(),
             lightning: None,
-            via_swap: false,
             funding: Vec::new(),
             funding_more: false,
             funding_wait: FundingWait::No,
@@ -490,14 +467,6 @@ impl Sale {
         self.lightning.as_ref()
     }
 
-    /// Whether the Lightning payment that settled the sale came through a
-    /// swap provider (CR-221) and not the shop's own node: its claim is on
-    /// the chain, to the sale's own address, so a bitcoin refund is open for
-    /// it (CR-224).
-    pub fn paid_via_swap(&self) -> bool {
-        self.via_swap && self.lightning.is_some()
-    }
-
     /// The funding transactions of the channels the Lightning payment came
     /// through that are not confirmed yet (SL-40, SL-27): empty for a payment
     /// through confirmed channels, and when every funding has confirmed.
@@ -553,12 +522,6 @@ impl Sale {
     /// The cancel of this sale was recorded (CR-14).
     pub fn cancel_recorded(&self) -> bool {
         self.cancel_recorded
-    }
-
-    /// CR-221: why a swap sale was taken back when that can be undone: 1 the
-    /// lockup is spent, 2 the claim of an accepted sale left the chain.
-    pub fn taken_back(&self) -> u8 {
-        self.taken_back
     }
 
     /// CR-283: whether the cashier chose the on-chain code over a
@@ -838,17 +801,12 @@ impl Sale {
         }
         out.extend_from_slice(&len32(watch.len()).to_le_bytes());
         out.extend_from_slice(&watch);
-        let funded = !self.via_swap
-            && self.request.is_none()
+        let funded = self.request.is_none()
             && (self.funding_wait != FundingWait::No
                 || (self.lightning.is_some() && self.rests_on_fundings()));
-        if funded || (self.via_swap && self.lightning.is_some()) {
+        if funded {
             if let Some(byte) = out.get_mut(4) {
-                *byte = if funded {
-                    SALE_VERSION_FUNDING
-                } else {
-                    SALE_VERSION_SWAP
-                };
+                *byte = SALE_VERSION_FUNDING;
             }
             out.extend_from_slice(&self.tip.0.to_le_bytes());
             match &self.lightning {
@@ -873,15 +831,11 @@ impl Sale {
                 }
                 None => out.push(0),
             }
-            if funded {
-                out.push(self.funding_wait.to_byte());
-                out.push(u8::from(self.funding_more) | (u8::from(self.funding_lost_accepted) << 1));
-                out.push(u8::try_from(self.funding.len()).unwrap_or(u8::MAX));
-                for txid in &self.funding {
-                    out.extend_from_slice(txid);
-                }
-            } else {
-                out.push(self.taken_back);
+            out.push(self.funding_wait.to_byte());
+            out.push(u8::from(self.funding_more) | (u8::from(self.funding_lost_accepted) << 1));
+            out.push(u8::try_from(self.funding.len()).unwrap_or(u8::MAX));
+            for txid in &self.funding {
+                out.extend_from_slice(txid);
             }
         } else if self.request.is_some() || self.note.is_some() {
             if let Some(byte) = out.get_mut(4) {
@@ -978,7 +932,6 @@ impl Sale {
             && version != SALE_VERSION_LIGHTNING
             && version != SALE_VERSION_TIP
             && version != SALE_VERSION_REQUEST
-            && version != SALE_VERSION_SWAP
             && version != SALE_VERSION_FUNDING
         {
             return Err(DecodeError::UnsupportedVersion(version));
@@ -1112,16 +1065,12 @@ impl Sale {
         let mut lightning = None;
         let mut tip = Amount(0);
         let funded = version == SALE_VERSION_FUNDING;
-        let swap = version == SALE_VERSION_SWAP || funded;
-        // Only a swap payment (version 6) may be held or taken back; a payment
-        // on fundings (version 7) keeps the rules of its own.
-        let swap_payment = version == SALE_VERSION_SWAP;
-        let extended = version == SALE_VERSION_TIP || version == SALE_VERSION_REQUEST || swap;
+        let extended = version == SALE_VERSION_TIP || version == SALE_VERSION_REQUEST || funded;
         if extended {
             tip = Amount(r.u64_le()?);
             // The tip is part of the sum due, and a tip is never more than
             // the sale's own amount (CR-190). Version 5 may have none.
-            let none = tip.0 == 0 && (version == SALE_VERSION_REQUEST || swap);
+            let none = tip.0 == 0 && (version == SALE_VERSION_REQUEST || funded);
             if !none && (tip.0 == 0 || tip.0 > amount.0.saturating_sub(tip.0)) {
                 return Err(bad("a sale's tip is nothing or more than the sale itself"));
             }
@@ -1157,7 +1106,7 @@ impl Sale {
         }
         let mut request = None;
         let mut note = None;
-        if version == SALE_VERSION_REQUEST || swap {
+        if version == SALE_VERSION_REQUEST || funded {
             request = match r.u8()? {
                 0 => None,
                 days => Some(
@@ -1175,29 +1124,11 @@ impl Sale {
                 }
                 note = Some(text);
             }
-            if !swap && request.is_none() && note.is_none() {
+            if !funded && request.is_none() && note.is_none() {
                 return Err(bad("version 5 holds neither a request nor a note"));
             }
-            if swap && request.is_some() {
-                return Err(bad("version 6 holds a swap payment and is not a request"));
-            }
-            if swap && !funded && lightning.is_none() {
-                return Err(bad("version 6 holds a swap payment"));
-            }
-        }
-        let mut taken_back = 0;
-        if swap_payment {
-            taken_back = r.u8()?;
-            let held = match taken_back {
-                0 => true,
-                1 | 2 => cancel_recorded,
-                3 => !cancel_recorded && overridden.is_some(),
-                _ => false,
-            };
-            if !held {
-                return Err(bad(
-                    "a swap sale is taken back for a reason that is not known",
-                ));
+            if funded && request.is_some() {
+                return Err(bad("version 7 is not a request"));
             }
         }
         let mut funding = Vec::new();
@@ -1267,9 +1198,7 @@ impl Sale {
         if watch.tolerance_bps() != tolerance_bps {
             return Err(bad("the watch has another tolerance"));
         }
-        // A swap payment may be reported paid at the claim's depth and then
-        // taken back (CR-221), with no acceptance at once.
-        if cancel_recorded && accepted.is_none() && overridden.is_none() && !swap_payment {
+        if cancel_recorded && accepted.is_none() && overridden.is_none() {
             return Err(bad(
                 "a cancel is recorded on a sale that was never accepted",
             ));
@@ -1277,9 +1206,7 @@ impl Sale {
         if ended.is_some() && (accepted.is_some() || overridden.is_some()) {
             return Err(bad("an accepted sale has ended"));
         }
-        // A swap payment is final at the claim's refund depth, not before
-        // (CR-221): until then the sale holds it and is not final.
-        if lightning.is_some() && (ended.is_some() || (!books_final && !swap_payment)) {
+        if lightning.is_some() && (ended.is_some() || !books_final) {
             return Err(bad("a sale paid over Lightning has ended or is not final"));
         }
         Ok(Self {
@@ -1311,8 +1238,6 @@ impl Sale {
             late_unlisted,
             refunds,
             lightning,
-            via_swap: swap && !funded,
-            taken_back,
             funding,
             funding_more,
             funding_wait,

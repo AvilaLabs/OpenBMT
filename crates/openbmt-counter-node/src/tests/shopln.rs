@@ -424,7 +424,7 @@ fn heartbeat(rig: &mut Rig) {
 }
 
 #[test]
-fn sl_40_a_payment_through_a_channel_not_yet_confirmed_is_decided_as_a_swap_is() {
+fn sl_40_a_payment_through_a_channel_not_yet_confirmed_is_decided_as_a_light_payment_is() {
     use openbmt_counter::{State, Why};
     let dir = Scratch::new();
     let mut rig = rig(&dir, settings_naming(3, 1), None);

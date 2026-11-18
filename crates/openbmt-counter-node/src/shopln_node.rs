@@ -122,7 +122,7 @@ const WRITE_WAIT_SECS: u64 = 8;
 /// seconds.
 pub const RETRY_OFFER_SECS: u64 = 5;
 /// The description on the invoices. It names neither the shop nor the sale.
-pub const DESCRIPTION: &str = crate::swap::DESCRIPTION;
+pub const DESCRIPTION: &str = "Lightning payment";
 /// The folder of the node's state, in the folder of Shop Lightning.
 const NODE_DIR: &str = "node";
 /// The folder of the node's chain watcher.

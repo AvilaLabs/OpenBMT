@@ -149,7 +149,6 @@ class Controller(private val act: MainActivity) {
     private val workers = ArrayList<Thread>()
     private var lightningThread: Thread? = null
     private var transport: LightningTransport? = null
-    private var swapTransport: SwapTransport? = null
     private val lightningJobs = LinkedBlockingQueue<Runnable>()
     private val startLock = Any()
 
@@ -629,9 +628,6 @@ class Controller(private val act: MainActivity) {
     private fun startLightning(id: Int, n: CounterNode, gate: TorGate) {
         val t = LightningTransport(gate.torOn, gate.address)
         transport = t
-        // CR-225: the swap provider is reached through the same Tor, by its onion name only.
-        val swapTransport = SwapTransport(gate.address)
-        this.swapTransport = swapTransport
         lightningJobs.clear()
         val worker = Thread {
             while (runId == id) {
@@ -647,13 +643,6 @@ class Controller(private val act: MainActivity) {
                             is LnOutcome.Answer -> n.lnReply(request.id, out.status.toLong(), out.body)
                             is LnOutcome.Failed -> n.lnFailed(request.id, out.why)
                         }
-                        continue
-                    }
-                    // CR-219: the swap provider's request, one at a time like the node's.
-                    val swap = n.swapNext(nowSecs()) ?: continue
-                    when (val out = swapTransport.send(swap.hostPort, swap.bytes)) {
-                        is SwapOutcome.Answer -> n.swapReply(swap.id, out.bytes)
-                        is SwapOutcome.Failed -> n.swapFailed(swap.id)
                     }
                 } catch (_: InterruptedException) {
                     return@Thread
@@ -754,7 +743,6 @@ class Controller(private val act: MainActivity) {
         lightningThread?.interrupt()
         lightningThread = null
         transport = null
-        swapTransport = null
         lightningJobs.clear()
         node?.let {
             try {
@@ -2291,7 +2279,6 @@ class Controller(private val act: MainActivity) {
                 // CR-113: the line that says Lightning is not available for this sale, or that its code is on the way.
                 val ln = s.lightning
                 val unavailable = ln?.unavailable
-                val failed = ln?.failed
                 // CR-286: while the invoice is waited for, its line shows the ring of the 6 seconds; it goes when the invoice comes or the time is over.
                 var lnWaiting: WordsModel? = null
                 var lnWait: Pair<Long, Long>? = null
@@ -2304,15 +2291,12 @@ class Controller(private val act: MainActivity) {
                         val total = ln.waitSecsTotal
                         if (left != null && total != null) lnWait = left to total
                     }
-                    failed != null -> extra.add(WordsModel.of(failed.say()))
                 }
-                // CR-219: with a swap provider set and none for this sale, the code stays on-chain and one small line says so.
-                val notForThisSale = ln != null && ln.notForThisSale
                 // CR-286: what the wait shows of its time; the numbers change in place, the sig only its parts.
                 val wait = SaleModel.wait(s.state, s.watchSecsLeft, s.watchSecsTotal, s.seenSecs, s.checkHealthy)
                 val sig = listOf(
                     s.state, says.heading, says.what, says.next, s.receivedSats, s.needsSats, s.missingSats, s.missingMinor, wait.ringSecs != null, wait.seen != null, wait.pulse, lnWait != null, payment?.copyUri, flash?.heading,
-                    flash?.what, extra.joinToString("\u0002") { it.heading + it.what + it.next }, notForThisSale, s.lightningFirst, info.reference, info.billNumber,
+                    flash?.what, extra.joinToString("\u0002") { it.heading + it.what + it.next }, s.lightningFirst, info.reference, info.billNumber,
                 ).joinToString("\u0001")
                 if (sig != lastSig) {
                     lastSig = sig
@@ -2353,9 +2337,6 @@ class Controller(private val act: MainActivity) {
                         if (s.lightningFirst) {
                             body.add(ui.text(LightningFirstWords.LINE, 13f, colour = ui.pal.secondary).also { it.gravity = android.view.Gravity.CENTER })
                             body.add(ui.button(LightningFirstWords.BUTTON) { payOnChainInstead(index) { w -> flashWith(w) } })
-                        }
-                        if (notForThisSale) {
-                            body.add(ui.text(AppWords.lnNotForThisSale, 13f, colour = ui.pal.secondary).also { it.gravity = android.view.Gravity.CENTER })
                         }
                         val words = LinearLayout(act).apply {
                             orientation = LinearLayout.VERTICAL

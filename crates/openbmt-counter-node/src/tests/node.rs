@@ -830,14 +830,6 @@ fn nr_46_a_checked_block_still_on_the_chain_leaves_the_height_and_a_height_alone
 }
 
 #[test]
-fn ss_02_the_nodes_own_random_bytes_come_from_the_checked_read_and_differ() {
-    let a = crate::node::os_random().expect("the kernel gave bytes");
-    let b = crate::node::os_random().expect("the kernel gave bytes");
-    assert_ne!(a, [0u8; 32]);
-    assert_ne!(a, b);
-}
-
-#[test]
 fn cr_284_a_sale_that_turns_green_and_then_red_tells_each_turn_once() {
     let dir = Scratch::new();
     let (mut rig, pay) = rig_with_a_sale(&dir);

@@ -432,8 +432,8 @@ checks every Paid on chain against its own view of the wallet (OC-14), and
 says so when one is missing.
 
 - **OC-60.** What is checked. Every sale a counter's records have ever shown
-  paid by a payment to the sale's own address: accepted at once (CR-13),
-  confirmed, or paid by a swap claim to that address (CR-221). A later record
+  paid by a payment to the sale's own address: accepted at once (CR-13) or
+  confirmed. A later record
   that reopens or replaces the payment does not take the sale out of the
   check: the counter's own word cannot undo a Paid it showed. What the check
   expects is the higher of the most the counter ever recorded as received for

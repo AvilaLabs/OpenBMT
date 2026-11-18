@@ -249,15 +249,6 @@ impl Blocks {
         &self.blocks[height as usize - 1]
     }
 
-    /// Mine one more block with these transactions and a coinbase that
-    /// claims `fees` above the subsidy.
-    pub fn extend_paying(&mut self, txs: &[Transaction], fees: u64) -> &Block {
-        let height = self.height() + 1;
-        let block = mine_paying(self.tip_hash(), height, 0, txs, fees);
-        self.blocks.push(block);
-        &self.blocks[height as usize - 1]
-    }
-
     /// The headers as a stored header file holds them.
     pub fn stored_headers(&self) -> Vec<u8> {
         let mut store = HeaderStore::new(Network::Regtest).unwrap();
@@ -327,8 +318,6 @@ pub struct Calls {
     pub asked: Vec<Txid>,
     /// How many times the node asked to dial the own node again.
     pub retried: u32,
-    /// The transactions the node sent to the peers, in order.
-    pub broadcast: Vec<Vec<u8>>,
 }
 
 /// A driver port whose events the test sends.
@@ -365,10 +354,6 @@ impl DriverPort for FakePort {
 
     fn retry_own_node(&self) {
         self.calls.lock().unwrap().retried += 1;
-    }
-
-    fn send_claim(&self, tx: Vec<u8>) {
-        self.calls.lock().unwrap().broadcast.push(tx);
     }
 }
 

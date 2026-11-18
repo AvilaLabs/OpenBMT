@@ -1022,7 +1022,6 @@ fn command<P: DriverPort>(
                 openbmt_counter_node::SaleLightning::Unavailable(w) => {
                     say(format!("lightning unavailable {}", w.heading))
                 }
-                other => say(format!("lightning other {other:?}")),
             }
         }
         Some("shop-settings") => {

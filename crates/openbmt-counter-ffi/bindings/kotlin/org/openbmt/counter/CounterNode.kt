@@ -104,9 +104,6 @@ private const val OP_ADD_NOTE = 62
 private const val OP_SALE_INFO = 63
 private const val OP_REQUESTS = 64
 private const val OP_REQUEST_LINK = 65
-private const val OP_SWAP_NEXT = 66
-private const val OP_SWAP_REPLY = 67
-private const val OP_SWAP_FAILED = 68
 private const val OP_PAIR_ADDRESS_SAME = 69
 private const val OP_PAIR_ADDRESS_DIFFERENT = 70
 private const val OP_PENDING_CHANGE = 71
@@ -547,14 +544,11 @@ class Screen(
 
 /**
  * CR-113: what a sale shows of Lightning. [unavailable] is the one line, with the reason under its details.
- * Through a swap provider, [notForThisSale] is the small line of CR-219 and [failed] the words of CR-223.
  */
 class LightningSale(
     val invoice: Boolean,
     val waiting: Boolean,
     val unavailable: Words?,
-    val notForThisSale: Boolean,
-    val failed: Words?,
     /** CR-286: the seconds left of the wait for the invoice, only while it is waited for; null otherwise. */
     val waitSecsLeft: Long?,
     /** CR-286: the whole of that wait, for the ring that empties over it; null otherwise. */
@@ -602,14 +596,6 @@ class LnRequest(
     val body: String?,
 ) {
     override fun toString(): String = "LnRequest(id=$id, $method $path)"
-}
-
-/**
- * One request for the app to send to the swap provider (CR-225): plain HTTP/1.1 to the onion name [hostPort]
- * through the counter's own Tor, never around it. [bytes] is the whole request.
- */
-class SwapRequest(val id: Long, val hostPort: String, val bytes: ByteArray) {
-    override fun toString(): String = "SwapRequest(id=$id, ${bytes.size} bytes)"
 }
 
 /** What an answer to a setup request led to: the next request, or the record to seal. */
@@ -1109,9 +1095,7 @@ internal fun Reader.screen(): Screen =
     )
 
 private fun Reader.lightningSale(): LightningSale =
-    LightningSale(bool(), bool(), option { words() }, bool(), option { words() }, option { u64() }, option { u64() })
-
-internal fun Reader.swapRequest(): SwapRequest = SwapRequest(u64(), string(), bytes())
+    LightningSale(bool(), bool(), option { words() }, option { u64() }, option { u64() })
 
 private fun Reader.lnMethod(): LnMethod =
     when (u8()) {
@@ -1889,18 +1873,6 @@ class CounterNode private constructor(private val handle: Long) : AutoCloseable 
         val r = call(OP_LN_NEXT, handle) { it.u64(now) }
         return r.option { r.lnRequest() }.also { r.end() }
     }
-
-    /** The next request for the swap provider, or null when none is due (CR-219, CR-225). */
-    fun swapNext(now: Long): SwapRequest? {
-        val r = call(OP_SWAP_NEXT, handle) { it.u64(now) }
-        return r.option { r.swapRequest() }.also { r.end() }
-    }
-
-    /** The bytes the provider sent for request [id], everything until it closed the connection (CR-225). */
-    fun swapReply(id: Long, bytes: ByteArray) = callUnit(OP_SWAP_REPLY, handle) { it.u64(id).bytes(bytes) }
-
-    /** The request to the provider got no answer (CR-225). */
-    fun swapFailed(id: Long) = callUnit(OP_SWAP_FAILED, handle) { it.u64(id) }
 
     /** Remove the Lightning connection at once (CR-115). */
     fun lnRemove() = callUnit(OP_LN_REMOVE, handle)

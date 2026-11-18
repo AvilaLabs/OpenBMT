@@ -17,7 +17,6 @@ network = ["dep:openbmt-lightning-node", "dep:tokio"]
 [dependencies]
 bitcoin = { version = "=0.32.8", default-features = false, features = ["std"] }
 openbmt-core = { path = "../openbmt-core" }
-openbmt-kernel-random = { path = "../openbmt-kernel-random" }
 openbmt-watch = { path = "../openbmt-watch" }
 openbmt-net-io = { path = "../openbmt-net-io" }
 openbmt-counter = { path = "../openbmt-counter" }
@@ -27,8 +26,6 @@ openbmt-link = { path = "../openbmt-link" }
 openbmt-pos = { path = "../openbmt-pos" }
 # The shop's own Lightning node (CR-112 to CR-116).
 openbmt-lightning = { path = "../openbmt-lightning" }
-# Lightning through a swap provider (CR-218 to CR-226).
-openbmt-swap = { path = "../openbmt-swap" }
 # Shop Lightning's node (SL-70 to SL-78): the counter that the settings name
 # runs it, and talks to the Box with Store and Stored messages. tokio is the
 # runtime the node needs, at the version the node pins.
@@ -40,7 +37,3 @@ tokio = { version = "=1.54.1", features = ["rt-multi-thread", "time", "sync"], o
 openbmt-core = { path = "../openbmt-core", features = ["test-support"] }
 # The recorded replies and the invoice writer of the tests.
 openbmt-lightning = { path = "../openbmt-lightning", features = ["testing"] }
-# The pretend swap service and the regtest node of the tests (SW-90).
-openbmt-swap = { path = "../openbmt-swap", features = ["testing"] }
-# The owner phone's check of a refund (CR-224), in the end-to-end test.
-openbmt-owner = { path = "../openbmt-owner" }

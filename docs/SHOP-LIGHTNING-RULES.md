@@ -324,8 +324,8 @@ on. The prototype used `ldk-node`; this crate does not (SL-02).
   has a confirmation is final at once. A payment that came through a channel
   the provider opened for it, before that channel's funding has a
   confirmation, rests on a transaction not yet in a block, as an on-chain
-  payment seen and not yet confirmed does, and is decided the same way, as a
-  swap is (CR-221): within the shop's instant limits for a payment the light
+  payment seen and not yet confirmed does, and is decided the same way: within
+  the shop's instant limits for a payment the light
   client has seen (`Light`, WR-45) and with room in the exposure ledger, the
   sale is Paid at once, and the amount stays in the ledger until the funding
   confirms. Above them the sale waits for that confirmation, and the manager
@@ -339,9 +339,8 @@ on. The prototype used `ldk-node`; this crate does not (SL-02).
   news of its fundings, it asks the node, and a funding the node does not know
   counts as not confirmed. A sale waiting for its fundings is still waiting
   after a restart. It is not cancelled and takes no new quote (CR-08). A
-  payment that pays it another way, through a confirmed channel or a swap,
-  ends the wait. A swap payment rests on no channel funding. SL-27 says what
-  happens if a funding never confirms.
+  payment that pays it another way, through a confirmed channel,
+  ends the wait. SL-27 says what happens if a funding never confirms.
 - **SL-41. When Lightning is not offered.** With the second device away, the
   chain data behind, no usable channel and no provider answering, the
   counter shows the on-chain code alone and the manager sees why.

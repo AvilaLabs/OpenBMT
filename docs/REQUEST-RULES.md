@@ -293,6 +293,6 @@ an end, payments in parts, repeats and returns.
   paying. Bitcoin has no pull payments; a customer always pays.
 - They do not send messages, emails or reminders. The owner shares; the
   app shows what is due.
-- They do not take a payment over Lightning. A swap provider's invoice
+- They do not take a payment over Lightning. A Lightning invoice
   lasts minutes, not days.
 - They do not check who sent a payment. Anyone who has the link can pay it.

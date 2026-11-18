@@ -26,7 +26,6 @@ mod settle;
 mod staff;
 mod states;
 mod storage;
-mod swap;
 mod switch;
 mod till;
 mod tips;

@@ -25,7 +25,6 @@ mod shopln;
 mod staff;
 mod starter;
 mod strict;
-mod swap;
 mod switch;
 mod tap;
 mod till;

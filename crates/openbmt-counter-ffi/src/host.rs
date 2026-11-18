@@ -65,8 +65,7 @@ use crate::views::{
     OpenRequestArgs, OpenTipArgs, OpenedView, OverrideArgs, OwnNodeView, PendingChangeView,
     PendingSwitchView, PumpView, RefundArgs, RefundAskView, RefundRow, ReportView, RequestRow,
     RequoteArgs, SaleInfoView, ScreenView, ShopLightningView, StaffArgs, StartConfig, StatusView,
-    SwapReplyArgs, SwapRequestView, SwitchSameView, SwitchStateView, TipChoiceView, TurnView,
-    WithdrawArgs, WordsView,
+    SwitchSameView, SwitchStateView, TipChoiceView, TurnView, WithdrawArgs, WordsView,
 };
 
 /// The longest a `pump` waits, whatever the app asks for, so that a call
@@ -919,7 +918,6 @@ impl Entry {
         // must not be lost with it.
         let mut payment = None;
         let mut lightning = None;
-        let mut waiting_words = None;
         let mut lightning_first = false;
         if live {
             payment = self.payment(node, index, code_sats).ok();
@@ -937,8 +935,6 @@ impl Entry {
                         invoice: false,
                         waiting: true,
                         unavailable: None,
-                        not_for_this_sale: false,
-                        failed: None,
                         wait_secs_left: wait.map(|(left, _)| left),
                         wait_secs_total: wait.map(|(_, total)| total),
                     });
@@ -952,8 +948,6 @@ impl Entry {
                         invoice: code.is_some(),
                         waiting: false,
                         unavailable: None,
-                        not_for_this_sale: false,
-                        failed: None,
                         wait_secs_left: None,
                         wait_secs_total: None,
                     });
@@ -977,37 +971,6 @@ impl Entry {
                         invoice: false,
                         waiting: false,
                         unavailable: Some(WordsView(words)),
-                        not_for_this_sale: false,
-                        failed: None,
-                        wait_secs_left: None,
-                        wait_secs_total: None,
-                    });
-                }
-                // CR-219: the code stays on-chain and the small line says so.
-                SaleLightning::NotForThisSale => {
-                    lightning = Some(LightningSaleView {
-                        invoice: false,
-                        waiting: false,
-                        unavailable: None,
-                        not_for_this_sale: true,
-                        failed: None,
-                        wait_secs_left: None,
-                        wait_secs_total: None,
-                    });
-                }
-                // CR-221: the Lightning payment arrived and the sale waits
-                // for one block; the words stand in for the sale's own.
-                SaleLightning::Confirming(words) => {
-                    waiting_words = Some(words);
-                }
-                // CR-223: the swap failed; the sale goes on as it was.
-                SaleLightning::Failed(words) => {
-                    lightning = Some(LightningSaleView {
-                        invoice: false,
-                        waiting: false,
-                        unavailable: None,
-                        not_for_this_sale: false,
-                        failed: Some(WordsView(words)),
                         wait_secs_left: None,
                         wait_secs_total: None,
                     });
@@ -1016,9 +979,7 @@ impl Entry {
         }
         ScreenView {
             state: screen.state.into(),
-            words: WordsView(
-                waiting_words.unwrap_or_else(|| screen.words_at(node.settings().place)),
-            ),
+            words: WordsView(screen.words_at(node.settings().place)),
             flags: screen.flag_words().into_iter().map(WordsView).collect(),
             check: screen.check_words().map(WordsView),
             received_sats: screen.received_sats,
@@ -1366,20 +1327,10 @@ impl Entry {
                 sales: node.sales().collect(),
                 refused_below_minimum: node.counter().refused_below_minimum(),
                 stopped: node.stopped(),
-                // CR-222: a claim that is stuck is told to the owner on the
-                // Lightning line, whichever path made the invoice.
-                lightning: node
-                    .lightning_status()
-                    .map(|s| LightningStatusView {
-                        ready: s.ready,
-                        words: WordsView(s.words),
-                    })
-                    .or_else(|| {
-                        node.swap_status().map(|words| LightningStatusView {
-                            ready: node.swap_on(),
-                            words: WordsView(words),
-                        })
-                    }),
+                lightning: node.lightning_status().map(|s| LightningStatusView {
+                    ready: s.ready,
+                    words: WordsView(s.words),
+                }),
             })
         })
     }
@@ -1507,31 +1458,6 @@ impl Entry {
                     ))
                 }),
             })
-        })
-    }
-
-    // Lightning through a swap provider (CR-219, CR-225).
-
-    /// CR-225: the next request for the provider, if one is due.
-    pub(crate) fn swap_next(&self, now: u64) -> Result<Option<SwapRequestView>, CounterError> {
-        self.run(Some(now), |node, _, _| {
-            Ok(node.swap_next().map(SwapRequestView::from))
-        })
-    }
-
-    /// CR-225: the bytes the provider sent for a request.
-    pub(crate) fn swap_reply(&self, a: SwapReplyArgs) -> Result<(), CounterError> {
-        self.run(None, |node, _, _| {
-            node.swap_reply(a.id, &a.bytes);
-            Ok(())
-        })
-    }
-
-    /// CR-225: the request got no answer.
-    pub(crate) fn swap_failed(&self, id: u64) -> Result<(), CounterError> {
-        self.run(None, |node, _, _| {
-            node.swap_failed(id);
-            Ok(())
         })
     }
 

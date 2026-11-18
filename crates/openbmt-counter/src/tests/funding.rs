@@ -1,6 +1,6 @@
 //! Section 5 of `docs/SHOP-LIGHTNING-RULES.md`, SL-27 and SL-40, at the
 //! counter: a Lightning payment through a channel whose funding has no
-//! confirmation is decided as a swap's is (CR-221), and what becomes of the
+//! confirmation is decided as a payment the light client has seen is, and what becomes of the
 //! funding is told to the sales that rest on it.
 
 use super::kit::*;
@@ -102,7 +102,6 @@ fn sl_40_within_the_instant_limits_the_sale_is_paid_at_once_and_the_ledger_holds
     assert!(sale.books_final() && !sale.is_live());
     assert_eq!(sale.lightning_fundings(), &[FUNDING]);
     assert_eq!(sale.lightning().unwrap().sats(), 5_000);
-    assert!(!sale.paid_via_swap());
     // A restart reads it back, with its funding and its ledger.
     w.restart();
     assert_eq!(w.c.exposure_outstanding(), 5_000);
@@ -302,15 +301,10 @@ fn sl_40_the_stored_sale_is_version_7_and_older_versions_still_read() {
     let mut long = bytes.clone();
     long.push(0);
     assert!(Sale::from_bytes(&long).is_err());
-    let mut v6 = bytes[..bytes.len() - 35].to_vec();
-    v6.push(0);
+    // Version 6 is not read.
+    let mut v6 = bytes.clone();
     v6[4] = 6;
-    let old = Sale::from_bytes(&v6).unwrap();
-    assert!(old.lightning_fundings().is_empty());
-    assert!(old.paid_via_swap());
-    let mut v6_long = bytes.clone();
-    v6_long[4] = 6;
-    assert!(Sale::from_bytes(&v6_long).is_err());
+    assert!(Sale::from_bytes(&v6).is_err());
     // Version 7 with no payment is refused.
     let unpaid = w.open_five();
     let mut none = w.c.sale(unpaid.index).unwrap().to_bytes();

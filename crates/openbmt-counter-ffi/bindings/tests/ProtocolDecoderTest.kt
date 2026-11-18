@@ -334,19 +334,11 @@ object ProtocolDecoderTest {
         rejects("a bool in the Lightning-first flag") { decodeResponse(screenFrame(lightningFirst = 2)).screen() }
         decodeResponse(screenFrame(lightning = 1)).screen().also {
             val ln = it.lightning ?: error("a Lightning line")
-            check(ln.invoice && !ln.waiting && ln.unavailable == null && !ln.notForThisSale && ln.failed == null)
+            check(ln.invoice && !ln.waiting && ln.unavailable == null)
         }
         decodeResponse(screenFrame(lightning = 2)).screen().also {
             val ln = it.lightning ?: error("a Lightning line")
             check(!ln.invoice && !ln.waiting && ln.unavailable?.heading == "Not available")
-        }
-        decodeResponse(screenFrame(lightning = 4)).screen().also {
-            val ln = it.lightning ?: error("a Lightning line")
-            check(!ln.invoice && ln.notForThisSale && ln.failed == null && ln.unavailable == null)
-        }
-        decodeResponse(screenFrame(lightning = 5)).screen().also {
-            val ln = it.lightning ?: error("a Lightning line")
-            check(!ln.notForThisSale && ln.failed?.heading == "Not finished")
         }
         decodeResponse(screenFrame(lightning = 6)).screen().also {
             val ln = it.lightning ?: error("a Lightning line")
@@ -509,16 +501,6 @@ object ProtocolDecoderTest {
             r.end()
             check(step.next == null && step.record!!.contentEquals(byteArrayOf(1, 2, 3)))
         }
-        // CR-225: a request for the swap provider is an id, a host and port and the bytes to send.
-        decodeResponse(header(0, Writer().u8(1).u64(4).string("abc.onion:80").bytes(byteArrayOf(71, 69, 84)).toByteArray())).let { r ->
-            val next = r.option { r.swapRequest() }
-            r.end()
-            check(next != null && next.id == 4L && next.hostPort == "abc.onion:80" && next.bytes.contentEquals(byteArrayOf(71, 69, 84)))
-        }
-        decodeResponse(header(0, Writer().u8(0).toByteArray())).let { r ->
-            check(r.option { r.swapRequest() } == null)
-            r.end()
-        }
         rejects("a request method") {
             val bad = Writer().u64(9).string("h:1").u8(2).string("/").string("n").string("v").u8(0).toByteArray()
             decodeResponse(header(0, bad)).lnRequest()
@@ -655,19 +637,13 @@ object ProtocolDecoderTest {
         }
         when (lightning) {
             0 -> out.write(0)
-            1 -> out.write(byteArrayOf(1, 1, 0, 0, 0, 0))
+            1 -> out.write(byteArrayOf(1, 1, 0, 0))
             2 -> {
                 out.write(byteArrayOf(1, 0, 0, 1))
                 words(out, 2, 2, "Not available".toByteArray(Charsets.UTF_8))
-                out.write(byteArrayOf(0, 0))
             }
-            4 -> out.write(byteArrayOf(1, 0, 0, 0, 1, 0))
-            5 -> {
-                out.write(byteArrayOf(1, 0, 0, 0, 0, 1))
-                words(out, 2, 2, "Not finished".toByteArray(Charsets.UTF_8))
-            }
-            6 -> out.write(byteArrayOf(1, 0, 1, 0, 0, 0))
-            else -> out.write(byteArrayOf(1, 2, 0, 0, 0, 0))
+            6 -> out.write(byteArrayOf(1, 0, 1, 0))
+            else -> out.write(byteArrayOf(1, 2, 0, 0))
         }
         // CR-286: the seconds of the wait for the invoice follow the Lightning line, when there is one.
         if (lightning == 6) {

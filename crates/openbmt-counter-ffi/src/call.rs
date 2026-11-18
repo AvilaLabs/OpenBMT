@@ -82,10 +82,6 @@
 //!   cashier, 86 `till_start` opens the sale for one, 87 `till_not_now` hides
 //!   one and 88 `till_of_sale` says whether a sale came from the till and
 //!   whether the till cancelled it (CR-266 to CR-271).
-//! - 66 to 68 Lightning through a swap provider (CR-219, CR-225):
-//!   `swap_next` hands out the next request for the provider's onion name,
-//!   `swap_reply` takes the bytes that came back and `swap_failed` says there
-//!   were none. The app sends them over plain HTTP/1.1 through its own Tor.
 //! - 71 `pending_change` reads the change to the shop's settings that waits
 //!   for a counter's confirmation, and 72 `confirm_change` signs it and
 //!   writes the record (CR-239 to CR-241). The PIN of CR-84 is the app's: it
@@ -158,9 +154,8 @@ use crate::views::{
     OwnNodeCheckArgs, OwnNodeView, OwnWalletKind, PairBeginArgs, PairStartedView, PairingView,
     PendingChangeView, PendingSwitchView, PersonLineView, PumpView, RefundArgs, RefundAskView,
     RefundRow, RefundStateView, RelayKind, ReportView, RequestRow, RequoteArgs, SaleInfoView,
-    ScreenView, ShopLightningView, StaffArgs, StartConfig, StateView, StatusView, SwapReplyArgs,
-    SwapRequestView, SwitchSameView, SwitchStateView, TallyView, TipChoiceView, TipTallyView,
-    TurnView, WithdrawArgs, WordsView,
+    ScreenView, ShopLightningView, StaffArgs, StartConfig, StateView, StatusView, SwitchSameView,
+    SwitchStateView, TallyView, TipChoiceView, TipTallyView, TurnView, WithdrawArgs, WordsView,
 };
 
 /// The first four bytes of a request.
@@ -567,15 +562,6 @@ fn build_ops() -> Vec<Op> {
             Node,
             |c, (index, label): (u32, String)| c.entry()?.request_link(index, &label),
         ),
-        op(66, "swap_next", Node, |c, now: u64| {
-            c.entry()?.swap_next(now)
-        }),
-        op(67, "swap_reply", Node, |c, a: SwapReplyArgs| {
-            c.entry()?.swap_reply(a)
-        }),
-        op(68, "swap_failed", Node, |c, id: u64| {
-            c.entry()?.swap_failed(id)
-        }),
         op(
             69,
             "pair_address_same",
@@ -860,8 +846,6 @@ fn definitions() -> Vec<TypeDef> {
         LnFailArgs::define(),
         LnStepView::define(),
         LightningSaleView::define(),
-        SwapRequestView::define(),
-        SwapReplyArgs::define(),
         LightningStatusView::define(),
         ChangeValueKind::define(),
         BillKindView::define(),

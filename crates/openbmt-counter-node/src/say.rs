@@ -1139,7 +1139,6 @@ pub fn all_words() -> Vec<(String, Words)> {
     }
     // CR-112 to CR-116: the words of the Lightning driver.
     all.extend(crate::lightning::all_words());
-    all.extend(crate::swap::all_words());
     // SL-41, SL-72, SL-76, SL-77: the words of Shop Lightning.
     all.extend(all_shopln_words());
     for (name, e) in [
