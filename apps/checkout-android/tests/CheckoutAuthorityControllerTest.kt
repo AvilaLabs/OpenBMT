@@ -132,21 +132,23 @@ object CheckoutAuthorityControllerTest {
         val directory = fixture.controller()
         directory.refresh()
         val cashierId = (directory.signIn(managerId, "112233".toCharArray()) as CheckoutAccessState.SignedIn).actor.actorId
-        val staff = directory.staffAdministration().staff
+        val staff = (directory.staffAdministration() as CheckoutStaffAdministrationResult.Ready).snapshot.staff
         val cashier = staff.single { it.actorId != managerId }
         check(cashierId == managerId)
 
         val cashierSessionController = fixture.controller()
         cashierSessionController.refresh()
         cashierSessionController.signIn(cashier.actorId, "445566".toCharArray())
-        check(runCatching { cashierSessionController.staffAdministration() }.exceptionOrNull() is CheckoutAuthorityDeniedException)
+        check(cashierSessionController.staffAdministration() is CheckoutStaffAdministrationResult.Failed)
         check((cashierSessionController.state() as CheckoutAccessState.SignedIn).actor.role == CheckoutAuthorityRole.CASHIER)
 
         val manager = fixture.controller()
         manager.refresh()
         manager.signIn(managerId, "112233".toCharArray())
         val renamed = manager.renameStaffMember(cashier.actorId, "Front Cashier") as CheckoutStaffAdministrationResult.Ready
-        check(renamed.snapshot.staff.first { it.actorId == cashier.actorId }.displayName == "Front Cashier")
+        check(manager.state() is CheckoutAccessState.SignInRequired)
+        manager.signIn(managerId, "112233".toCharArray())
+        check((manager.staffAdministration() as CheckoutStaffAdministrationResult.Ready).snapshot.staff.first { it.actorId == cashier.actorId }.displayName == "Front Cashier")
         check(manager.changeStaffRole(cashier.actorId, CheckoutAuthorityRole.MANAGER) is CheckoutStaffAdministrationResult.Ready)
         check(manager.state() is CheckoutAccessState.SignInRequired)
 
@@ -159,11 +161,11 @@ object CheckoutAuthorityControllerTest {
 
         val audit = CheckoutAuthorityAuditJournal(fixture.auditStorage).snapshot()
         check(audit.map { it.action }.count { it in setOf(
-            CheckoutAuthorityAuditAction.STAFF_CREATE_PREPARED,
-            CheckoutAuthorityAuditAction.STAFF_RENAME_PREPARED,
-            CheckoutAuthorityAuditAction.STAFF_ROLE_PREPARED,
-            CheckoutAuthorityAuditAction.STAFF_PIN_PREPARED,
-            CheckoutAuthorityAuditAction.STAFF_DISABLE_PREPARED,
+            CheckoutAuthorityAuditAction.STAFF_CREATE_PREPARED_WITH_RECEIPT,
+            CheckoutAuthorityAuditAction.STAFF_RENAME_PREPARED_WITH_RECEIPT,
+            CheckoutAuthorityAuditAction.STAFF_ROLE_PREPARED_WITH_RECEIPT,
+            CheckoutAuthorityAuditAction.STAFF_PIN_PREPARED_WITH_RECEIPT,
+            CheckoutAuthorityAuditAction.STAFF_DISABLE_PREPARED_WITH_RECEIPT,
         ) } == 5)
         check(audit.filter { it.action in setOf(
             CheckoutAuthorityAuditAction.STAFF_CREATED,

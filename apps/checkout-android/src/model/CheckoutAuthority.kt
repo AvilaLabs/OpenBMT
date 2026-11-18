@@ -204,6 +204,24 @@ data class CheckoutAuthorityLoginProfile(
     val enabledStaff: List<CheckoutStaffSummary>,
 )
 
+/** Non-secret state projection used only to resolve an uncertain staff-audit intent. */
+internal data class CheckoutAuthorityStaffRecoveryState(
+    val policyGeneration: Long,
+    val staff: List<CheckoutStaffSummary>,
+    val receipts: List<CheckoutAuthorityStaffOperationReceipt>,
+    val revision: ByteArray,
+)
+
+internal enum class CheckoutAuthorityStaffOperationKind { CREATE, RENAME, ROLE, PIN, DISABLE }
+internal data class CheckoutAuthorityStaffOperationReceipt(
+    val operationId: String,
+    val kind: CheckoutAuthorityStaffOperationKind,
+    val subjectActorId: String,
+    val baseGeneration: Long,
+    val resultGeneration: Long,
+    val requestDigest: ByteArray,
+)
+
 /** Opaque, process-local bearer. It is deliberately not serializable and its string form is redacted. */
 class CheckoutAuthoritySession internal constructor() {
     override fun toString(): String = "CheckoutAuthoritySession(redacted)"
@@ -428,21 +446,55 @@ class CheckoutAuthority(
         displayName: String,
         role: CheckoutAuthorityRole,
         pin: CharArray,
+    ): CheckoutStaffSummary = try {
+        createStaffInternal(session, requestedScope, displayName, role, pin, prepareStaffActorId(), null)
+    } catch (error: Exception) {
+        pin.fill('\u0000')
+        throw error
+    }
+
+    /** Stable ID is generated before an audit prepare row so uncertain creation can be inspected. */
+    internal fun prepareStaffActorId(): String = synchronized(monitor) {
+        ensureAvailable()
+        ensureCurrentRevision()
+        val current = requireState()
+        var actorId: String
+        do { actorId = newId() } while (current.actors.any { it.actorId == actorId })
+        actorId
+    }
+
+    internal fun createStaffForOperation(
+        session: CheckoutAuthoritySession, requestedScope: CheckoutAuthorityScope, displayName: String,
+        role: CheckoutAuthorityRole, pin: CharArray, actorId: String, operationId: String, requestDigest: ByteArray,
+    ): CheckoutStaffSummary = createStaffInternal(session, requestedScope, displayName, role, pin, actorId,
+        staffReceipt(operationId, CheckoutAuthorityStaffOperationKind.CREATE, actorId, 0, 0, requestDigest))
+
+    private fun createStaffInternal(
+        session: CheckoutAuthoritySession,
+        requestedScope: CheckoutAuthorityScope,
+        displayName: String,
+        role: CheckoutAuthorityRole,
+        pin: CharArray,
+        actorId: String,
+        receiptTemplate: CheckoutAuthorityStaffOperationReceipt?,
     ): CheckoutStaffSummary {
         try {
             validateDisplayName(displayName)
             validatePin(pin)
+            validateActorId(actorId)
             synchronized(monitor) {
                 authorize(session, CheckoutAuthorityCapability.STAFF_MANAGE, requestedScope)
                 val current = requireState()
                 if (pinMatchesEnabledActor(pin, current, excludeActorId = null)) throw CheckoutAuthorityDeniedException()
-                val actorId = newId()
+                if (current.actors.any { it.actorId == actorId }) throw CheckoutAuthorityDeniedException()
                 val salt = randomBytes(SALT_BYTES)
                 val verifier = derive(pin, salt, current.iterations)
                 val actor = ActorRecord(actorId, displayName.trim(), role, true, salt, verifier, 0, 0, "")
+                val nextGeneration = incrementGeneration(current.policyGeneration)
                 val next = current.copy(
-                    policyGeneration = incrementGeneration(current.policyGeneration),
+                    policyGeneration = nextGeneration,
                     actors = current.actors + actor,
+                    staffReceipts = receiptTemplate?.let { addStaffReceipt(current.staffReceipts, it, current.policyGeneration, nextGeneration) } ?: current.staffReceipts,
                 )
                 persist(next)
                 sessions.clear()
@@ -461,12 +513,43 @@ class CheckoutAuthority(
         requireState().actors.map { CheckoutStaffSummary(it.actorId, it.displayName, it.role, it.enabled) }
     }
 
+    /** Read the exact non-secret staff projection and generation under the authority lock. */
+    internal fun staffRecoveryState(
+        session: CheckoutAuthoritySession,
+        requestedScope: CheckoutAuthorityScope,
+    ): CheckoutAuthorityStaffRecoveryState = synchronized(monitor) {
+        authorize(session, CheckoutAuthorityCapability.STAFF_MANAGE, requestedScope)
+        val current = requireState()
+        CheckoutAuthorityStaffRecoveryState(
+            current.policyGeneration,
+            current.actors.map { CheckoutStaffSummary(it.actorId, it.displayName, it.role, it.enabled) },
+            current.staffReceipts.map { it.copy(requestDigest = it.requestDigest.copyOf()) },
+            MessageDigest.getInstance("SHA-256").digest(persistedBytes ?: error("authority state bytes unavailable")),
+        )
+    }
+
+    internal fun staffOperationReceipts(
+        session: CheckoutAuthoritySession,
+        requestedScope: CheckoutAuthorityScope,
+    ): List<CheckoutAuthorityStaffOperationReceipt> = staffRecoveryState(session, requestedScope).receipts
+
     /** Renaming changes future event snapshots, never the stable actor ID or prior attribution. */
     fun renameStaff(
         session: CheckoutAuthoritySession,
         requestedScope: CheckoutAuthorityScope,
         actorId: String,
         displayName: String,
+    ): CheckoutStaffSummary = renameStaffInternal(session, requestedScope, actorId, displayName, null)
+
+    internal fun renameStaffForOperation(
+        session: CheckoutAuthoritySession, requestedScope: CheckoutAuthorityScope, actorId: String,
+        displayName: String, operationId: String, requestDigest: ByteArray,
+    ): CheckoutStaffSummary = renameStaffInternal(session, requestedScope, actorId, displayName,
+        staffReceipt(operationId, CheckoutAuthorityStaffOperationKind.RENAME, actorId, 0, 0, requestDigest))
+
+    private fun renameStaffInternal(
+        session: CheckoutAuthoritySession, requestedScope: CheckoutAuthorityScope, actorId: String,
+        displayName: String, receipt: CheckoutAuthorityStaffOperationReceipt?,
     ): CheckoutStaffSummary = synchronized(monitor) {
         validateActorId(actorId)
         validateDisplayName(displayName)
@@ -474,7 +557,10 @@ class CheckoutAuthority(
         val current = requireState()
         val actor = current.actors.firstOrNull { it.actorId == actorId } ?: throw CheckoutAuthorityDeniedException()
         val changed = actor.copy(displayName = displayName.trim())
-        persist(current.replace(changed))
+        val nextGeneration = incrementGeneration(current.policyGeneration)
+        persist(current.replace(changed).copy(policyGeneration = nextGeneration,
+            staffReceipts = receipt?.let { addStaffReceipt(current.staffReceipts, it, current.policyGeneration, nextGeneration) } ?: current.staffReceipts))
+        sessions.clear()
         CheckoutStaffSummary(changed.actorId, changed.displayName, changed.role, changed.enabled)
     }
 
@@ -483,6 +569,17 @@ class CheckoutAuthority(
         requestedScope: CheckoutAuthorityScope,
         actorId: String,
         role: CheckoutAuthorityRole,
+    ): CheckoutStaffSummary = changeRoleInternal(session, requestedScope, actorId, role, null)
+
+    internal fun changeRoleForOperation(
+        session: CheckoutAuthoritySession, requestedScope: CheckoutAuthorityScope, actorId: String,
+        role: CheckoutAuthorityRole, operationId: String, requestDigest: ByteArray,
+    ): CheckoutStaffSummary = changeRoleInternal(session, requestedScope, actorId, role,
+        staffReceipt(operationId, CheckoutAuthorityStaffOperationKind.ROLE, actorId, 0, 0, requestDigest))
+
+    private fun changeRoleInternal(
+        session: CheckoutAuthoritySession, requestedScope: CheckoutAuthorityScope, actorId: String,
+        role: CheckoutAuthorityRole, receipt: CheckoutAuthorityStaffOperationReceipt?,
     ): CheckoutStaffSummary = synchronized(monitor) {
         validateActorId(actorId)
         authorize(session, CheckoutAuthorityCapability.STAFF_MANAGE, requestedScope)
@@ -496,7 +593,9 @@ class CheckoutAuthority(
             throw CheckoutAuthorityDeniedException()
         }
         val changed = actor.copy(role = role)
-        persist(current.replace(changed).copy(policyGeneration = incrementGeneration(current.policyGeneration)))
+        val nextGeneration = incrementGeneration(current.policyGeneration)
+        persist(current.replace(changed).copy(policyGeneration = nextGeneration,
+            staffReceipts = receipt?.let { addStaffReceipt(current.staffReceipts, it, current.policyGeneration, nextGeneration) } ?: current.staffReceipts))
         sessions.clear()
         CheckoutStaffSummary(changed.actorId, changed.displayName, changed.role, changed.enabled)
     }
@@ -506,6 +605,17 @@ class CheckoutAuthority(
         requestedScope: CheckoutAuthorityScope,
         actorId: String,
         newPin: CharArray,
+    ) = changePinInternal(session, requestedScope, actorId, newPin, null)
+
+    internal fun changePinForOperation(
+        session: CheckoutAuthoritySession, requestedScope: CheckoutAuthorityScope, actorId: String,
+        newPin: CharArray, operationId: String, requestDigest: ByteArray,
+    ) = changePinInternal(session, requestedScope, actorId, newPin,
+        staffReceipt(operationId, CheckoutAuthorityStaffOperationKind.PIN, actorId, 0, 0, requestDigest))
+
+    private fun changePinInternal(
+        session: CheckoutAuthoritySession, requestedScope: CheckoutAuthorityScope, actorId: String,
+        newPin: CharArray, receipt: CheckoutAuthorityStaffOperationReceipt?,
     ) {
         try {
             validateActorId(actorId)
@@ -521,7 +631,9 @@ class CheckoutAuthority(
                     verifier = derive(newPin, salt, current.iterations),
                     failedAttempts = 0, holdUntilElapsed = 0, holdBootIdentity = "",
                 )
-                persist(current.replace(changed).copy(policyGeneration = incrementGeneration(current.policyGeneration)))
+                val nextGeneration = incrementGeneration(current.policyGeneration)
+                persist(current.replace(changed).copy(policyGeneration = nextGeneration,
+                    staffReceipts = receipt?.let { addStaffReceipt(current.staffReceipts, it, current.policyGeneration, nextGeneration) } ?: current.staffReceipts))
                 sessions.clear()
             }
         } finally {
@@ -533,6 +645,17 @@ class CheckoutAuthority(
         session: CheckoutAuthoritySession,
         requestedScope: CheckoutAuthorityScope,
         actorId: String,
+    ): CheckoutStaffSummary = disableStaffInternal(session, requestedScope, actorId, null)
+
+    internal fun disableStaffForOperation(
+        session: CheckoutAuthoritySession, requestedScope: CheckoutAuthorityScope, actorId: String,
+        operationId: String, requestDigest: ByteArray,
+    ): CheckoutStaffSummary = disableStaffInternal(session, requestedScope, actorId,
+        staffReceipt(operationId, CheckoutAuthorityStaffOperationKind.DISABLE, actorId, 0, 0, requestDigest))
+
+    private fun disableStaffInternal(
+        session: CheckoutAuthoritySession, requestedScope: CheckoutAuthorityScope, actorId: String,
+        receipt: CheckoutAuthorityStaffOperationReceipt?,
     ): CheckoutStaffSummary = synchronized(monitor) {
         validateActorId(actorId)
         authorize(session, CheckoutAuthorityCapability.STAFF_MANAGE, requestedScope)
@@ -544,7 +667,9 @@ class CheckoutAuthority(
             throw CheckoutAuthorityDeniedException()
         }
         val changed = actor.copy(enabled = false)
-        persist(current.replace(changed).copy(policyGeneration = incrementGeneration(current.policyGeneration)))
+        val nextGeneration = incrementGeneration(current.policyGeneration)
+        persist(current.replace(changed).copy(policyGeneration = nextGeneration,
+            staffReceipts = receipt?.let { addStaffReceipt(current.staffReceipts, it, current.policyGeneration, nextGeneration) } ?: current.staffReceipts))
         sessions.clear()
         CheckoutStaffSummary(changed.actorId, changed.displayName, changed.role, changed.enabled)
     }
@@ -837,6 +962,7 @@ class CheckoutAuthority(
         val recoveryFailedAttempts: Int,
         val recoveryHoldUntilElapsed: Long,
         val recoveryHoldBootIdentity: String,
+        val staffReceipts: List<CheckoutAuthorityStaffOperationReceipt> = emptyList(),
     ) {
         fun replace(actor: ActorRecord): AuthorityState = copy(actors = actors.map { if (it.actorId == actor.actorId) actor else it })
     }
@@ -845,6 +971,15 @@ class CheckoutAuthority(
         require(state.actors.size in 1..MAX_ACTORS && state.iterations in MIN_ITERATIONS..MAX_ITERATIONS)
         require(state.policyGeneration > 0 && state.recoverySalt.size == SALT_BYTES && state.recoveryVerifier.size == VERIFIER_BYTES)
         require(state.actors.map { it.actorId }.toSet().size == state.actors.size)
+        require(state.staffReceipts.size <= MAX_STAFF_RECEIPTS)
+        require(state.staffReceipts.map { it.operationId }.toSet().size == state.staffReceipts.size)
+        state.staffReceipts.forEachIndexed { index, receipt ->
+            validateStaffReceipt(receipt)
+            if (receipt.resultGeneration > state.policyGeneration ||
+                (index > 0 && state.staffReceipts[index - 1].resultGeneration >= receipt.resultGeneration)) {
+                throw CheckoutAuthorityUnavailableException()
+            }
+        }
         validateActorId(state.recoveryManagerActorId)
         require(state.actors.any { it.actorId == state.recoveryManagerActorId && it.role == CheckoutAuthorityRole.MANAGER && it.enabled })
         val out = ByteArrayOutputStream()
@@ -878,6 +1013,17 @@ class CheckoutAuthority(
             data.writeInt(state.recoveryFailedAttempts)
             data.writeLong(state.recoveryHoldUntilElapsed)
             data.writeText(state.recoveryHoldBootIdentity)
+            require(state.staffReceipts.size <= MAX_STAFF_RECEIPTS)
+            data.writeInt(state.staffReceipts.size)
+            state.staffReceipts.forEach { receipt ->
+                validateStaffReceipt(receipt)
+                data.writeText(receipt.operationId)
+                data.writeByte(receipt.kind.ordinal)
+                data.writeText(receipt.subjectActorId)
+                data.writeLong(receipt.baseGeneration)
+                data.writeLong(receipt.resultGeneration)
+                data.write(receipt.requestDigest)
+            }
         }
         val bytes = out.toByteArray()
         require(bytes.size <= MAX_FILE_BYTES)
@@ -934,12 +1080,34 @@ class CheckoutAuthority(
                 val recoveryFailures = data.readInt()
                 val recoveryHold = data.readLong()
                 val recoveryBoot = data.readText(MAX_BOOT_ID_BYTES)
-                if (recoveryFailures < 0 || recoveryHold < 0 || (recoveryHold == 0L) != recoveryBoot.isEmpty() || data.available() != 0) {
+                if (recoveryFailures < 0 || recoveryHold < 0 || (recoveryHold == 0L) != recoveryBoot.isEmpty()) {
                     throw CheckoutAuthorityUnavailableException()
                 }
                 if (recoveryBoot.isNotEmpty() && !validScopeId(recoveryBoot)) throw CheckoutAuthorityUnavailableException()
+                val receipts = ArrayList<CheckoutAuthorityStaffOperationReceipt>()
+                if (version >= 3) {
+                    val receiptCount = data.readInt()
+                    if (receiptCount !in 0..MAX_STAFF_RECEIPTS) throw CheckoutAuthorityUnavailableException()
+                    repeat(receiptCount) {
+                        val op = data.readText(MAX_OPERATION_ID_BYTES)
+                        val kind = CheckoutAuthorityStaffOperationKind.entries.getOrNull(data.readUnsignedByte())
+                            ?: throw CheckoutAuthorityUnavailableException()
+                        val subject = data.readText(MAX_ACTOR_ID_BYTES)
+                        val base = data.readLong(); val result = data.readLong()
+                        val requestDigest = if (version >= 4) ByteArray(32).also(data::readFully) else ByteArray(32)
+                        val receipt = CheckoutAuthorityStaffOperationReceipt(op, kind, subject, base, result, requestDigest)
+                        validateStaffReceipt(receipt)
+                        if (receipts.any { it.operationId == op }) throw CheckoutAuthorityUnavailableException()
+                        receipts.add(receipt)
+                    }
+                }
+                if (receipts.any { it.resultGeneration > generation } ||
+                    receipts.zipWithNext().any { (previous, next) -> previous.resultGeneration >= next.resultGeneration }) {
+                    throw CheckoutAuthorityUnavailableException()
+                }
+                if (data.available() != 0) throw CheckoutAuthorityUnavailableException()
                 return AuthorityState(scope, generation, iterations, recoveryManagerId, actors, recoverySalt, recoveryVerifier,
-                    recoveryFailures, recoveryHold, recoveryBoot)
+                    recoveryFailures, recoveryHold, recoveryBoot, receipts)
             }
         } catch (e: CheckoutAuthorityUnavailableException) {
             throw e
@@ -967,11 +1135,45 @@ class CheckoutAuthority(
     private fun incrementGeneration(value: Long): Long = try { Math.addExact(value, 1) }
     catch (_: ArithmeticException) { throw CheckoutAuthorityUnavailableException() }
 
+    private fun staffReceipt(
+        operationId: String, kind: CheckoutAuthorityStaffOperationKind, subject: String,
+        baseGeneration: Long, resultGeneration: Long, requestDigest: ByteArray,
+    ): CheckoutAuthorityStaffOperationReceipt {
+        if (requestDigest.size != 32) throw CheckoutAuthorityUnavailableException()
+        return CheckoutAuthorityStaffOperationReceipt(operationId, kind, subject, baseGeneration, resultGeneration, requestDigest.copyOf())
+    }
+
+    private fun addStaffReceipt(
+        existing: List<CheckoutAuthorityStaffOperationReceipt>,
+        template: CheckoutAuthorityStaffOperationReceipt,
+        baseGeneration: Long,
+        resultGeneration: Long,
+    ): List<CheckoutAuthorityStaffOperationReceipt> {
+        if (existing.size >= MAX_STAFF_RECEIPTS || existing.any { it.operationId == template.operationId }) {
+            throw CheckoutAuthorityUnavailableException()
+        }
+        val receipt = template.copy(baseGeneration = baseGeneration, resultGeneration = resultGeneration)
+        validateStaffReceipt(receipt)
+        return existing + receipt
+    }
+
+    private fun validateStaffReceipt(receipt: CheckoutAuthorityStaffOperationReceipt) {
+        if (receipt.operationId.length !in 8..MAX_OPERATION_ID_BYTES ||
+            receipt.operationId.any { !(it in 'a'..'z' || it in 'A'..'Z' || it in '0'..'9' || it == '-' || it == '_') }) {
+            throw CheckoutAuthorityUnavailableException()
+        }
+        validateActorId(receipt.subjectActorId)
+        if (receipt.baseGeneration <= 0 || receipt.resultGeneration != incrementGeneration(receipt.baseGeneration) ||
+            receipt.requestDigest.size != 32) {
+            throw CheckoutAuthorityUnavailableException()
+        }
+    }
+
     override fun toString(): String = "CheckoutAuthority(redacted)"
 
     companion object {
         private const val MAGIC = 0x43415554 // CAUT
-        private const val VERSION = 2
+        private const val VERSION = 4
         private const val MAX_FILE_BYTES = 1024 * 1024
         private const val MAX_ACTORS = 500
         private const val SALT_BYTES = 16
@@ -983,6 +1185,8 @@ class CheckoutAuthority(
         private const val MAX_PIN_LENGTH = 12
         private const val MAX_SCOPE_ID_BYTES = 64
         private const val MAX_ACTOR_ID_BYTES = 80
+        private const val MAX_OPERATION_ID_BYTES = 128
+        private const val MAX_STAFF_RECEIPTS = 4096
         private const val MAX_DISPLAY_NAME_CHARS = 80
         private const val MAX_DISPLAY_NAME_BYTES = 256
         private const val MAX_BOOT_ID_BYTES = 128

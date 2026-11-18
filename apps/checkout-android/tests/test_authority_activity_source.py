@@ -87,6 +87,8 @@ class CheckoutAuthorityActivitySourceTest(unittest.TestCase):
         self.assertIn("changeRolePrepared", controller)
         self.assertIn("changePinPrepared", controller)
         self.assertIn("disableStaffPrepared", controller)
+        self.assertIn("reconcileStaffIntents(active, scope)", controller)
+        self.assertIn("authority().staffAdministration()", flow)
 
     def test_queued_staff_commands_are_dropped_after_lifecycle_generation_changes(self):
         flow = (ROOT / "src/android/AndroidCheckoutAuthorityFlow.kt").read_text()
@@ -98,6 +100,15 @@ class CheckoutAuthorityActivitySourceTest(unittest.TestCase):
         self.assertLess(guard, clear_secrets)
         self.assertLess(clear_secrets, command)
         self.assertIn("return@execute", worker[guard:command])
+
+    def test_staff_reconciliation_failure_blocks_staff_writes_without_locking_checkout(self):
+        controller = (ROOT / "src/model/CheckoutAuthorityController.kt").read_text()
+        for name in ("createStaffMember", "renameStaffMember", "changeStaffRole", "changeStaffPin", "disableStaffMember"):
+            section = self._function_section(controller, name)
+            self.assertLess(
+                section.index("catch (_: CheckoutAuthorityAuditReconciliationRequiredException)"),
+                section.index("catch (_: CheckoutAuthorityAuditUnavailableException)"),
+            )
 
     def test_cash_writes_use_the_opaque_session_bridge(self):
         activity = (ROOT / "src/android/CheckoutActivity.kt").read_text()
@@ -114,7 +125,6 @@ class CheckoutAuthorityActivitySourceTest(unittest.TestCase):
         activity = (ROOT / "src/android/CheckoutActivity.kt").read_text()
         inventory = (ROOT / "src/android/CheckoutInventoryController.kt").read_text()
         commands = (
-            (activity, "confirmSaleCreation", "SALE_CREATE", "executeAuthorized"),
             (activity, "showProductEditor", "CATALOG_MANAGE", "executeCapability"),
             (activity, "confirmArchiveProduct", "CATALOG_MANAGE", "executeCapability"),
             (inventory, "showConfirmation", "INVENTORY_MANAGE", "executeCapability"),
@@ -138,10 +148,81 @@ class CheckoutAuthorityActivitySourceTest(unittest.TestCase):
                     rf"CheckoutAuthorityCapability\s*\.\s*{re.escape(capability)}\b",
                 )
 
-        # Sale creation uses the shared wrapper; assert that it actually enters the
-        # authority worker rather than allowing the wrapper to become a bypass.
-        wrapper = self._function_section(activity, "executeAuthorized")
-        self.assertRegex(wrapper, r"authorityFlow\.executeCapability\s*\(\s*capability\s*,")
+    def test_sale_creation_uses_worker_session_and_atomic_ledger_command(self):
+        activity = (ROOT / "src/android/CheckoutActivity.kt").read_text()
+        flow = (ROOT / "src/android/AndroidCheckoutAuthorityFlow.kt").read_text()
+        ledger = (ROOT / "src/model/CheckoutLedger.kt").read_text()
+        create = self._function_section(activity, "confirmSaleCreation")
+        worker = self._function_section(flow, "executeSaleCreate")
+        self.assertIn("val saleId = UUID.randomUUID().toString()", create)
+        self.assertIn('val operationId = "sale-$saleId"', create)
+        self.assertIn("var createdAt: Long? = null", create)
+        self.assertIn("createdAt ?: nowSecs()", create)
+        self.assertIn("authorityFlow.executeSaleCreate(", create)
+        self.assertNotIn("ledger.createSale(", create)
+        self.assertIn("ledger.bindCommandAuthority(authority, scope)", worker)
+        self.assertIn("runCommand { session ->", worker)
+        self.assertIn("ledger.createSale(session, operationId, saleId", worker)
+        self.assertIn("ledger.createPricedSale(session, operationId, saleId", worker)
+        attributed = ledger.split("fun createSale(session:", 1)[1].split("/** Compatibility API", 1)[0]
+        self.assertIn("CheckoutAuthorityCapability.SALE_CREATE", attributed)
+        self.assertIn("replay = { getSale(saleId) }", attributed)
+        self.assertIn("state.commandEvents.add(CheckoutLedgerCommandEvent(", ledger)
+        self.assertIn("state.legacyHistoryUnattributed = true", ledger)
+        digest = ledger.split("private fun saleCommandDigest", 1)[1].split("private fun commandDigest", 1)[0]
+        self.assertIn('out.str("openbmt.checkout.ledger-command")', digest)
+        self.assertIn("out.writeInt(1)", digest)
+        self.assertIn('require(event.eventType == "sale.create")', ledger)
+        self.assertIn('error("system ledger command type is not implemented")', ledger)
+        self.assertIn("const val LEGACY_COMMAND_DIGEST_VERSION = 8", ledger)
+        self.assertIn("const val VERSION = 9", ledger)
+        self.assertIn("migratesV8SaleCommandDigestsWithoutChangingOnRead", (ROOT / "tests/CheckoutLedgerTest.kt").read_text())
+
+    def test_uncertain_sale_commit_blocks_checkout_until_reopen(self):
+        activity = (ROOT / "src/android/CheckoutActivity.kt").read_text()
+        create = self._function_section(activity, "confirmSaleCreation")
+        blocked = self._function_section(activity, "lockAfterUncertainSaleWrite")
+        self.assertIn("is CheckoutLedgerWriteUncertainException -> lockAfterUncertainSaleWrite()", create)
+        self.assertIn("stopCounterForAuthorityLock()", blocked)
+        self.assertIn("authorityFlow.lock()", blocked)
+        self.assertIn("The sale may have been saved", blocked)
+        self.assertIn("reopen the app to reload the ledger", blocked)
+        self.assertNotIn("showHomeWithError", blocked)
+        ledger = (ROOT / "src/model/CheckoutLedger.kt").read_text()
+        self.assertIn("class CheckoutLedgerWriteUncertainException", ledger)
+
+    def test_sale_creation_is_single_flight_through_dialog_and_worker(self):
+        activity = (ROOT / "src/android/CheckoutActivity.kt").read_text()
+        create = self._function_section(activity, "confirmSaleCreation")
+        self.assertIn("if (saleCreationInFlight) return", create)
+        self.assertLess(create.index("saleCreationInFlight = true"), create.index("val saleId = UUID.randomUUID()"))
+        self.assertIn("if (commandStarted) return@create", create)
+        self.assertIn("saleCreationInFlight = false", create)
+        uncertain = create.split("is CheckoutLedgerWriteUncertainException ->", 1)[1].split("else ->", 1)[0]
+        self.assertNotIn("saleCreationInFlight = false", uncertain)
+        self.assertIn("setOnCancelListener { if (!commandStarted) saleCreationInFlight = false }", create)
+        self.assertIn("saleCreationInFlight = false\n                if (followup.attempts.isEmpty())", create)
+
+    def test_sale_worker_distinguishes_pre_access_cancel_from_post_access_outcome(self):
+        flow = (ROOT / "src/android/AndroidCheckoutAuthorityFlow.kt").read_text()
+        activity = (ROOT / "src/android/CheckoutActivity.kt").read_text()
+        worker = self._function_section(flow, "executeSaleCreate")
+        pre_access = worker.split("if (generation.get() != ticket)", 1)[1].split("val error = try", 1)[0]
+        self.assertIn("worker has not touched the ledger", pre_access)
+        self.assertIn("completion(CheckoutAuthorityUnavailableException())", pre_access)
+        post_access = worker.split("val error = try", 1)[1].split("catch (_: java.util.concurrent.RejectedExecutionException)", 1)[0]
+        self.assertIn("saleOutcomeNeedsReopen = true", post_access)
+        self.assertIn("completion(error)", post_access)
+        self.assertNotIn("generation.get() != ticket) return@post", post_access)
+        self.assertIn("if (authorityFlow.isSignedIn()) showTenderChoice(saleId)",
+                      self._function_section(activity, "confirmSaleCreation"))
+        self.assertIn("if (authorityFlow.isSignedIn()) {\n                            showHomeWithError(",
+                      self._function_section(activity, "confirmSaleCreation"))
+        self.assertIn("if (saleOutcomeNeedsReopen) CheckoutAccessState.Unavailable()", flow)
+        self.assertIn("fun requiresSaleReopen(): Boolean = saleOutcomeNeedsReopen", flow)
+        on_state = self._function_section(activity, "onAuthorityState")
+        self.assertIn("authorityFlow.requiresSaleReopen()", on_state)
+        self.assertIn("lockAfterUncertainSaleWrite()", on_state)
 
     def test_report_reads_are_authorized_and_never_render_stale_data(self):
         controller = (ROOT / "src/android/CheckoutReportController.kt").read_text()

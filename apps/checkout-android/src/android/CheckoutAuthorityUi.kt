@@ -183,7 +183,7 @@ internal class CheckoutAuthorityUi(private val activity: Activity) {
         }
         column.addView(label("STAFF MANAGEMENT · TEST ONLY", 12f, true), margins(bottom = 8))
         column.addView(label("Manage staff access", 24f, true), margins(bottom = 10))
-        column.addView(label("Each staff write requires current manager authorization and records an audit intent before changing access. If the save outcome is uncertain, staff administration stays locked until the intent is reconciled. Policy changes require sign-in again.", 14f), margins(bottom = 12))
+        column.addView(label("Each staff write requires current manager authorization and records an audit intent before changing access. Opening this screen checks any pending intent against the durable authority receipt and saved staff state. If neither proves the outcome, staff changes stay blocked. Staff updates require sign-in again.", 14f), margins(bottom = 12))
         column.addView(label("The first manager is the recovery manager. The current authority model does not support changing that designation.", 13f), margins(bottom = 12))
         message?.let { column.addView(label(it, 14f, true), margins(bottom = 10)) }
 

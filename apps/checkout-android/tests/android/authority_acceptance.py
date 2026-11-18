@@ -211,10 +211,12 @@ class Device:
     def download_file_size(self, name: str) -> int | None:
         if not re.fullmatch(r"[a-zA-Z0-9._-]+", name):
             raise AcceptanceFailure("invalid test download name")
-        try:
-            raw = self.shell("stat", "-c", "%s", f"/sdcard/Download/{name}").strip()
-        except AcceptanceFailure:
+        # A successful directory listing distinguishes an absent name from an adb,
+        # permission, or stat failure. Only the former is a valid "no file" result.
+        names = self.shell("ls", "-1", "/sdcard/Download").splitlines()
+        if name not in names:
             return None
+        raw = self.shell("stat", "-c", "%s", f"/sdcard/Download/{name}").strip()
         if not raw.isdigit():
             raise AcceptanceFailure("test download size was unreadable")
         return int(raw)
@@ -321,6 +323,64 @@ class Suite:
         self.open_shop_tools()
         self.device.tap_text(r"^Reports · local ledger$", timeout=20)
         self.device.wait_text(r"^Sales report$", timeout=45)
+
+    def open_sales(self) -> None:
+        self.device.tap_text(r"^Sales and receipts$", timeout=25)
+        self.device.wait_text(r"^Sales and receipts$", timeout=30)
+
+    def assert_single_unpaid_manual_sale(self) -> None:
+        self.device.wait_text(r"^1 of 1 sales$", timeout=30)
+        self.device.wait_text(r"^1\.23 USD · Tender not selected$", timeout=15)
+        self.device.wait_text(r"^Manual amount$", timeout=15)
+
+    def attributed_sale_persistence(self) -> None:
+        self.open_sales()
+        if not self.device.has_text(r"^0 of 0 sales$"):
+            raise AcceptanceFailure("fresh paired checkout did not start with an empty sales list")
+        self.device.tap_text(r"^Back to checkout$")
+        self.wait_checkout_ready()
+        ledger_before = hashlib.sha256(self.device.app_file(LEDGER_FILE)).hexdigest()
+
+        self.open_shop_tools()
+        self.device.tap_text(r"^Manual amount$")
+        self.device.wait_text(r"^Manual amount$")
+        self.device.type_into_field("1.23")
+        self.device.shell("input", "keyevent", "KEYCODE_BACK")
+        self.device.tap_text(r"^Review amount · choose payment$")
+        self.device.wait_text(r"^Choose payment$", timeout=45)
+        # Viewing Sales from this screen leaves the sale's tender list empty.
+        self.open_sales()
+        self.assert_single_unpaid_manual_sale()
+        ledger_after_create = hashlib.sha256(self.device.app_file(LEDGER_FILE)).hexdigest()
+        if ledger_after_create == ledger_before:
+            raise AcceptanceFailure("manual sale did not change the durable ledger")
+
+        self.force_restart_to_signin()
+        self.sign_in(self.pin, expect_checkout=None)
+        self.device.wait_text(r"^Choose payment$", timeout=45)
+        self.open_sales()
+        self.assert_single_unpaid_manual_sale()
+        ledger_after_restart = hashlib.sha256(self.device.app_file(LEDGER_FILE)).hexdigest()
+        if ledger_after_restart != ledger_after_create:
+            raise AcceptanceFailure("durable ledger changed while reopening the unpaid sale")
+        say("PASS one attributed-path manual sale remains unpaid and durable after restart")
+
+        # Resolve the fixture sale before unrelated staff/report scenarios. The normal
+        # checkout preserves the sale and requires reopening its receipt explicitly.
+        self.device.tap_text(r"^Back to checkout$")
+        self.wait_checkout_ready()
+        self.open_sales()
+        self.device.tap_text(r"^Open receipt$")
+        self.device.wait_text(r"^Sale receipt$", timeout=30)
+        self.device.tap_text(r"^Choose payment$")
+        self.device.wait_text(r"^Choose payment$", timeout=30)
+        self.device.tap_text(r"^Cash$")
+        self.device.wait_text(r"^Cash received · USD$", timeout=20)
+        self.device.type_into_field("1.23")
+        self.device.tap_text(r"^Record cash received$")
+        self.device.wait_text(r"^Sale receipt$", timeout=30)
+        self.device.tap_text(r"^New sale$")
+        self.wait_checkout_ready()
 
     def sign_in(self, pin: str, expect_checkout: bool | None = True) -> None:
         self.device.wait_text(r"Sign in")
@@ -570,6 +630,7 @@ def main() -> int:
     device = Device(find_adb(), args.serial)
     suite = Suite(device, args.apk.resolve(), args.fixture.resolve(), args.include_expiry)
     suite.launch_fresh_enrollment()
+    suite.attributed_sale_persistence()
     suite.staff_policy_and_role_access()
     suite.process_recreation()
     suite.background_lock()

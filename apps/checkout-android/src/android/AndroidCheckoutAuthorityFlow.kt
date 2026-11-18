@@ -33,14 +33,17 @@ internal class AndroidCheckoutAuthorityFlow(
     }
     @Volatile private var publishedState: CheckoutAccessState = CheckoutAccessState.Loading
     @Volatile private var controller: CheckoutAuthorityController? = null
+    @Volatile private var saleOutcomeNeedsReopen = false
     private var authorityRecord: CheckoutAuthority? = null
     private var installationScopeStore: AndroidCheckoutInstallationScopeStore? = null
     private var installationDescriptor: CheckoutInstallationDescriptor? = null
     @Volatile private var closed = false
 
-    fun state(): CheckoutAccessState = publishedState
-    fun isSignedIn(): Boolean = publishedState is CheckoutAccessState.SignedIn
-    fun isManager(): Boolean = (publishedState as? CheckoutAccessState.SignedIn)?.actor?.role == CheckoutAuthorityRole.MANAGER
+    fun state(): CheckoutAccessState = if (saleOutcomeNeedsReopen) CheckoutAccessState.Unavailable() else publishedState
+    fun isSignedIn(): Boolean = !saleOutcomeNeedsReopen && publishedState is CheckoutAccessState.SignedIn
+    fun isManager(): Boolean = !saleOutcomeNeedsReopen &&
+        (publishedState as? CheckoutAccessState.SignedIn)?.actor?.role == CheckoutAuthorityRole.MANAGER
+    fun requiresSaleReopen(): Boolean = saleOutcomeNeedsReopen
 
     fun start() = refresh()
 
@@ -121,7 +124,7 @@ internal class AndroidCheckoutAuthorityFlow(
 
     fun loadStaffAdministration(completion: (CheckoutStaffAdministrationResult) -> Unit) =
         staffOperation(completion) {
-            CheckoutStaffAdministrationResult.Ready(authority().staffAdministration())
+            authority().staffAdministration()
         }
 
     fun createStaffMember(name: String, role: CheckoutAuthorityRole, pin: CharArray,
@@ -161,10 +164,15 @@ internal class AndroidCheckoutAuthorityFlow(
         operation: (CheckoutAuthoritySession) -> Unit,
         completion: (Exception?) -> Unit,
     ) {
+        if (saleOutcomeNeedsReopen) return completion(CheckoutAuthorityUnavailableException())
         if (closed) return completion(CheckoutAuthorityUnavailableException())
         val ticket = generation.get()
         executor.execute {
             if (closed || generation.get() != ticket) return@execute
+            if (saleOutcomeNeedsReopen) {
+                main.post { if (!closed) completion(CheckoutAuthorityUnavailableException()) }
+                return@execute
+            }
             val error = try {
                 checkNotNull(controller) { "Checkout authority is unavailable" }.runCommand(operation)
                 null
@@ -183,16 +191,83 @@ internal class AndroidCheckoutAuthorityFlow(
         }
     }
 
+    /** Create one sale without allowing its opaque authority session to cross this worker API. */
+    fun executeSaleCreate(
+        ledger: CheckoutLedger,
+        operationId: String,
+        saleId: String,
+        amountMinor: Long,
+        currency: String,
+        createdAt: Long,
+        items: List<SaleItem>,
+        pricing: CheckoutPricingSnapshot?,
+        completion: (Exception?) -> Unit,
+    ) {
+        if (saleOutcomeNeedsReopen) return completion(CheckoutAuthorityUnavailableException())
+        if (closed) return completion(CheckoutAuthorityUnavailableException())
+        val ticket = generation.get()
+        try {
+            executor.execute {
+                if (closed) return@execute
+                if (saleOutcomeNeedsReopen) {
+                    main.post { if (!closed) completion(CheckoutAuthorityUnavailableException()) }
+                    return@execute
+                }
+                if (generation.get() != ticket) {
+                    // The worker has not touched the ledger, so this cancellation is definitive.
+                    main.post { if (!closed) completion(CheckoutAuthorityUnavailableException()) }
+                    return@execute
+                }
+                val error = try {
+                    checkNotNull(controller) { "Checkout authority is unavailable" }.runCommand { session ->
+                        val authority = checkNotNull(authorityRecord) { "Checkout authority is unavailable" }
+                        val scope = checkNotNull(installationDescriptor) { "Checkout installation is unavailable" }.scope
+                        ledger.bindCommandAuthority(authority, scope)
+                        if (pricing != null) {
+                            ledger.createPricedSale(session, operationId, saleId, currency, createdAt, pricing)
+                        } else {
+                            ledger.createSale(session, operationId, saleId, amountMinor, currency, createdAt, items)
+                        }
+                    }
+                    null
+                } catch (failure: Exception) {
+                    failure
+                }
+                if (error is CheckoutLedgerWriteUncertainException) saleOutcomeNeedsReopen = true
+                val next = controller?.state() ?: CheckoutAccessState.Unavailable()
+                main.post {
+                    if (closed) return@post
+                    if (generation.get() == ticket && (saleOutcomeNeedsReopen || next !is CheckoutAccessState.SignedIn)) {
+                        main.removeCallbacks(expireSession)
+                        val effective = if (saleOutcomeNeedsReopen) CheckoutAccessState.Unavailable() else next
+                        publishedState = effective
+                        onState(effective)
+                    }
+                    // The operation may already have committed. Never discard a post-access outcome
+                    // because the UI generation changed while the serialized worker was running.
+                    completion(error)
+                }
+            }
+        } catch (_: java.util.concurrent.RejectedExecutionException) {
+            completion(CheckoutAuthorityUnavailableException())
+        }
+    }
+
     /** Authorize and serialize a non-cash command; attribution remains inside the worker. */
     fun executeCapability(
         capability: CheckoutAuthorityCapability,
         operation: () -> Unit,
         completion: (Exception?) -> Unit,
     ) {
+        if (saleOutcomeNeedsReopen) return completion(CheckoutAuthorityUnavailableException())
         if (closed) return completion(CheckoutAuthorityUnavailableException())
         val ticket = generation.get()
         executor.execute {
             if (closed || generation.get() != ticket) return@execute
+            if (saleOutcomeNeedsReopen) {
+                main.post { if (!closed) completion(CheckoutAuthorityUnavailableException()) }
+                return@execute
+            }
             val error = try {
                 checkNotNull(controller) { "Checkout authority is unavailable" }
                     .runAuthorizedCommand(capability) { operation() }
@@ -217,7 +292,7 @@ internal class AndroidCheckoutAuthorityFlow(
     fun lock() {
         if (closed) return
         val ticket = generation.incrementAndGet()
-        publish(CheckoutAccessState.Loading, ticket)
+        publish(if (saleOutcomeNeedsReopen) CheckoutAccessState.Unavailable() else CheckoutAccessState.Loading, ticket)
         executor.execute {
             val next = try {
                 controller?.lock() ?: CheckoutAccessState.Loading
@@ -245,9 +320,10 @@ internal class AndroidCheckoutAuthorityFlow(
     private fun enqueue(operation: () -> CheckoutAccessState) {
         if (closed) return
         val ticket = generation.incrementAndGet()
-        publish(CheckoutAccessState.Loading, ticket)
+        publish(if (saleOutcomeNeedsReopen) CheckoutAccessState.Unavailable() else CheckoutAccessState.Loading, ticket)
         executor.execute {
-            val next = try { operation() } catch (_: Exception) { CheckoutAccessState.Unavailable() }
+            val next = if (saleOutcomeNeedsReopen) CheckoutAccessState.Unavailable()
+                else try { operation() } catch (_: Exception) { CheckoutAccessState.Unavailable() }
             publish(next, ticket)
         }
     }
@@ -266,6 +342,13 @@ internal class AndroidCheckoutAuthorityFlow(
             executor.execute {
                 if (closed || generation.get() != ticket) {
                     secrets.forEach { it.fill('\u0000') }
+                    return@execute
+                }
+                if (saleOutcomeNeedsReopen) {
+                    secrets.forEach { it.fill('\u0000') }
+                    main.post {
+                        if (!closed) completion(CheckoutStaffAdministrationResult.Failed("Checkout authority is unavailable."))
+                    }
                     return@execute
                 }
                 val result = try { operation() } catch (_: Exception) {
@@ -291,14 +374,15 @@ internal class AndroidCheckoutAuthorityFlow(
 
     private fun publish(next: CheckoutAccessState, ticket: Long) {
         if (closed || generation.get() != ticket) return
-        publishedState = next
+        val effective = if (saleOutcomeNeedsReopen) CheckoutAccessState.Unavailable() else next
+        publishedState = effective
         main.post {
             if (!closed && generation.get() == ticket) {
                 main.removeCallbacks(expireSession)
-                if (next is CheckoutAccessState.SignedIn) {
+                if (effective is CheckoutAccessState.SignedIn) {
                     main.postDelayed(expireSession, SESSION_LIFETIME_MILLIS)
                 }
-                onState(next)
+                onState(effective)
             }
         }
     }
@@ -340,6 +424,7 @@ internal class AndroidCheckoutAuthorityFlow(
     }
 
     private fun refreshAccess(): CheckoutAccessState {
+        if (saleOutcomeNeedsReopen) return CheckoutAccessState.Unavailable()
         val activeController = authority()
         val scopeStore = checkNotNull(installationScopeStore)
         val descriptor = scopeStore.loadDescriptor()

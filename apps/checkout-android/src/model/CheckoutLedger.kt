@@ -210,16 +210,47 @@ private data class PendingLedgerCommand(
     val sourceObservedAt: Long?,
 )
 
+class CheckoutLedgerWriteUncertainException(cause: Throwable) :
+    IllegalStateException("ledger write outcome is uncertain; reopen before continuing", cause)
+
 class CheckoutLedger(
     private val storage: DurableLedgerStorage,
-    private val commandAuthority: CheckoutAuthority? = null,
-    private val commandScope: CheckoutAuthorityScope? = null,
+    initialCommandAuthority: CheckoutAuthority? = null,
+    initialCommandScope: CheckoutAuthorityScope? = null,
 ) {
     private val lock = Any()
     private var state: State = decode(storage.read())
     private var poisoned = false
     private var stableSaleCallbackActive = false
     private var activeCommand: PendingLedgerCommand? = null
+    private var commandAuthority: CheckoutAuthority? = initialCommandAuthority
+    private var commandScope: CheckoutAuthorityScope? = initialCommandScope
+
+    init {
+        if ((commandAuthority == null) != (commandScope == null)) throw CheckoutAuthorityUnavailableException()
+        commandScope?.let(::requireRecordedCommandScope)
+    }
+
+    /** Bind Android's already-open authority without exposing its opaque session to the UI. */
+    internal fun bindCommandAuthority(authority: CheckoutAuthority, scope: CheckoutAuthorityScope) = synchronized(lock) {
+        ensureHealthy()
+        val existingAuthority = commandAuthority
+        val existingScope = commandScope
+        if (existingAuthority == null && existingScope == null) {
+            requireRecordedCommandScope(scope)
+            commandAuthority = authority
+            commandScope = scope
+        } else if (existingAuthority !== authority || existingScope != scope) {
+            throw CheckoutAuthorityUnavailableException()
+        }
+    }
+
+    private fun requireRecordedCommandScope(scope: CheckoutAuthorityScope) {
+        if (state.commandEvents.any { event ->
+                event.origin == CheckoutLedgerEventOrigin.HUMAN &&
+                    (event.attribution == null || event.attribution.scope != scope)
+            }) throw CheckoutAuthorityUnavailableException()
+    }
 
     /** Explicitly commits the event epoch; legacy reads alone never rewrite their source file.
      * Restoring an older raw ledger file is not detectable here; callers must rotate the epoch
@@ -239,7 +270,7 @@ class CheckoutLedger(
             try { storage.writeAtomically(next) } catch (e: Throwable) {
                 poisoned = true
                 try { state = decode(storage.read()) } catch (_: Throwable) { }
-                throw IllegalStateException("ledger write outcome is uncertain; reopen before continuing", e)
+                throw CheckoutLedgerWriteUncertainException(e)
             }
         }
         eventSnapshotLocked()
@@ -554,6 +585,22 @@ class CheckoutLedger(
         items: List<SaleItem>,
         pricing: CheckoutPricingSnapshot?,
     ): ByteArray = commandDigest { out ->
+        out.str("openbmt.checkout.ledger-command"); out.writeInt(1); out.str("sale.create")
+        out.str(saleId); out.writeLong(amountMinor); out.str(currency); out.writeLong(createdAt)
+        out.writeInt(items.size)
+        items.forEach { out.str(it.productId); out.str(it.name); out.writeLong(it.unitMinor); out.writeInt(it.quantity) }
+        writePricing(out, pricing)
+    }
+
+    /** Digest used by the first v8 command writer; retained only for strict v8 migration. */
+    private fun saleCommandDigestV8(
+        saleId: String,
+        amountMinor: Long,
+        currency: String,
+        createdAt: Long,
+        items: List<SaleItem>,
+        pricing: CheckoutPricingSnapshot?,
+    ): ByteArray = commandDigest { out ->
         out.str("sale.create"); out.str(saleId); out.writeLong(amountMinor); out.str(currency); out.writeLong(createdAt)
         out.writeInt(items.size)
         items.forEach { out.str(it.productId); out.str(it.name); out.writeLong(it.unitMinor); out.writeInt(it.quantity) }
@@ -628,7 +675,7 @@ class CheckoutLedger(
         try { storage.writeAtomically(next) } catch (e: Throwable) {
             poisoned = true
             try { state = decode(storage.read()) } catch (_: Throwable) { }
-            throw IllegalStateException("ledger write outcome is uncertain; reopen before continuing", e)
+            throw CheckoutLedgerWriteUncertainException(e)
         }
         result
     }
@@ -913,9 +960,16 @@ class CheckoutLedger(
         }
     }
 
-    private fun validateCommandEvents(s: State) {
+    private fun validateCommandEvents(s: State, ledgerVersion: Int) {
         require(s.commandEvents.size <= MAX_COMMAND_EVENTS)
+        require(s.commandEvents.asSequence()
+            .filter { it.origin == CheckoutLedgerEventOrigin.HUMAN }
+            .mapNotNull { it.attribution?.scope }
+            .distinct()
+            .take(2)
+            .count() <= 1) { "ledger command events cross installation scopes" }
         val byOperation = HashMap<String, CheckoutLedgerCommandEvent>()
+        val saleCreationTargets = HashSet<String>()
         s.commandEvents.forEachIndexed { index, event ->
             validId(event.operationId, "command operation id"); validText(event.eventType, "command event type")
             validId(event.targetIdentity, "command target"); validId(event.commitIdentity, "command commit identity")
@@ -925,25 +979,39 @@ class CheckoutLedger(
                 CheckoutLedgerEventOrigin.HUMAN -> {
                     val actor = event.attribution ?: error("human command lacks attribution")
                     require(event.sourceIdentity == null && event.linkedOperationId == null && event.sourceObservedAt == null)
-                    require(actor.actorId.isNotBlank() && actor.displayNameAtEvent.isNotBlank() && actor.policyGeneration >= 0 && actor.eventTimeMillis >= 0)
+                    require(actor.actorId.isNotBlank() && actor.displayNameAtEvent.isNotBlank() && actor.policyGeneration > 0 && actor.eventTimeMillis >= 0)
                     require(CheckoutAuthorityCapability.fromId(actor.capabilityId) != null)
                     require(actor.eventTimeMillis == event.recordedAtMillis)
-                    val expected = when (event.eventType) {
-                        "sale.create" -> CheckoutAuthorityCapability.SALE_CREATE
-                        "tender.bitcoin.begin", "tender.card.begin", "tender.cash.record", "tender.cancel.request" -> CheckoutAuthorityCapability.TENDER_BEGIN
-                        "refund.request" -> CheckoutAuthorityCapability.REFUND_REQUEST
-                        else -> error("unknown human ledger event type")
+                    require(event.eventType == "sale.create") { "unsupported human ledger event type" }
+                    require(actor.capabilityId == CheckoutAuthorityCapability.SALE_CREATE.id) {
+                        "command capability does not match event type"
                     }
-                    require(actor.capabilityId == expected.id) { "command capability does not match event type" }
+                    val sale = s.sales[event.targetIdentity] ?: error("sale command target is missing")
+                    require(saleCreationTargets.add(event.targetIdentity)) { "sale has duplicate create commands" }
+                    require(event.commitIdentity == "${event.targetIdentity}@0" || event.commitIdentity == "${event.targetIdentity}@1") {
+                        "sale command commit identity is invalid"
+                    }
+                    val expectedDigest = if (ledgerVersion == LEGACY_COMMAND_DIGEST_VERSION) {
+                        saleCommandDigestV8(sale.id, sale.amountMinor, sale.currency, sale.createdAt, sale.items, sale.pricing)
+                    } else {
+                        saleCommandDigest(sale.id, sale.amountMinor, sale.currency, sale.createdAt, sale.items, sale.pricing)
+                    }
+                    val digestMatches = MessageDigest.isEqual(event.payloadDigest, expectedDigest)
+                    expectedDigest.fill(0)
+                    require(digestMatches) { "sale command digest does not match persisted sale" }
+                    if (ledgerVersion == LEGACY_COMMAND_DIGEST_VERSION) {
+                        val migratedDigest = saleCommandDigest(sale.id, sale.amountMinor, sale.currency, sale.createdAt,
+                            sale.items, sale.pricing)
+                        s.commandEvents[index] = event.copy(payloadDigest = migratedDigest)
+                    }
                 }
                 CheckoutLedgerEventOrigin.SYSTEM -> {
-                    require(event.attribution == null && event.sourceIdentity != null && event.sourceObservedAt != null && event.sourceObservedAt >= 0)
-                    validId(event.sourceIdentity, "system event source")
-                    event.linkedOperationId?.let { linked ->
-                        require(byOperation[linked]?.origin == CheckoutLedgerEventOrigin.HUMAN) { "system event link is not a human command" }
-                    }
+                    error("system ledger command type is not implemented")
                 }
             }
+        }
+        if (!s.legacyHistoryUnattributed) {
+            require(saleCreationTargets == s.sales.keys) { "ledger has a sale without exactly one create command" }
         }
     }
 
@@ -1137,7 +1205,7 @@ class CheckoutLedger(
                         state.commandEvents.add(CheckoutLedgerCommandEvent(sequence, operationId, eventType, origin,
                             attribution, target, digest, linked, source, sourceAt, recordedAt, commit))
                     }
-                    validateCommandEvents(state)
+                    validateCommandEvents(state, version)
                 } else {
                     state.legacyHistoryUnattributed = state.sales.isNotEmpty()
                 }
@@ -1181,7 +1249,8 @@ class CheckoutLedger(
         const val EVENT_VERSION = 6
         const val PRICING_SNAPSHOT_VERSION = 7
         const val COMMAND_EVENT_VERSION = 8
-        const val VERSION = 8
+        const val LEGACY_COMMAND_DIGEST_VERSION = 8
+        const val VERSION = 9
         const val COMMAND_DIGEST_BYTES = 32
         const val MAX_COMMAND_EVENTS = 5_000
         const val MAX_TEXT_BYTES = 1024

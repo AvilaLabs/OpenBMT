@@ -2,6 +2,7 @@ package org.openbmt.checkout
 
 import java.io.ByteArrayOutputStream
 import java.io.DataOutputStream
+import java.security.MessageDigest
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
@@ -19,6 +20,8 @@ object CheckoutLedgerTest {
         immutableBasketAndLegacyMigration()
         pricedSaleRoundTripAndV6Upgrade()
         authenticatedSaleCommandIsAtomicAndIdempotent()
+        strictSaleCommandDecodeRejectsCorruption()
+        migratesV8SaleCommandDigestsWithoutChangingOnRead()
         stableSaleSerializesLocalCommit()
         cashAcknowledgmentAndMigration()
         duplicateAndCorruptStorage()
@@ -371,7 +374,9 @@ object CheckoutLedgerTest {
         val manager = authority.bootstrapManager(draft, scope, "Ledger Manager", "123456".toCharArray())
         val session = authority.authenticate(manager.managerActorId, "123456".toCharArray(), scope)
         val storage = MemoryStorage()
-        var ledger = CheckoutLedger(storage, authority, scope)
+        var ledger = CheckoutLedger(storage)
+        ledger.bindCommandAuthority(authority, scope)
+        check(runCatching { ledger.bindCommandAuthority(authority, scope.copy(registerId = "other-register")) }.isFailure)
         val items = listOf(SaleItem("tea", "Tea", 225, 2))
         val saved = ledger.createSale(session, "sale-op-1", "sale-authenticated", 450, "USD", 50, items)
         check(saved.items == items)
@@ -383,6 +388,15 @@ object CheckoutLedgerTest {
         check(command.attribution.scope == scope && command.attribution.policyGeneration > 0)
         check(command.payloadDigest.size == 32 && command.commitIdentity == "sale-authenticated@0")
         check(!ledger.eventSnapshot().legacyHistoryUnattributed)
+        val mismatchedScopeLedger = CheckoutLedger(storage)
+        check(runCatching {
+            mismatchedScopeLedger.bindCommandAuthority(authority, scope.copy(storeId = "other-store"))
+        }.isFailure)
+
+        val initializedLedger = CheckoutLedger(MemoryStorage(), authority, scope)
+        initializedLedger.initializeEvents()
+        initializedLedger.createSale(session, "sale-op-initialized", "sale-initialized", 25, "USD", 52)
+        check(initializedLedger.commandEvents().single().commitIdentity == "sale-initialized@1")
 
         ledger = CheckoutLedger(storage, authority, scope)
         check(ledger.createSale(session, "sale-op-1", "sale-authenticated", 450, "USD", 50, items) == saved)
@@ -393,13 +407,45 @@ object CheckoutLedgerTest {
         }.isFailure)
         check(storage.bytes!!.contentEquals(committedBytes))
 
+        val staleStorage = MemoryStorage()
+        val staleLedger = CheckoutLedger(staleStorage, authority, scope)
+        authority.lock()
+        check(runCatching {
+            staleLedger.createSale(session, "sale-op-stale", "sale-stale", 100, "USD", 50)
+        }.isFailure)
+        check(staleLedger.commandEvents().isEmpty() && staleLedger.listSales().isEmpty())
+        val recoveredSession = authority.authenticate(manager.managerActorId, "123456".toCharArray(), scope)
+
         val uncertainStorage = MemoryStorage().also { it.failNextWrite = true }
         val first = CheckoutLedger(uncertainStorage, authority, scope)
-        check(runCatching { first.createSale(session, "sale-op-uncertain", "sale-uncertain", 100, "USD", 51) }.isFailure)
+        val uncertain = runCatching {
+            first.createSale(recoveredSession, "sale-op-uncertain", "sale-uncertain", 100, "USD", 51)
+        }.exceptionOrNull()
+        check(uncertain is CheckoutLedgerWriteUncertainException)
         check(runCatching { first.getSale("sale-uncertain") }.isFailure)
         val recovered = CheckoutLedger(uncertainStorage, authority, scope)
-        check(recovered.createSale(session, "sale-op-uncertain", "sale-uncertain", 100, "USD", 51).saleId == "sale-uncertain")
+        check(recovered.getSale("sale-uncertain").saleId == "sale-uncertain") // committed despite callback loss
         check(recovered.commandEvents().single().operationId == "sale-op-uncertain")
+        check(recovered.createSale(recoveredSession, "sale-op-uncertain", "sale-uncertain", 100, "USD", 51).saleId == "sale-uncertain")
+        check(recovered.commandEvents().single().operationId == "sale-op-uncertain")
+        check(runCatching {
+            recovered.createSale(recoveredSession, "sale-op-uncertain", "sale-uncertain", 101, "USD", 51)
+        }.isFailure)
+
+        val beforeWrite = object : DurableLedgerStorage {
+            private var bytes: ByteArray? = null
+            override fun read(): ByteArray? = bytes?.copyOf()
+            override fun writeAtomically(bytes: ByteArray) {
+                check(bytes.isNotEmpty())
+                error("simulated pre-write failure")
+            }
+        }
+        val prewriteLedger = CheckoutLedger(beforeWrite, authority, scope)
+        check(runCatching {
+            prewriteLedger.createSale(recoveredSession, "sale-op-prewrite", "sale-prewrite", 100, "USD", 52)
+        }.exceptionOrNull() is CheckoutLedgerWriteUncertainException)
+        val prewriteReopened = CheckoutLedger(beforeWrite, authority, scope)
+        check(prewriteReopened.listSales().isEmpty() && prewriteReopened.commandEvents().isEmpty())
 
         val legacyV7Storage = MemoryStorage().also { it.bytes = legacyV7WithCash() }
         val originalV7 = legacyV7Storage.bytes!!.copyOf()
@@ -413,6 +459,154 @@ object CheckoutLedgerTest {
         check(migratedV7.getSale("legacy-v7-followup").saleId == "legacy-v7-followup")
         check(migratedV7.eventSnapshot().legacyHistoryUnattributed)
         check(migratedV7.commandEvents().isEmpty()) // no actor is inferred for v7 or compatibility writes
+    }
+
+    private fun strictSaleCommandDecodeRejectsCorruption() {
+        val valid = twoSaleCommandLedgerBytes()
+        fun rejected(bytes: ByteArray) = check(runCatching {
+            CheckoutLedger(MemoryStorage().also { it.bytes = bytes })
+        }.isFailure)
+
+        val unsupportedType = valid.copyOf()
+        replaceEncodedString(unsupportedType, "sale.create", "sale.broken")
+        rejected(unsupportedType)
+
+        val systemEvent = valid.copyOf()
+        val firstOffsets = commandOffsets(systemEvent, "sale-op-1")
+        writeInt(systemEvent, firstOffsets.origin, CheckoutLedgerEventOrigin.SYSTEM.ordinal)
+        rejected(systemEvent)
+
+        val missingTarget = valid.copyOf()
+        val targetOffset = commandOffsets(missingTarget, "sale-op-1").target
+        replaceEncodedStringAt(missingTarget, targetOffset, "sale-xxx")
+        rejected(missingTarget)
+
+        val badDigest = valid.copyOf()
+        badDigest[commandOffsets(badDigest, "sale-op-1").digest] = (badDigest[commandOffsets(badDigest, "sale-op-1").digest].toInt() xor 1).toByte()
+        rejected(badDigest)
+
+        val duplicateOperation = valid.copyOf()
+        replaceEncodedStringAt(duplicateOperation, findEncodedString(duplicateOperation, "sale-op-2"), "sale-op-1")
+        rejected(duplicateOperation)
+
+        val crossScope = valid.copyOf()
+        val storeScope = encodeString("store-ledger")
+        val firstStore = findBytes(crossScope, storeScope, 0)
+        val secondStore = findBytes(crossScope, storeScope, firstStore + storeScope.size)
+        val replacement = "store-fraud1".toByteArray(Charsets.UTF_8)
+        check(replacement.size == storeScope.size - Int.SIZE_BYTES)
+        replacement.copyInto(crossScope, secondStore + 4)
+        rejected(crossScope)
+    }
+
+    private fun migratesV8SaleCommandDigestsWithoutChangingOnRead() {
+        val v8Bytes = twoSaleCommandLedgerBytes()
+        writeInt(v8Bytes, 4, 8)
+        listOf(
+            Triple("sale-op-1", "sale-one", 100L),
+            Triple("sale-op-2", "sale-two", 200L),
+        ).forEach { (operationId, saleId, amount) ->
+            legacySaleDigest(saleId, amount, "USD", if (saleId == "sale-one") 50L else 51L)
+                .copyInto(v8Bytes, commandOffsets(v8Bytes, operationId).digest)
+        }
+        val original = v8Bytes.copyOf()
+        val storage = MemoryStorage().also { it.bytes = v8Bytes }
+        val reopened = CheckoutLedger(storage)
+        check(reopened.listSales().map { it.saleId } == listOf("sale-one", "sale-two"))
+        check(reopened.commandEvents().map { it.operationId } == listOf("sale-op-1", "sale-op-2"))
+        check(storage.bytes!!.contentEquals(original)) // v8 read is read-only
+
+        val scope = CheckoutAuthorityScope("merchant-ledger", "store-ledger", "location-ledger", "register-ledger", "device-ledger")
+        val authority = CheckoutAuthority(LedgerAuthorityStorage(), LedgerAuthorityClock(), defaultIterations = 1_000)
+        val manager = authority.bootstrapManager(authority.prepareBootstrap(), scope, "Ledger Manager", "123456".toCharArray())
+        val session = authority.authenticate(manager.managerActorId, "123456".toCharArray(), scope)
+        reopened.bindCommandAuthority(authority, scope)
+        reopened.createSale(session, "sale-op-3", "sale-three", 300, "USD", 52)
+        check(readInt(checkNotNull(storage.bytes), 4) == 9)
+        val migrated = CheckoutLedger(storage)
+        check(migrated.commandEvents().map { it.operationId } == listOf("sale-op-1", "sale-op-2", "sale-op-3"))
+        check(migrated.listSales().map { it.saleId } == listOf("sale-one", "sale-two", "sale-three"))
+    }
+
+    private fun twoSaleCommandLedgerBytes(): ByteArray {
+        val scope = CheckoutAuthorityScope("merchant-ledger", "store-ledger", "location-ledger", "register-ledger", "device-ledger")
+        val authority = CheckoutAuthority(LedgerAuthorityStorage(), LedgerAuthorityClock(), defaultIterations = 1_000)
+        val manager = authority.bootstrapManager(authority.prepareBootstrap(), scope, "Ledger Manager", "123456".toCharArray())
+        val session = authority.authenticate(manager.managerActorId, "123456".toCharArray(), scope)
+        val storage = MemoryStorage()
+        val ledger = CheckoutLedger(storage, authority, scope)
+        ledger.createSale(session, "sale-op-1", "sale-one", 100, "USD", 50)
+        ledger.createSale(session, "sale-op-2", "sale-two", 200, "USD", 51)
+        return checkNotNull(storage.bytes).copyOf()
+    }
+
+    private fun legacySaleDigest(saleId: String, amount: Long, currency: String, createdAt: Long): ByteArray {
+        val bytes = ByteArrayOutputStream().also { buffer ->
+            DataOutputStream(buffer).use { out ->
+                writeString(out, "sale.create"); writeString(out, saleId); out.writeLong(amount)
+                writeString(out, currency); out.writeLong(createdAt); out.writeInt(0); out.writeBoolean(false)
+            }
+        }.toByteArray()
+        return MessageDigest.getInstance("SHA-256").digest(bytes)
+    }
+
+    private data class CommandOffsets(val origin: Int, val target: Int, val digest: Int)
+
+    private fun commandOffsets(bytes: ByteArray, operationId: String): CommandOffsets {
+        var cursor = findEncodedString(bytes, operationId) + encodeString(operationId).size
+        cursor = skipEncodedString(bytes, cursor) // event type
+        val originOffset = cursor
+        cursor += 4
+        check(bytes[cursor].toInt() == 1)
+        cursor++ // actor attribution present
+        cursor = skipEncodedString(bytes, cursor) // actor ID
+        cursor = skipEncodedString(bytes, cursor) // display name
+        cursor += 4 // role
+        cursor = skipEncodedString(bytes, cursor) // capability
+        cursor += 8 // policy generation
+        repeat(5) { cursor = skipEncodedString(bytes, cursor) } // exact scope
+        cursor += 8 // actor event time
+        val targetOffset = cursor
+        cursor = skipEncodedString(bytes, cursor)
+        check(readInt(bytes, cursor) == 32)
+        return CommandOffsets(originOffset, targetOffset, cursor + 4)
+    }
+
+    private fun skipEncodedString(bytes: ByteArray, offset: Int): Int = offset + 4 + readInt(bytes, offset)
+
+    private fun findEncodedString(bytes: ByteArray, value: String): Int = findBytes(bytes, encodeString(value), 0)
+
+    private fun replaceEncodedString(bytes: ByteArray, old: String, replacement: String) {
+        require(old.toByteArray(Charsets.UTF_8).size == replacement.toByteArray(Charsets.UTF_8).size)
+        replaceEncodedStringAt(bytes, findEncodedString(bytes, old), replacement)
+    }
+
+    private fun replaceEncodedStringAt(bytes: ByteArray, offset: Int, replacement: String) {
+        val encoded = encodeString(replacement)
+        require(readInt(bytes, offset) == encoded.size - 4)
+        encoded.copyInto(bytes, offset)
+    }
+
+    private fun encodeString(value: String): ByteArray {
+        val text = value.toByteArray(Charsets.UTF_8)
+        return byteArrayOf((text.size ushr 24).toByte(), (text.size ushr 16).toByte(),
+            (text.size ushr 8).toByte(), text.size.toByte()) + text
+    }
+
+    private fun readInt(bytes: ByteArray, offset: Int): Int =
+        ((bytes[offset].toInt() and 0xff) shl 24) or ((bytes[offset + 1].toInt() and 0xff) shl 16) or
+            ((bytes[offset + 2].toInt() and 0xff) shl 8) or (bytes[offset + 3].toInt() and 0xff)
+
+    private fun writeInt(bytes: ByteArray, offset: Int, value: Int) {
+        bytes[offset] = (value ushr 24).toByte(); bytes[offset + 1] = (value ushr 16).toByte()
+        bytes[offset + 2] = (value ushr 8).toByte(); bytes[offset + 3] = value.toByte()
+    }
+
+    private fun findBytes(bytes: ByteArray, needle: ByteArray, fromIndex: Int): Int {
+        val index = (fromIndex..bytes.size - needle.size).firstOrNull { start ->
+            needle.indices.all { bytes[start + it] == needle[it] }
+        }
+        return checkNotNull(index) { "encoded test value was not found" }
     }
 
     /** v6 uninitialized event ledger with one cash-only manual sale. */

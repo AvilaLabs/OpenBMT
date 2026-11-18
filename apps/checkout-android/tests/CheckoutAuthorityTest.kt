@@ -111,7 +111,11 @@ object CheckoutAuthorityTest {
         val cashierSession = authority.authenticate(cashier.actorId, chars("234567"), SCOPE)
         val before = authority.authorize(cashierSession, CheckoutAuthorityCapability.SALES_READ, SCOPE)
         authority.renameStaff(manager, SCOPE, cashier.actorId, "After Rename")
-        val after = authority.authorize(cashierSession, CheckoutAuthorityCapability.SALES_READ, SCOPE)
+        expectDenied { authority.authorize(cashierSession, CheckoutAuthorityCapability.SALES_READ, SCOPE) }
+        val after = authority.authorize(
+            authority.authenticate(cashier.actorId, chars("234567"), SCOPE),
+            CheckoutAuthorityCapability.SALES_READ, SCOPE,
+        )
         check(before.actorId == after.actorId && before.actorId == cashier.actorId)
         check(before.displayNameAtEvent == "Before Rename" && after.displayNameAtEvent == "After Rename")
     }

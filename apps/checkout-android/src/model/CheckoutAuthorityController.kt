@@ -285,16 +285,27 @@ class CheckoutAuthorityController(
     }
 
     /** Read the complete staff directory only after a fresh manager capability check. */
-    fun staffAdministration(): CheckoutStaffAdministrationSnapshot = synchronized(monitor) {
-        val active = managerSession()
+    fun staffAdministration(): CheckoutStaffAdministrationResult = synchronized(monitor) {
         try {
-            CheckoutStaffAdministrationSnapshot(authority.listStaff(active, scope))
-        } catch (error: CheckoutAuthorityDeniedException) {
-            requireSignIn()
-            throw error
+            val active = managerSession()
+            val reconciled = checkNotNull(auditCommands) { "Audited staff administration is unavailable" }
+                .reconcileStaffIntents(active, scope)
+            CheckoutStaffAdministrationResult.Ready(CheckoutStaffAdministrationSnapshot(
+                authority.listStaff(active, scope),
+                if (reconciled > 0) "A previous staff operation was reconciled against its durable outcome." else null,
+            ))
+        } catch (_: CheckoutAuthorityAuditReconciliationRequiredException) {
+            CheckoutStaffAdministrationResult.Failed(
+                "A previous staff operation could not be proven safe to close. Staff changes remain blocked.",
+            )
+        } catch (_: CheckoutAuthorityAuditUnavailableException) {
+            failClosed()
+            CheckoutStaffAdministrationResult.Failed("Staff audit storage is unavailable. Staff changes remain blocked.")
+        } catch (_: CheckoutAuthorityDeniedException) {
+            CheckoutStaffAdministrationResult.Failed("Manager access is required to view staff administration.")
         } catch (error: CheckoutAuthorityUnavailableException) {
             failClosed()
-            throw error
+            CheckoutStaffAdministrationResult.Failed("Staff access storage is unavailable.")
         }
     }
 
@@ -311,6 +322,8 @@ class CheckoutAuthorityController(
             CheckoutStaffAdministrationResult.Ready(CheckoutStaffAdministrationSnapshot(emptyList(), "Staff member created."))
         } catch (_: CheckoutAuthorityDeniedException) {
             CheckoutStaffAdministrationResult.Failed("Staff change was rejected. Check the details and PIN, then try again.")
+        } catch (_: CheckoutAuthorityAuditReconciliationRequiredException) {
+            CheckoutStaffAdministrationResult.Failed("A previous staff change is unresolved. Reopen staff administration to reconcile it; no new change was applied.")
         } catch (_: CheckoutAuthorityAuditUnavailableException) {
             failClosed()
             CheckoutStaffAdministrationResult.Failed("Staff audit storage is unavailable. No further staff changes can be made in this session.")
@@ -329,9 +342,12 @@ class CheckoutAuthorityController(
             val active = managerSession()
             checkNotNull(auditCommands) { "Audited staff administration is unavailable" }
                 .renameStaffPrepared(newOperationId(), active, scope, actorId, displayName)
-            refreshManagerSnapshot("Staff name updated.")
+            invalidateAfterPolicyChange("Staff name updated. Sign in again to continue.")
+            CheckoutStaffAdministrationResult.Ready(CheckoutStaffAdministrationSnapshot(emptyList(), "Staff name updated."))
         } catch (_: CheckoutAuthorityDeniedException) {
             CheckoutStaffAdministrationResult.Failed("Name change was rejected. Check staff status and try again.")
+        } catch (_: CheckoutAuthorityAuditReconciliationRequiredException) {
+            CheckoutStaffAdministrationResult.Failed("A previous staff change is unresolved. Reopen staff administration to reconcile it; no new change was applied.")
         } catch (_: CheckoutAuthorityAuditUnavailableException) {
             failClosed()
             CheckoutStaffAdministrationResult.Failed("Staff audit storage is unavailable. No further staff changes can be made in this session.")
@@ -352,6 +368,8 @@ class CheckoutAuthorityController(
             CheckoutStaffAdministrationResult.Ready(CheckoutStaffAdministrationSnapshot(emptyList(), "Staff role updated."))
         } catch (_: CheckoutAuthorityDeniedException) {
             CheckoutStaffAdministrationResult.Failed("Role change was rejected. Keep an active recovery manager enabled.")
+        } catch (_: CheckoutAuthorityAuditReconciliationRequiredException) {
+            CheckoutStaffAdministrationResult.Failed("A previous staff change is unresolved. Reopen staff administration to reconcile it; no new change was applied.")
         } catch (_: CheckoutAuthorityAuditUnavailableException) {
             failClosed()
             CheckoutStaffAdministrationResult.Failed("Staff audit storage is unavailable. No further staff changes can be made in this session.")
@@ -372,6 +390,8 @@ class CheckoutAuthorityController(
             CheckoutStaffAdministrationResult.Ready(CheckoutStaffAdministrationSnapshot(emptyList(), "PIN updated."))
         } catch (_: CheckoutAuthorityDeniedException) {
             CheckoutStaffAdministrationResult.Failed("PIN change was rejected. Check the PIN and try again.")
+        } catch (_: CheckoutAuthorityAuditReconciliationRequiredException) {
+            CheckoutStaffAdministrationResult.Failed("A previous staff change is unresolved. Reopen staff administration to reconcile it; no new change was applied.")
         } catch (_: CheckoutAuthorityAuditUnavailableException) {
             failClosed()
             CheckoutStaffAdministrationResult.Failed("Staff audit storage is unavailable. No further staff changes can be made in this session.")
@@ -394,6 +414,8 @@ class CheckoutAuthorityController(
             CheckoutStaffAdministrationResult.Ready(CheckoutStaffAdministrationSnapshot(emptyList(), "Staff access disabled."))
         } catch (_: CheckoutAuthorityDeniedException) {
             CheckoutStaffAdministrationResult.Failed("Staff access could not be disabled. Keep an active recovery manager enabled.")
+        } catch (_: CheckoutAuthorityAuditReconciliationRequiredException) {
+            CheckoutStaffAdministrationResult.Failed("A previous staff change is unresolved. Reopen staff administration to reconcile it; no new change was applied.")
         } catch (_: CheckoutAuthorityAuditUnavailableException) {
             failClosed()
             CheckoutStaffAdministrationResult.Failed("Staff audit storage is unavailable. No further staff changes can be made in this session.")
@@ -501,15 +523,6 @@ class CheckoutAuthorityController(
         } else {
             state = CheckoutAccessState.SignInRequired(profile.enabledStaff, message)
         }
-    }
-
-    private fun refreshManagerSnapshot(message: String): CheckoutStaffAdministrationResult {
-        val active = managerSession()
-        val attribution = authority.authorize(active, CheckoutAuthorityCapability.SALES_READ, scope)
-        state = CheckoutAccessState.SignedIn(attribution)
-        return CheckoutStaffAdministrationResult.Ready(
-            CheckoutStaffAdministrationSnapshot(authority.listStaff(active, scope), message),
-        )
     }
 
     private fun newOperationId(): String = UUID.randomUUID().toString()

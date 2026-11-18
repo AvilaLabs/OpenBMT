@@ -25,10 +25,25 @@ full production five-minute session-expiry wait, add `--include-expiry`.
 Android SDK platform-tools must be on `PATH`, or `ANDROID_SDK_ROOT` must point
 to the SDK. The emulator must be booted and unlocked before starting.
 
+The host-side file-inspection helper has isolated Python unit coverage; run it
+without an emulator with:
+
+```sh
+python3 -m unittest discover -s apps/checkout-android/tests/android -p 'test_*.py'
+```
+
 ## Covered flows
 
 - First-manager enrollment with exact recovery-code acknowledgement, manager
   sign-in, and debug-fixture wallet pairing through the authorized import path.
+- One manual $1.23 sale created through the normal worker path, with no tender
+  started; the sales list must show exactly one unpaid sale before and after
+  process restart. After restart, the app must resume at `Choose payment` before
+  the harness opens Sales; the ledger hash must remain stable across that restart.
+  The runner does not decode or print the actor-bearing ledger contents; exact
+  attribution is checked by the source contract and Kotlin ledger tests. The
+  fixture sale is then settled as cash so its correct resume flow does not hide
+  the normal checkout tools used by the remaining scenarios.
 - Manager creates a cashier, verifies the policy change requires manager
   reauthentication, changes the manager PIN and verifies another reauthentication,
   then signs in as cashier and checks that Staff, Reports, Catalog management,

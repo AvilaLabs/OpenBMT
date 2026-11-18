@@ -70,29 +70,35 @@ store, authenticated installation descriptor, first-manager enrollment,
 staff PIN sign-in, manager recovery, five-minute expiry and lifecycle lock.
 Managers can administer local staff through the app; each staff mutation first
 persists an intent in a separate Keystore-sealed authority audit journal. An
-uncertain intent blocks further staff changes. Automatic reconciliation of
-such an intent is not implemented yet, so this path fails closed after that
-rare storage fault.
+uncertain intent is checked when a manager opens staff administration. The
+resolver closes it only from a matching same-transaction authority receipt or
+an exact unchanged pre-state; ambiguous outcomes remain blocked. PIN material
+is not included in the audit request digest.
 Current merchant-started sale, tender, refund, catalog, inventory and report
 commands pass exact capability checks. Cash-session v4 records persist actor
 and scope attribution; v1-v3 labels remain explicitly legacy/unverified.
-Ledger v8 now has same-file command events for an opaque-session-authorized
-sale-creation path. A safe typed writer for provider/native observations is
-deliberately deferred. Existing Android checkout callers still use
-compatibility methods, which are explicitly marked unattributed;
-catalog and inventory stores also remain unattributed. The generic business
+Ledger v9 now has domain-tagged same-file command events for an
+opaque-session-authorized sale-creation path, and the Android checkout now uses
+that path for new manual sales. A safe typed writer for provider/native
+observations is deliberately
+deferred. Existing Ledger v8 command records are verified with their original
+digest and migrate on the next write. Android tender and refund mutations still
+use compatibility methods, which are explicitly marked unattributed; catalog
+and inventory stores also remain unattributed. The generic business
 prepare/reconcile journal is model-only and does not make separate store files
 atomic. Staff audit intent and authority mutation are likewise separate files,
 so the implementation makes no cross-file atomicity claim.
 
 The coordinator's current implementation and validation record is
-[native POS foundations (17 November 2026)](../../docs/research/native-pos-foundations-2026-11-17.md).
-The historical [Android authority and cash-attribution milestone](../../docs/research/android-authority-cash-foundation-2026-11-17.md)
-and [staff, ledger-attribution, adoption-core, and emulator record](../../docs/research/android-authority-ledger-adoption-2026-11-17.md)
-list the exact proof and remaining boundaries. API 35 emulator authority flows
-are now covered; no physical-device workflow is claimed. The Shop Lightning
-work in this batch is an owner-app readiness report only. **The native checkout
-still has no integrated Lightning tender path.**
+[Android sale attribution and staff reconciliation (18 November 2026)](../../docs/research/android-sale-attribution-staff-reconciliation-2026-11-18.md).
+Earlier [native POS foundations](../../docs/research/native-pos-foundations-2026-11-17.md),
+[Android authority and cash attribution](../../docs/research/android-authority-cash-foundation-2026-11-17.md),
+and [staff, Ledger v8, adoption-core, and emulator](../../docs/research/android-authority-ledger-adoption-2026-11-17.md)
+records remain historical milestones rather than validation of the current
+diff. API 35 emulator authority flows are covered; no physical-device workflow
+is claimed. The Shop Lightning work in this batch is an owner-app readiness
+report only. **The native checkout still has no integrated Lightning tender
+path.**
 
 ## Pairing and fixture setup
 
@@ -156,10 +162,13 @@ reconciled.
 
 Legacy staff/operator labels are not authentication. New cash-session writes
 require a signed-in actor, and current Android merchant commands enforce local
-capabilities, but Android non-cash callers do not yet use Ledger v8 attribution.
+capabilities. New Android manual-sale creation uses Ledger v9 attribution (with
+strict v8 read/migration support), but tender, refund, provider-observation,
+catalog and inventory attribution remain open.
 The staff audit journal is Android-wired, although its file and the authority
-mutation are not cross-file atomic; an uncertain prepared intent blocks more
-staff changes. API 35 emulator workflows are recorded, while physical devices,
+mutation are not cross-file atomic; deterministic staff outcomes now have a
+manager-triggered receipt reconciliation path, while indeterminate outcomes
+remain blocked. API 35 emulator workflows are recorded, while physical devices,
 tamper-evident business storage, production card approval, merchant onboarding,
 independent Lightning recovery, actual merchant shifts, and mainnet/real-funds
 gates remain open. Partial native UI and model tests do not establish POS parity

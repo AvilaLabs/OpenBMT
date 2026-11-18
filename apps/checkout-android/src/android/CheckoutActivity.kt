@@ -85,6 +85,7 @@ open class CheckoutActivity : Activity() {
     private var pendingPairingImport: ByteArray? = null
     private var pendingPairingFixture: File? = null
     private var pairingImportInFlight = false
+    private var saleCreationInFlight = false
     private var node: CounterNode? = null
     private var torLease: TorLease? = null
     private var pumpThread: Thread? = null
@@ -128,6 +129,7 @@ open class CheckoutActivity : Activity() {
     private var businessStartupFault: String? = null
     private var pendingSavedUiState: Bundle? = null
     private var staffAdministrationVisible = false
+    private var saleOutcomePromptShown = false
     private var staffAdministrationSnapshot: CheckoutStaffAdministrationSnapshot? = null
     private var staffAdministrationMessage: String? = null
     private var staffAdministrationRevision = 0L
@@ -196,6 +198,10 @@ open class CheckoutActivity : Activity() {
     }
 
     private fun onAuthorityState(state: CheckoutAccessState) {
+        if (authorityFlow.requiresSaleReopen()) {
+            lockAfterUncertainSaleWrite()
+            return
+        }
         if (state !is CheckoutAccessState.SignedIn) {
             // Timeout, denial, recovery and storage faults must stop the payment observer just as
             // backgrounding does. Native state remains durable and is reconciled after sign-in.
@@ -1026,25 +1032,50 @@ open class CheckoutActivity : Activity() {
     }
 
     private fun confirmSaleCreation(amountMinor: Long, currency: String, items: List<SaleItem>, pricing: CheckoutPricingSnapshot? = null) {
+        if (saleCreationInFlight) return
+        saleCreationInFlight = true
         val followup = latestFollowupSale()
-        val create = {
-            val saleId = UUID.randomUUID().toString()
-            executeAuthorized(
-                CheckoutAuthorityCapability.SALE_CREATE,
-                "The sale could not be saved. No payment attempt was started.",
-                {
-                    if (pricing != null) ledger.createPricedSale(saleId, currency, nowSecs(), pricing)
-                    else ledger.createSale(saleId, amountMinor, currency, nowSecs(), items)
-                },
-            ) {
-                if (items.isNotEmpty()) {
-                    cartSelections.clear()
-                    cartQuantities.clear()
-                    discountDraft = ""
-                    taxRateDraft = ""
-                    tipDraft = ""
+        val saleId = UUID.randomUUID().toString()
+        val operationId = "sale-$saleId"
+        var createdAt: Long? = null
+        var commandStarted = false
+        val create = create@{
+            if (commandStarted) return@create
+            commandStarted = true
+            val commandCreatedAt = createdAt ?: nowSecs().also { createdAt = it }
+            authorityFlow.executeSaleCreate(
+                ledger = ledger,
+                operationId = operationId,
+                saleId = saleId,
+                amountMinor = amountMinor,
+                currency = currency,
+                createdAt = commandCreatedAt,
+                items = items,
+                pricing = pricing,
+            ) { error ->
+                when (error) {
+                    null -> {
+                        saleCreationInFlight = false
+                        if (items.isNotEmpty()) {
+                            cartSelections.clear()
+                            cartQuantities.clear()
+                            discountDraft = ""
+                            taxRateDraft = ""
+                            tipDraft = ""
+                        }
+                        if (authorityFlow.isSignedIn()) showTenderChoice(saleId)
+                    }
+                    is CheckoutAuthorityDeniedException, is CheckoutAuthorityUnavailableException -> {
+                        saleCreationInFlight = false
+                    }
+                    is CheckoutLedgerWriteUncertainException -> lockAfterUncertainSaleWrite()
+                    else -> {
+                        saleCreationInFlight = false
+                        if (authorityFlow.isSignedIn()) {
+                            showHomeWithError("The sale could not be saved. No payment attempt was started. Details: ${safeDetail(error)}")
+                        }
+                    }
                 }
-                showTenderChoice(saleId)
             }
         }
         if (followup == null) return create()
@@ -1052,10 +1083,25 @@ open class CheckoutActivity : Activity() {
             .setTitle("Earlier sale needs follow-up")
             .setMessage("${formatAmount(followup.amountMinor, followup.currency)} · ${saleStateLabel(followup)}\n\nIts attempts and evidence will stay unchanged. Start a separate sale only if this is a different customer order.")
             .setNegativeButton("Resume earlier sale") { _, _ ->
+                saleCreationInFlight = false
                 if (followup.attempts.isEmpty()) showTenderChoice(followup.saleId) else showReceipt(followup.saleId)
             }
-            .setNeutralButton("Cancel", null)
+            .setNeutralButton("Cancel") { _, _ -> saleCreationInFlight = false }
             .setPositiveButton("Start separate sale") { _, _ -> create() }
+            .setOnCancelListener { if (!commandStarted) saleCreationInFlight = false }
+            .show()
+    }
+
+    private fun lockAfterUncertainSaleWrite() {
+        if (saleOutcomePromptShown || isFinishing || isDestroyed) return
+        saleOutcomePromptShown = true
+        stopCounterForAuthorityLock()
+        authorityFlow.lock()
+        AlertDialog.Builder(this)
+            .setTitle("Sale outcome needs checking")
+            .setMessage("The sale may have been saved. No payment attempt was started. Checkout is locked; close and reopen the app to reload the ledger, then verify Sales before continuing.")
+            .setCancelable(false)
+            .setPositiveButton("Close checkout") { _, _ -> finish() }
             .show()
     }
 
@@ -2105,21 +2151,6 @@ open class CheckoutActivity : Activity() {
         if (config == null) return showSetup(message)
         showHome()
         Toast.makeText(this, message, Toast.LENGTH_LONG).show()
-    }
-
-    private fun executeAuthorized(
-        capability: CheckoutAuthorityCapability,
-        failureMessage: String,
-        operation: () -> Unit,
-        success: () -> Unit,
-    ) {
-        authorityFlow.executeCapability(capability, operation) { error ->
-            when (error) {
-                null -> success()
-                is CheckoutAuthorityDeniedException, is CheckoutAuthorityUnavailableException -> Unit
-                else -> showHomeWithError("$failureMessage Details: ${safeDetail(error)}")
-            }
-        }
     }
 
     private fun showStatus(title: String, body: String, details: String? = null) {
