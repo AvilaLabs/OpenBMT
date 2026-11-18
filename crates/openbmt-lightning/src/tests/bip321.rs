@@ -23,7 +23,7 @@ fn checked(msat: u64, network: &'static str) -> Checked {
     m.msat = Some(msat);
     m.network = network;
     m.description = Some("Sale 17".to_string());
-    let ask = Ask::sale(COUNTER, 17, 0, msat, 300).unwrap();
+    let ask = Ask::sale(17, msat, 300).unwrap();
     check(
         &m.write(),
         &Expectation {

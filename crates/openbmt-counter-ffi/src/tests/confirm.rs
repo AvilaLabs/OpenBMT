@@ -132,7 +132,6 @@ pub(super) fn config(rig: &Rig, record: &[u8]) -> StartConfig {
         record: record.to_vec(),
         proxy: None,
         own_node: None,
-        lightning: None,
         link_proxy: None,
         shop_seed: None,
     }

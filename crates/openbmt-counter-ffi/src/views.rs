@@ -6,8 +6,7 @@
 use openbmt_core::pinned_wallet::WalletKind;
 use openbmt_core::say::Words;
 use openbmt_counter::{DayTotals, RefundState, Report, Role, State, Tally};
-use openbmt_counter_node::{FieldValue, LnRequest, LnTransport, PendingChange, PendingSwitch};
-use openbmt_lightning::request::Method;
+use openbmt_counter_node::{FieldValue, PendingChange, PendingSwitch};
 
 use crate::codec::{
     bad_tag, wire_record, wire_record_get, wire_unit_enum, Define, Get, Put, Reader, Shaped,
@@ -105,10 +104,6 @@ pub struct StartConfig {
     /// An address that is refused, or that comes with no proxy, starts the
     /// node without an own node, and the status says so (CR-102).
     pub own_node: Option<String>,
-    /// CR-115: the saved Lightning connection, as `ln_reply` returned it
-    /// when the test passed and as the app kept it sealed, or none. It is
-    /// not part of the pairing record.
-    pub lightning: Option<Vec<u8>>,
     /// CR-134: the SOCKS5 proxy of Orbot for the link to the owner, when the
     /// relay is an onion service and the settings have Tor off (with Tor on
     /// the link uses `proxy`). The app gives it only when the proxy answers.
@@ -126,7 +121,6 @@ wire_record!(StartConfig {
     record,
     proxy,
     own_node,
-    lightning,
     link_proxy,
     shop_seed
 });
@@ -136,7 +130,6 @@ wire_record_get!(StartConfig {
     record,
     proxy,
     own_node,
-    lightning,
     link_proxy,
     shop_seed
 });
@@ -1502,8 +1495,6 @@ pub struct StatusView {
     pub refused_below_minimum: u64,
     /// The driver has stopped.
     pub stopped: bool,
-    /// CR-116: the Lightning line; none when no credential is saved.
-    pub lightning: Option<LightningStatusView>,
 }
 
 wire_record!(StatusView {
@@ -1513,8 +1504,7 @@ wire_record!(StatusView {
     own_node,
     sales,
     refused_below_minimum,
-    stopped,
-    lightning
+    stopped
 });
 
 // ---- Shop Lightning (SL-70 to SL-78) ------------------------------------------------
@@ -1558,207 +1548,13 @@ pub struct LightningSaleView {
     /// The line that says Lightning is not available for this sale, with
     /// the reason in its details.
     pub unavailable: Option<WordsView>,
-    /// CR-286: the seconds left of the wait for the invoice (CR-113), only
-    /// while it is being waited for; the ring goes when the invoice comes or
-    /// the time is over.
-    pub wait_secs_left: Option<u64>,
-    /// CR-286: the whole of that wait, for the ring that empties over it.
-    pub wait_secs_total: Option<u64>,
 }
 
 wire_record!(LightningSaleView {
     invoice,
     waiting,
-    unavailable,
-    wait_secs_left,
-    wait_secs_total
+    unavailable
 });
-
-/// The Lightning line of the status (CR-116).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LightningStatusView {
-    /// Sales get a Lightning code now.
-    pub ready: bool,
-    /// What the owner is told.
-    pub words: WordsView,
-}
-
-wire_record!(LightningStatusView { ready, words });
-
-/// The kind of node a credential is for (LN-01).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum LnKind {
-    /// LND, over its REST interface.
-    Lnd,
-    /// Core Lightning, over clnrest.
-    Cln,
-}
-
-wire_unit_enum!(LnKind { Lnd = 0, Cln = 1 });
-
-/// The arguments of `ln_setup`: what a manager scanned or typed (CR-115).
-///
-/// For LND, `address` is the `lndconnect://` text and the other two are
-/// empty. For Core Lightning, `address` is `host:port`, `secret` the rune and
-/// `cert` the certificate as PEM text or as a SHA-256 fingerprint in hex.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LnSetupArgs {
-    /// The kind of node.
-    pub kind: LnKind,
-    /// The `lndconnect://` text, or `host:port`.
-    pub address: String,
-    /// The rune (Core Lightning only).
-    pub secret: String,
-    /// The certificate, as PEM or a SHA-256 fingerprint (Core Lightning
-    /// only).
-    pub cert: String,
-}
-
-wire_record!(LnSetupArgs {
-    kind,
-    address,
-    secret,
-    cert
-});
-wire_record_get!(LnSetupArgs {
-    kind,
-    address,
-    secret,
-    cert
-});
-
-/// The method of a request for the node (CR-114).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum LnMethod {
-    /// HTTP GET, no body.
-    Get,
-    /// HTTP POST with a JSON body.
-    Post,
-}
-
-wire_unit_enum!(LnMethod { Get = 0, Post = 1 });
-
-/// One request for the app to send to the shop's node (CR-114): HTTPS only,
-/// no redirect, the certificate pinned with `ln_pin`. The header value is a
-/// secret and is never logged.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LnRequestView {
-    /// The number the answer comes back with.
-    pub id: u64,
-    /// `host:port` of the node.
-    pub host_port: String,
-    /// GET or POST.
-    pub method: LnMethod,
-    /// The path and query.
-    pub path: String,
-    /// The name of the header that carries the credential.
-    pub header_name: String,
-    /// The value of that header.
-    pub header_value: String,
-    /// The JSON body of a POST.
-    pub body: Option<String>,
-}
-
-wire_record!(LnRequestView {
-    id,
-    host_port,
-    method,
-    path,
-    header_name,
-    header_value,
-    body
-});
-
-impl From<LnRequest> for LnRequestView {
-    fn from(r: LnRequest) -> Self {
-        Self {
-            id: r.id,
-            host_port: r.host_port,
-            method: match r.request.method {
-                Method::Get => LnMethod::Get,
-                Method::Post => LnMethod::Post,
-            },
-            path: r.request.path,
-            header_name: r.request.header_name.to_string(),
-            header_value: r.request.header_value,
-            body: r.request.body,
-        }
-    }
-}
-
-/// What the node answered to a request (CR-114): the status and the body.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LnReplyArgs {
-    /// The number of the request.
-    pub id: u64,
-    /// The HTTP status.
-    pub status: u32,
-    /// The body, at most 1,000,000 bytes.
-    pub body: Vec<u8>,
-}
-
-wire_record!(LnReplyArgs { id, status, body });
-wire_record_get!(LnReplyArgs { id, status, body });
-
-/// Why the request got no answer (CR-114).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum LnTransportView {
-    /// The node showed another certificate than the pinned one.
-    PinRefused,
-    /// No connection could be made.
-    Unreachable,
-    /// The connect or the read took too long.
-    TimedOut,
-    /// The body is longer than the app takes.
-    TooBig,
-    /// The node answered with a redirect.
-    Redirected,
-}
-
-wire_unit_enum!(LnTransportView {
-    PinRefused = 0,
-    Unreachable = 1,
-    TimedOut = 2,
-    TooBig = 3,
-    Redirected = 4
-});
-
-impl LnTransportView {
-    pub(crate) fn of(self) -> LnTransport {
-        match self {
-            Self::PinRefused => LnTransport::PinRefused,
-            Self::Unreachable => LnTransport::Unreachable,
-            Self::TimedOut => LnTransport::TimedOut,
-            Self::TooBig => LnTransport::TooBig,
-            Self::Redirected => LnTransport::Redirected,
-        }
-    }
-}
-
-/// The arguments of `ln_failed`.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LnFailArgs {
-    /// The number of the request.
-    pub id: u64,
-    /// Why there was no answer.
-    pub why: LnTransportView,
-}
-
-wire_record!(LnFailArgs { id, why });
-wire_record_get!(LnFailArgs { id, why });
-
-/// What an answer to a setup request led to (CR-115): the next request of
-/// the test, or, when the test passed, the bytes to seal and keep.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LnStepView {
-    /// The next request of the test, if there is one.
-    pub next: Option<LnRequestView>,
-    /// The record to seal in `noBackupFilesDir` and hand back at every
-    /// `start`, when the test passed.
-    pub record: Option<Vec<u8>>,
-}
-
-wire_record!(LnStepView { next, record });
 
 // ---- the day's totals (CR-152 to CR-154) ----------------------------------
 

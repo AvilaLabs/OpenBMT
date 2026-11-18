@@ -331,7 +331,9 @@ fn sl_21_a_claimed_payment_a_sale_does_not_take_is_recorded_as_a_late_one() {
     let index = sale(&mut rig);
     // Less than the least the sale asks (SATS is what a $5.00 sale needs):
     // not credited, recorded as late with its amount.
-    assert!(rig.node.lightning_paid(index, facts(1, 3_000)));
+    assert!(rig
+        .node
+        .lightning_paid_through(index, facts(1, 3_000), None));
     let reports = rig.feed(vec![]);
     assert!(
         reports.contains(&Report::LatePayment { index, sats: 3 }),
@@ -347,7 +349,9 @@ fn sl_21_a_claimed_payment_a_sale_does_not_take_is_recorded_as_a_late_one() {
     assert_eq!(late.len(), 1);
     assert_eq!(late[0].1, 3);
     // Once: the same payment again adds nothing.
-    assert!(rig.node.lightning_paid(index, facts(1, 3_000)));
+    assert!(rig
+        .node
+        .lightning_paid_through(index, facts(1, 3_000), None));
     assert_eq!(
         rig.node
             .counter()
@@ -359,7 +363,9 @@ fn sl_21_a_claimed_payment_a_sale_does_not_take_is_recorded_as_a_late_one() {
     );
     // A sale that ended: recorded as late.
     rig.node.cancel(index).unwrap();
-    assert!(rig.node.lightning_paid(index, facts(2, 5_000_000)));
+    assert!(rig
+        .node
+        .lightning_paid_through(index, facts(2, 5_000_000), None));
     assert_eq!(
         rig.node
             .counter()
@@ -376,7 +382,9 @@ fn sl_21_a_claimed_payment_for_a_sale_the_counter_does_not_know_is_kept_in_the_b
     use openbmt_counter::Report;
     let dir = Scratch::new();
     let mut rig = rig(&dir, settings_naming(3, 1), None);
-    assert!(rig.node.lightning_paid(9_999, facts(7, 7_000_000)));
+    assert!(rig
+        .node
+        .lightning_paid_through(9_999, facts(7, 7_000_000), None));
     let reports = rig.feed(vec![]);
     assert!(
         reports.contains(&Report::LatePayment {

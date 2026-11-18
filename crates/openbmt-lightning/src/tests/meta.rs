@@ -1,4 +1,4 @@
-//! Ties the rules of `docs/LIGHTNING-RULES.md` (LN-01 to LN-23) to the tests:
+//! Ties the rules of `docs/LIGHTNING-RULES.md` to the tests:
 //! every one has a test named for it, and every name in a test or in the code
 //! is a rule that exists.
 
@@ -6,15 +6,10 @@ use std::collections::BTreeSet;
 
 const RULES: &str = include_str!("../../../../docs/LIGHTNING-RULES.md");
 const CARGO: &str = include_str!("../../Cargo.toml");
-const SOURCES: [&str; 11] = [
+const SOURCES: [&str; 6] = [
     include_str!("bip321.rs"),
     include_str!("bolt11.rs"),
-    include_str!("cln.rs"),
-    include_str!("connect.rs"),
-    include_str!("credential.rs"),
-    include_str!("lnd.rs"),
     include_str!("payment.rs"),
-    include_str!("say.rs"),
     include_str!("settings.rs"),
     include_str!("meta.rs"),
     include_str!("mod.rs"),
@@ -30,8 +25,11 @@ fn defined() -> BTreeSet<String> {
 }
 
 #[test]
-fn the_rules_file_defines_ln_01_to_ln_23() {
-    let want: BTreeSet<String> = (1..=23).map(|i| format!("LN-{i:02}")).collect();
+fn the_rules_file_defines_the_rules_of_the_invoice_and_the_code() {
+    let want: BTreeSet<String> = [3, 13, 16, 17, 18, 19, 21, 23]
+        .iter()
+        .map(|i| format!("LN-{i:02}"))
+        .collect();
     assert_eq!(defined(), want);
 }
 
@@ -64,16 +62,9 @@ fn every_rule_the_code_names_exists() {
     for file in [
         include_str!("../bip321.rs"),
         include_str!("../bolt11.rs"),
-        include_str!("../cln.rs"),
-        include_str!("../connect.rs"),
-        include_str!("../credential.rs"),
         include_str!("../error.rs"),
         include_str!("../invoice.rs"),
         include_str!("../lib.rs"),
-        include_str!("../lnd.rs"),
-        include_str!("../node.rs"),
-        include_str!("../request.rs"),
-        include_str!("../say.rs"),
         CORE_SETTINGS,
         include_str!("../../../openbmt-approver/src/describe.rs"),
     ] {
@@ -87,28 +78,14 @@ fn every_rule_the_code_names_exists() {
             }
         }
     }
-    assert!(seen > 60, "only {seen} rule names in the code");
+    assert!(seen > 30, "only {seen} rule names in the code");
 }
 
 #[test]
-fn what_real_nodes_confirmed_is_marked_in_the_rules() {
-    assert!(!RULES.contains("[verify, E7]"));
-    let flat = RULES.split_whitespace().collect::<Vec<_>>().join(" ");
-    assert!(flat.contains("run against real nodes on a private test network"));
-    assert!(flat.contains("scripts/lightning-e2e-core.sh"));
-    assert!(flat.contains("rest on the source alone"));
-}
-
-#[test]
-fn the_rules_cite_the_releases_and_the_documents() {
+fn the_rules_cite_the_documents() {
     for url in [
-        "https://github.com/ElementsProject/lightning/releases",
-        "https://github.com/lightningnetwork/lnd/releases",
-        "https://docs.corelightning.org/reference/createrune",
-        "https://docs.lightning.engineering/lightning-network-tools/lnd/macaroons",
         "https://github.com/bitcoin/bips/blob/master/bip-0321.mediawiki",
         "https://github.com/lightning/bolts/blob/master/11-payment-encoding.md",
-        "https://acinq.github.io/eclair/",
     ] {
         assert!(RULES.contains(url), "{url}");
     }
@@ -123,7 +100,7 @@ fn ln_23_the_crate_depends_on_workspace_crates_by_path_and_on_bitcoin_only() {
         .take_while(|l| !l.starts_with('['))
         .filter(|l| !l.trim().is_empty() && !l.trim_start().starts_with('#'))
         .collect();
-    assert_eq!(deps.len(), 3, "{deps:?}");
+    assert_eq!(deps.len(), 2, "{deps:?}");
     for d in &deps {
         assert!(
             d.contains("path = \"../openbmt-")

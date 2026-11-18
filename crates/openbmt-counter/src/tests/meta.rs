@@ -39,7 +39,7 @@ const TEST_SOURCES: [&str; 27] = [
 /// Rules this crate does not test, each with the reason. The counter
 /// implements every rule except the ones that only state a limit and the
 /// ones that belong to the app it is built into.
-const NOT_HERE: [(&str, &str); 107] = [
+const NOT_HERE: [(&str, &str); 102] = [
     (
         "CR-284",
         "the library draws no notice: the node tells each sale's first turn to green or red \
@@ -172,35 +172,9 @@ const NOT_HERE: [(&str, &str); 107] = [
          `openbmt-counter-node`, `openbmt-counter-ffi` and the app's JVM tests",
     ),
     (
-        "CR-112",
-        "what the driver asks the node for, and when, is the node's; tested in \
-         `openbmt-counter-node` (`tests/lightning.rs`)",
-    ),
-    (
         "CR-113",
         "the sale code and the line about Lightning are made in `openbmt-counter-node` and \
          `openbmt-counter-ffi` and shown by the app; tested there and in the app's JVM tests",
-    ),
-    (
-        "CR-114",
-        "the transport is the Android app's; its tests are the app's JVM tests \
-         (`apps/counter-android`)",
-    ),
-    (
-        "CR-115",
-        "the credential is read and tested in `openbmt-counter-node`, kept sealed by the \
-         Android app behind the manager's PIN; tested in `openbmt-counter-node`, \
-         `openbmt-counter-ffi` and the app's JVM tests",
-    ),
-    (
-        "CR-116",
-        "the Lightning health line and the check of the settings' node key are the node's and \
-         the app's; tested in `openbmt-counter-node`, `openbmt-counter-ffi` and the app's JVM \
-         tests",
-    ),
-    (
-        "CR-118",
-        "the bound is the driver's; tested in `openbmt-counter-node` (`tests/lightning.rs`)",
     ),
     (
         "CR-130",
@@ -570,9 +544,9 @@ fn defined() -> BTreeSet<String> {
 }
 
 #[test]
-fn the_rules_file_defines_two_hundred_and_twenty_eight_rules() {
+fn the_rules_file_defines_two_hundred_and_twenty_three_rules() {
     let ids = defined();
-    assert_eq!(ids.len(), 228);
+    assert_eq!(ids.len(), 223);
     assert!(
         ids.contains("CR-01")
             && ids.contains("CR-42")
@@ -587,9 +561,7 @@ fn the_rules_file_defines_two_hundred_and_twenty_eight_rules() {
             && ids.contains("CR-100")
             && ids.contains("CR-108")
             && ids.contains("CR-109")
-            && ids.contains("CR-116")
             && ids.contains("CR-117")
-            && ids.contains("CR-118")
             && ids.contains("CR-130")
             && ids.contains("CR-136")
             && ids.contains("CR-140")

@@ -132,7 +132,6 @@ use openbmt_counter::{
     RequoteRefused, SaleExtras, Screen, SightingError, StaffEvent, StaffRefused, StoreFault,
     TillCancelled, TillDropped, TillRequest, TillStartRefused, TotalsRefused, WithdrawRefused,
 };
-use openbmt_lightning::{CertPin, Credential, Reply};
 use openbmt_net_io::{
     AppEvent, Clock, Driver, DriverConfig, EventReceiver, Handle, Key, NetMode, OsRandomness,
     OwnNode, OwnNodeEvent, Storage, SystemClock,
@@ -147,14 +146,10 @@ use openbmt_watch::{
 use crate::chainview::ChainView;
 use crate::confirm::{ChangeNotice, ConfirmRefused, Pending, PendingChange};
 use crate::dirstore::{DirStore, DirStoreError, CHECKED_WINDOW};
-use crate::lightning::{
-    Lightning, LightningStatus, LnEvent, LnRequest, LnTransport, SaleLightning, SetupRefused,
-    SetupStep,
-};
 use crate::notices::NodeRecords;
 use crate::paired_own::OwnPairingRecord;
 use crate::settings::{check_not_rolled, decode_file, SettingsFault, SettingsRefused};
-use crate::shopln::SeedNotTaken;
+use crate::shopln::{SaleLightning, SeedNotTaken};
 use crate::shopln_node::{ShopLn, ShopLnArgs, ShopLnConfig, ShopLnStatus, SweepSource};
 use crate::starter::{stop_decision, Cards, StarterCard, StarterRefused, StopDecision};
 use crate::switch::{
@@ -427,9 +422,6 @@ pub struct NodeConfig {
     /// The health rules. [`check_health`] unless a check against a node with
     /// fewer peers than the rules ask for puts something else here.
     pub health: HealthFn,
-    /// The saved Lightning connection, as the app sealed it (CR-115), if
-    /// there is one. Not part of the settings and never sent anywhere.
-    pub lightning: Option<Vec<u8>>,
     /// CR-162: the counter talks to the owner through a link, so the first
     /// start after pairing records the settings it was paired with, as the
     /// owner looks for that record. Off unless the app has a link.
@@ -464,7 +456,6 @@ impl NodeConfig {
             driver,
             clock: Box::new(SystemClock),
             health: Box::new(check_health),
-            lightning: None,
             announce_settings: false,
             own_record: None,
             shop_lightning: None,
@@ -661,8 +652,6 @@ pub struct Node<P: DriverPort = Handle> {
     /// CR-82: a settle is wanted as soon as the minute allows: the owner's
     /// first mark of this run came, or the last call left sales to settle.
     settle_wanted: bool,
-    /// CR-112 to CR-116: the driver of the shop's own Lightning node.
-    ln: Lightning,
     /// What a Lightning payment reported, for the next pump.
     ln_reports: Vec<Report>,
     /// CR-284: the sales that turned green (`true`) or red (`false`) for the
@@ -731,8 +720,6 @@ enum LnPath {
     None,
     /// Shop Lightning (SL-70).
     ShopLn,
-    /// The shop's own node (CR-112).
-    OwnNode,
 }
 
 /// What a start found of a switch that was being made (CR-261).
@@ -839,7 +826,6 @@ impl<P: DriverPort> Node<P> {
             mut driver,
             clock,
             health,
-            lightning,
             announce_settings,
             own_record,
             shop_lightning,
@@ -966,18 +952,6 @@ impl<P: DriverPort> Node<P> {
         let started_at = clock.now();
         let pending = load_pending(&mut store, &authority, &settings, started_at, &mut notes);
         let counter_device = counter.device_id();
-        let counter_id: [u8; 4] = counter
-            .device_id()
-            .to_bytes()
-            .first_chunk::<4>()
-            .copied()
-            .unwrap_or_default();
-        let ln = Lightning::new(
-            driver.network,
-            counter_id,
-            settings.lightning_node,
-            lightning.as_deref(),
-        );
         let scripts = counter.watched_scripts();
         // SL-70, SL-33: Shop Lightning gets the driver's settings as the
         // counter's other chain users have them. The shop's own wallet and
@@ -1053,7 +1027,6 @@ impl<P: DriverPort> Node<P> {
             stopped: false,
             last_settle: None,
             settle_wanted: false,
-            ln,
             ln_reports: Vec::new(),
             turns: Vec::new(),
             turned: BTreeSet::new(),
@@ -1061,32 +1034,6 @@ impl<P: DriverPort> Node<P> {
             shopln,
             _lock: lock,
         };
-        // CR-112: a sale that was open at the last stop asks for an invoice
-        // again, and the invoices of the quotes of sales open or lately over
-        // are asked for by their labels: Core Lightning answers with the
-        // ones it made.
-        for index in node.known.iter().copied().collect::<Vec<_>>() {
-            let Some(s) = node.counter.sale(index) else {
-                continue;
-            };
-            let quotes: Vec<(u64, u64)> = s
-                .quotes()
-                .iter()
-                .map(|q| {
-                    (
-                        openbmt_counter::sats_for(s.amount(), q.rate).unwrap_or(0),
-                        q.from,
-                    )
-                })
-                .collect();
-            let open = s.is_live();
-            // CR-208: a request is never asked of the Lightning node.
-            if s.is_request() {
-                continue;
-            }
-            node.ln.sale_restored(index, &quotes, open, started_at);
-        }
-        node.take_ln_notes();
         node.start_switch(recovery, started_at);
         node.start_starter();
         node.update_all_blocks();
@@ -1224,12 +1171,6 @@ impl<P: DriverPort> Node<P> {
     /// Whether the driver has stopped.
     pub fn stopped(&self) -> bool {
         self.stopped
-    }
-
-    fn take_ln_notes(&mut self) {
-        for line in self.ln.take_notes() {
-            self.note(line);
-        }
     }
 
     fn note(&mut self, line: String) {
@@ -1944,7 +1885,6 @@ impl<P: DriverPort> Node<P> {
         self.settle_when_due();
         self.retry_setting_record();
         reports.append(&mut self.ln_reports);
-        self.take_ln_notes();
         for report in &reports {
             self.turn_from_report(report);
         }
@@ -2521,19 +2461,14 @@ impl<P: DriverPort> Node<P> {
             extras,
             &mut self.store,
         )?;
-        self.sale_started(&opened, extras.request.is_none());
+        self.sale_started(&opened);
         Ok(opened)
     }
 
-    /// The node starts to watch a sale that was opened, and asks for its
-    /// invoices unless it is a request.
-    fn sale_started(&mut self, opened: &Opened, invoices: bool) {
+    /// The node starts to watch a sale that was opened.
+    fn sale_started(&mut self, opened: &Opened) {
         self.known.insert(opened.index);
         self.port.watch_script(opened.script.clone());
-        if invoices {
-            self.ln
-                .sale_opened(opened.index, opened.needs_sats, self.clock.now());
-        }
     }
 
     // CR-266 to CR-270: a sale from the till.
@@ -2608,7 +2543,7 @@ impl<P: DriverPort> Node<P> {
         let opened = self
             .counter
             .till_start(sale, rate, source, facts, by, &mut self.store)?;
-        self.sale_started(&opened, true);
+        self.sale_started(&opened);
         Ok(opened)
     }
 
@@ -2690,7 +2625,7 @@ impl<P: DriverPort> Node<P> {
             extras,
             &mut self.store,
         )?;
-        self.sale_started(&opened, true);
+        self.sale_started(&opened);
         Ok(opened)
     }
 
@@ -2863,32 +2798,14 @@ impl<P: DriverPort> Node<P> {
                 return (view, LnPath::ShopLn);
             }
         }
-        let view = self.ln.sale_view(index, now);
-        self.take_ln_notes();
-        if !matches!(view, SaleLightning::Off) {
-            return (view, LnPath::OwnNode);
-        }
         (SaleLightning::Off, LnPath::None)
-    }
-
-    /// CR-286: the seconds left of the wait for the invoice of the shop's own
-    /// node and the whole of that wait (CR-113), while it is being waited for.
-    pub fn lightning_wait(&mut self, index: u32) -> Option<(u64, u64)> {
-        let (view, path) = self.lightning_view(index);
-        if !matches!(view, SaleLightning::Waiting) || !matches!(path, LnPath::OwnNode) {
-            return None;
-        }
-        let now = self.clock.now();
-        let left = self.ln.wait_secs_left(index, now)?;
-        Some((left, crate::lightning::INVOICE_WINDOW_SECS))
     }
 
     /// CR-283: whether the code of the sale is the Lightning invoice alone.
     /// The sale is open and not a request to send, the cashier has not chosen
-    /// the on-chain code, its invoice has come and is final at once (from the
-    /// shop's own node, or from Shop Lightning over channels whose funding is
-    /// confirmed), and the instant decision for a payment of
-    /// the quote's amount is a wait. Asked again at every quote and after a
+    /// the on-chain code, its invoice has come and is final at once (from
+    /// Shop Lightning over channels whose funding is confirmed), and the
+    /// instant decision for a payment of the quote's amount is a wait. Asked again at every quote and after a
     /// restart: nothing of it is kept but the cashier's choice.
     pub fn lightning_first(&mut self, index: u32) -> bool {
         let open = self
@@ -2901,7 +2818,6 @@ impl<P: DriverPort> Node<P> {
         let (view, path) = self.lightning_view(index);
         let final_invoice = matches!(view, SaleLightning::Invoice(_))
             && match path {
-                LnPath::OwnNode => true,
                 LnPath::ShopLn => self.shopln.as_ref().is_some_and(|s| s.final_at_once(index)),
                 LnPath::None => false,
             };
@@ -2921,113 +2837,15 @@ impl<P: DriverPort> Node<P> {
         self.counter.choose_on_chain(index, &mut self.store)
     }
 
-    /// CR-116: the Lightning line of the status, when a credential is saved.
-    pub fn lightning_status(&self) -> Option<LightningStatus> {
-        self.ln.status()
-    }
-
-    /// Whether sales get a Lightning code now.
-    pub fn lightning_on(&self) -> bool {
-        self.ln.is_on()
-    }
-
-    /// CR-115: remove the Lightning connection at once.
-    pub fn lightning_remove(&mut self) {
-        self.ln.remove();
-    }
-
-    /// CR-115: begin the test of a connection. Nothing is tested or kept if
-    /// the signed settings name no node.
-    pub fn lightning_setup(&mut self, credential: Credential) -> Result<LnRequest, SetupRefused> {
-        let now = self.clock.now();
-        self.ln.setup_begin(credential, now)
-    }
-
-    /// CR-112: the next request for the node to send, if one is due.
-    pub fn lightning_next(&mut self) -> Option<LnRequest> {
-        let now = self.clock.now();
-        let counter = &self.counter;
-        let request = self
-            .ln
-            .next(now, |i| counter.sale(i).is_some_and(|s| s.is_live()));
-        self.take_ln_notes();
-        request
-    }
-
-    /// CR-114: the certificate the node must show for this request.
-    pub fn lightning_pin(&self, id: u64) -> Option<&CertPin> {
-        self.ln.pin_for(id)
-    }
-
-    /// Whether `id` is the number of the setup's request (CR-115).
-    pub fn lightning_is_setup(&self, id: u64) -> bool {
-        self.ln.is_setup(id)
-    }
-
-    /// CR-115: the answer to a setup request.
-    pub fn lightning_setup_answer(
-        &mut self,
-        id: u64,
-        reply: &Reply,
-    ) -> Result<SetupStep, SetupRefused> {
-        let now = self.clock.now();
-        let step = self.ln.setup_answer(id, reply)?;
-        if let SetupStep::Done(_) = step {
-            // The credential is in use: the open sales ask for invoices.
-            let live: Vec<(u32, u64)> = self
-                .known
-                .iter()
-                .filter_map(|i| self.counter.sale(*i))
-                .filter(|s| s.is_live() && !s.is_request())
-                .map(|s| (s.index(), s.needs_sats()))
-                .collect();
-            for (index, sats) in live {
-                self.ln.sale_opened(index, sats, now);
-            }
-        }
-        Ok(step)
-    }
-
-    /// CR-115: a setup request got no answer.
-    pub fn lightning_setup_failed(&mut self, id: u64, why: LnTransport) -> SetupRefused {
-        self.ln.setup_failed(id, why)
-    }
-
-    /// CR-112: the answer to the request the node handed out. A payment
-    /// the node reports is judged by the counter (CR-109), and what that
-    /// reports comes back with the next pump.
-    pub fn lightning_reply(&mut self, id: u64, reply: &Reply) {
-        if let LnEvent::Paid { index, facts } = self.ln.reply(id, reply) {
-            self.lightning_paid(index, facts);
-        }
-        self.take_ln_notes();
-    }
-
-    /// CR-114: the request got no answer.
-    pub fn lightning_failed(&mut self, id: u64, why: LnTransport) {
-        let now = self.clock.now();
-        self.ln.failed(id, why, now);
-        self.take_ln_notes();
-    }
-
     /// Records a Lightning payment against its sale. `true` when the payment
     /// is dealt with, which is when the node that reported it may forget it:
     /// the sale holds it, or it was recorded as late, or the counter will
     /// not take it at all. `false` when a record could not be written, so
-    /// the node still has it.
-    pub(crate) fn lightning_paid(
-        &mut self,
-        index: u32,
-        facts: openbmt_lightning::PaidFacts,
-    ) -> bool {
-        self.lightning_paid_through(index, facts, None)
-    }
-
-    /// [`Node::lightning_paid`] for a payment through a channel whose
-    /// funding had no confirmation at the claim, when `funding` says so
-    /// (SL-40): the counter decides it as a payment the light client has seen is, and a payment
-    /// that waits is `false`: the node still has it, and it comes again at
-    /// the next turn.
+    /// the node still has it. For a payment through a channel whose funding
+    /// had no confirmation at the claim, `funding` says so (SL-40): the
+    /// counter decides it as a payment the light client has seen is, and a
+    /// payment that waits is `false`: the node still has it, and it comes
+    /// again at the next turn.
     pub(crate) fn lightning_paid_through(
         &mut self,
         index: u32,
@@ -3074,7 +2892,6 @@ impl<P: DriverPort> Node<P> {
         match result {
             Ok(Some(screen)) => {
                 self.ln_reports.extend(screen.reports);
-                self.ln.paid(index, &hash);
                 self.name_lost_fundings(&lost_fundings);
                 true
             }
@@ -3099,7 +2916,6 @@ impl<P: DriverPort> Node<P> {
                         "sale {index}: a Lightning invoice was paid after the sale was over"
                     ));
                     self.ln_reports.extend(reports);
-                    self.ln.settled(index, &hash);
                     true
                 }
                 // The node still has it: asked again.
@@ -3128,7 +2944,6 @@ impl<P: DriverPort> Node<P> {
                 {
                     Ok(reports) => {
                         self.ln_reports.extend(reports);
-                        self.ln.settled(index, &hash);
                         true
                     }
                     Err(openbmt_counter::LightningRefused::Store(e)) => {
@@ -3153,7 +2968,6 @@ impl<P: DriverPort> Node<P> {
         let Some(shopln) = self.shopln.as_mut() else {
             // No Shop Lightning book: the payment is of another Lightning
             // path, which has its own record.
-            self.ln.settled(index, &paid.payment_hash);
             return true;
         };
         if !shopln.keep_unmatched(Some(index), paid.payment_hash, paid.amount_msat, now) {
@@ -3166,7 +2980,6 @@ impl<P: DriverPort> Node<P> {
         for line in shopln.take_notes() {
             self.note(line);
         }
-        self.ln.settled(index, &paid.payment_hash);
         true
     }
 
@@ -3329,9 +3142,6 @@ impl<P: DriverPort> Node<P> {
             &self.view,
             &mut self.store,
         )?;
-        // CR-112: a new quote asks for a new invoice.
-        let sats = self.counter.sale(index).map_or(0, |s| s.needs_sats());
-        self.ln.sale_requoted(index, sats, now);
         if let Some(shopln) = self.shopln.as_mut() {
             shopln.sale_requoted(index);
         }
@@ -3355,7 +3165,6 @@ impl<P: DriverPort> Node<P> {
         if let Some(shopln) = self.shopln.as_mut() {
             shopln.sale_closed(index);
         }
-        self.ln.sale_closed(index);
         Ok(())
     }
 

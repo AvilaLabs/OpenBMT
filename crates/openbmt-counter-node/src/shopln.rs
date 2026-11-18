@@ -24,9 +24,11 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::path::Path;
 
 use openbmt_core::identity::DeviceId;
+use openbmt_core::say::Words;
 use openbmt_core::settings::{Settings, ShopLightning, LIGHTNING_NODE_BYTES};
 use openbmt_core::shop_lightning::{check_seed, node_id, SeedRefused};
 use openbmt_core::wire::{self, DecodeError, Reader};
+use openbmt_lightning::bolt11::Checked;
 use openbmt_link::shopln::NotOffered;
 
 use crate::lnshim::room::OnChainReason;
@@ -558,6 +560,20 @@ impl Book {
         self.unmatched.push(u);
         true
     }
+}
+
+/// What the screen of a sale shows of Lightning (CR-113).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SaleLightning {
+    /// Shop Lightning is not in use, or the sale is not one it follows: no
+    /// Lightning line.
+    Off,
+    /// The invoice has been asked for and has not come.
+    Waiting,
+    /// The invoice passed the checks: the code carries it.
+    Invoice(Checked),
+    /// There is none for this sale, and why.
+    Unavailable(Words),
 }
 
 /// Why a sale shows the on-chain code alone, or why Lightning is not on at

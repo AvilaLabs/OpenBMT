@@ -295,7 +295,6 @@ fn cr_92_the_ceremony_runs_from_the_offer_to_a_node_that_opens_a_sale() {
         record,
         proxy: None,
         own_node: None,
-        lightning: None,
         link_proxy: None,
         shop_seed: None,
     });

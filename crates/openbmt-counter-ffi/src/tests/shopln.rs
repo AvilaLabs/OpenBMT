@@ -50,7 +50,6 @@ fn config(rig: &Rig, counter: u8) -> StartConfig {
         record: record_with(settings_naming(counter)).to_bytes(),
         proxy: None,
         own_node: None,
-        lightning: None,
         link_proxy: None,
         shop_seed: None,
     }

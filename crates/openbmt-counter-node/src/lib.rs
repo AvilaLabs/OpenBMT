@@ -15,14 +15,12 @@
 //!    owner, through a relay (`docs/LINK-RULES.md` section 6).
 //! 5. [`notices`]: [`NoticeOutbox`], the paid notices the link sends to a
 //!    Box (`docs/BOX-RULES.md` section 4).
-//! 6. [`lightning`]: the driver of the shop's own Lightning node (CR-112 to
-//!    CR-116).
-//! 7. [`ownnode`]: the counter's own-node setting (CR-100 to CR-102), read
+//! 6. [`ownnode`]: the counter's own-node setting (CR-100 to CR-102), read
 //!    from the text a manager typed.
-//! 8. [`settings`]: the settings the owner sends after pairing, the file the
+//! 7. [`settings`]: the settings the owner sends after pairing, the file the
 //!    counter keeps them in and what a start does with it (CR-160 to
 //!    CR-166).
-//! 9. [`shopln`] and [`shopln_node`]: Shop Lightning at the counter that
+//! 8. [`shopln`] and [`shopln_node`]: Shop Lightning at the counter that
 //!    the settings name, its seed, its node, its second copy on the Box and
 //!    its invoices for the sales (SL-70 to SL-78).
 //!
@@ -49,7 +47,6 @@
 pub mod chainview;
 pub mod confirm;
 pub mod dirstore;
-pub mod lightning;
 pub mod link;
 pub mod lnshim;
 pub mod mono;
@@ -82,10 +79,6 @@ pub use confirm::{
 pub use dirstore::{
     DirStore, DirStoreError, Loaded, TornTail, CONFIRM_FILE, SETTINGS_FILE, SWITCH_FILE,
 };
-pub use lightning::{
-    Lightning, LightningOff, LightningRecord, LightningStatus, LnEvent, LnRequest, LnTransport,
-    SaleLightning, SetupRefused, SetupStep, MAGIC_LIGHTNING_RECORD,
-};
 pub use link::{CounterLink, CounterLinkConfig, LinkState, Outgoing, Polled};
 pub use node::{
     DriverPort, HealthFn, HeartbeatNotTaken, HeartbeatTaken, Launch, Node, NodeConfig, StartError,
@@ -109,7 +102,7 @@ pub use settings::{
     effective as effective_settings, effective_of as effective_settings_of, Effective,
     SettingsFault, SettingsFrame, SettingsLine, SettingsRefused, MAX_SETTINGS_FILE_BYTES,
 };
-pub use shopln::{role, Book, Role, SeedNotTaken, SeedRecord, Why};
+pub use shopln::{role, Book, Role, SaleLightning, SeedNotTaken, SeedRecord, Why};
 pub use shopln_node::{PaidSale, ShopLn, ShopLnArgs, ShopLnConfig, ShopLnStatus};
 pub use starter::{
     stop_decision, Cards, StarterCard, StarterRefused, StopDecision, MAGIC_STARTER_CARDS, MAX_CARDS,

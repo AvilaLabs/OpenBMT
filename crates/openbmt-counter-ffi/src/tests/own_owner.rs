@@ -315,7 +315,6 @@ fn the_real_owner_pairs_the_real_counter_which_sells_from_the_wallet_and_takes_a
             record,
             proxy: None,
             own_node: None,
-            lightning: None,
             link_proxy: None,
             shop_seed: None,
         });
@@ -437,7 +436,6 @@ fn ss_41_the_real_owner_switches_the_real_counter_from_the_starter_wallet_and_ss
         record,
         proxy: None,
         own_node: None,
-        lightning: None,
         link_proxy: None,
         shop_seed: None,
     });
@@ -548,7 +546,6 @@ fn lk_79_the_real_owner_node_sends_the_real_counter_its_starter_line_through_the
         record,
         proxy: None,
         own_node: None,
-        lightning: None,
         link_proxy: None,
         shop_seed: None,
     });

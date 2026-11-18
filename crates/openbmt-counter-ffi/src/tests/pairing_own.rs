@@ -307,7 +307,6 @@ fn cr_233_the_record_reads_by_its_magic_and_starts_a_counter_that_sells_from_the
             record,
             proxy: None,
             own_node: None,
-            lightning: None,
             link_proxy: None,
             shop_seed: None,
         });
@@ -351,7 +350,6 @@ fn cr_235_a_batch_sent_to_an_own_wallet_counter_is_refused_with_words() {
         record,
         proxy: None,
         own_node: None,
-        lightning: None,
         link_proxy: None,
         shop_seed: None,
     });

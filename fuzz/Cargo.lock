@@ -715,7 +715,6 @@ dependencies = [
  "openbmt-signer",
  "openbmt-spend",
  "openbmt-stick",
- "openbmt-swap",
  "openbmt-ur",
  "openbmt-watch",
 ]
@@ -755,13 +754,11 @@ dependencies = [
  "openbmt-core",
  "openbmt-counter",
  "openbmt-courier",
- "openbmt-kernel-random",
  "openbmt-lightning",
  "openbmt-lightning-node",
  "openbmt-link",
  "openbmt-net-io",
  "openbmt-pos",
- "openbmt-swap",
  "openbmt-watch",
  "tokio",
 ]
@@ -806,7 +803,6 @@ version = "0.1.0"
 dependencies = [
  "bitcoin",
  "openbmt-core",
- "openbmt-json",
 ]
 
 [[package]]
@@ -1020,16 +1016,6 @@ dependencies = [
  "openbmt-core",
  "openbmt-qr",
  "openbmt-ur",
-]
-
-[[package]]
-name = "openbmt-swap"
-version = "0.1.0"
-dependencies = [
- "bitcoin",
- "miniscript",
- "openbmt-json",
- "openbmt-lightning",
 ]
 
 [[package]]

@@ -35,5 +35,3 @@ tokio = { version = "=1.54.1", features = ["rt-multi-thread", "time", "sync"], o
 [dev-dependencies]
 # The signing wallet and the signatures of a wallet message (AP-14).
 openbmt-core = { path = "../openbmt-core", features = ["test-support"] }
-# The recorded replies and the invoice writer of the tests.
-openbmt-lightning = { path = "../openbmt-lightning", features = ["testing"] }

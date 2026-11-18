@@ -40,7 +40,7 @@ esac
 
 # The files that are replaced by a twin in demo/kotlin-js/<app>/ (the JVM's
 # files, sockets, TLS and native libraries have no meaning in a page).
-skip=" DurableFile.kt LightningTransport.kt TorControl.kt ShareImages.kt QrNative.kt UrNative.kt Native.kt Socks5Probe.kt Pbkdf2Hasher.kt "
+skip=" DurableFile.kt TorControl.kt ShareImages.kt QrNative.kt UrNative.kt Native.kt Socks5Probe.kt Pbkdf2Hasher.kt "
 sources=()
 for f in "$common"/src/model/*.kt "${extra[@]}" "$app"/src/model/*.kt; do
     case "$skip" in *" $(basename "$f") "*) ;; *) sources+=("$f") ;; esac

@@ -88,12 +88,6 @@ ops run on another; it waits for at most 250 ms.
  47 pair_cancel      handle zero  args () -> ()
  48 pair_finish      handle zero  args (u64, list<u8>) -> list<u8>
  49 own_node_check   handle zero  args OwnNodeCheckArgs -> string
- 50 ln_setup         handle node  args LnSetupArgs -> LnRequestView
- 51 ln_reply         handle node  args LnReplyArgs -> LnStepView
- 52 ln_failed        handle node  args LnFailArgs -> ()
- 53 ln_pin           handle node  args (u64, list<u8>) -> bool
- 54 ln_next          handle node  args u64 -> option<LnRequestView>
- 55 ln_remove        handle node  args () -> ()
  56 take_relay       handle zero  args (list<u8>, list<u8>) -> list<u8>
  57 staff_record     handle node  args StaffArgs -> ()
  58 day_totals       handle node  args DayTotalsArgs -> DayTotalsView
@@ -144,7 +138,7 @@ CounterNetwork: enum, one tag byte
 ActorRole: enum, one tag byte
     tags Cashier=0 Manager=1
 ActorView: record: role: ActorRole, name: string
-StartConfig: record: dir: string, now: u64, record: list<u8>, proxy: option<string>, own_node: option<string>, lightning: option<list<u8>>, link_proxy: option<string>, shop_seed: option<list<u8>>
+StartConfig: record: dir: string, now: u64, record: list<u8>, proxy: option<string>, own_node: option<string>, link_proxy: option<string>, shop_seed: option<list<u8>>
 OwnNodeCheckArgs: record: text: string, network: CounterNetwork, tor: bool
 PairBeginArgs: record: offer: list<u8>, name: string, now: u64
 PairStartedView: record: request: list<u8>, words: list<string>, address: string, wallet: OwnWalletKind
@@ -193,7 +187,7 @@ HeartbeatOutcome: record: verified: bool, sent_at: option<u64>, words: Words, re
 HealthView: record: healthy: bool, behind: bool, words: Words
 OwnNodeView: record: usable: bool, words: Words
 ShopLightningView: record: needs_seed: bool, delete_seed: bool, why: option<Words>, scan: Words, funding_lost: option<Words>
-StatusView: record: checked_height: u32, tip_height: u32, health: option<HealthView>, own_node: option<OwnNodeView>, sales: list<u32>, refused_below_minimum: u64, stopped: bool, lightning: option<LightningStatusView>
+StatusView: record: checked_height: u32, tip_height: u32, health: option<HealthView>, own_node: option<OwnNodeView>, sales: list<u32>, refused_below_minimum: u64, stopped: bool
 RateSourceView: record: id: string, url: string, currency: string, initial: string
 RateParseArgs: record: source: string, response: list<u8>, fetched_at: u64
 SampleView: record: source: string, fetched_at: u64, minor_per_btc: u64
@@ -202,19 +196,7 @@ RateView: record: rate: u64, source_label: string, source_fetched_at: u64
 PlaceView: enum, one tag byte
     tags Shop=0 Giving=1
 SettingsView: record: version: u32, tor_on: bool, customer_wifi: bool, min_sale_sats: u64, currency: string, tips_on: bool, tip_percents: list<u8>, place: PlaceView
-LnKind: enum, one tag byte
-    tags Lnd=0 Cln=1
-LnSetupArgs: record: kind: LnKind, address: string, secret: string, cert: string
-LnMethod: enum, one tag byte
-    tags Get=0 Post=1
-LnRequestView: record: id: u64, host_port: string, method: LnMethod, path: string, header_name: string, header_value: string, body: option<string>
-LnReplyArgs: record: id: u64, status: u32, body: list<u8>
-LnTransportView: enum, one tag byte
-    tags PinRefused=0 Unreachable=1 TimedOut=2 TooBig=3 Redirected=4
-LnFailArgs: record: id: u64, why: LnTransportView
-LnStepView: record: next: option<LnRequestView>, record: option<list<u8>>
-LightningSaleView: record: invoice: bool, waiting: bool, unavailable: option<Words>, wait_secs_left: option<u64>, wait_secs_total: option<u64>
-LightningStatusView: record: ready: bool, words: Words
+LightningSaleView: record: invoice: bool, waiting: bool, unavailable: option<Words>
 ChangeValueKind: enum, one tag byte
     tags Units=0 Sats=1 Bps=2 Count=3 Seconds=4 Flag=5 Code=6
 BillKindView: enum, one tag byte

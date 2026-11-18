@@ -1,7 +1,5 @@
-//! Recorded replies and a writer of BOLT 11 invoices, for the tests of this
-//! crate and of the crates that drive it (`testing` feature). The fixtures
-//! are written from the projects' documents, not captured from a node. Not
-//! for use outside tests.
+//! A writer of BOLT 11 invoices, for the tests of this crate and of the
+//! crates that drive it (`testing` feature). Not for use outside tests.
 
 #![allow(missing_docs, clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 #![allow(clippy::indexing_slicing)]
@@ -10,10 +8,7 @@ use bitcoin::hashes::{sha256, Hash};
 use bitcoin::secp256k1::{Message, PublicKey, Secp256k1, SecretKey};
 use bitcoin::Network;
 
-use crate::credential::{CertPin, ClnCredential, Credential, Endpoint, LndCredential};
 use crate::invoice::Ask;
-use crate::request::Reply;
-use crate::text::{base64, hex, Alphabet};
 
 pub const COUNTER: [u8; 4] = [0xc0, 0xff, 0xee, 0x01];
 
@@ -27,61 +22,9 @@ pub fn node_key(seed: u8) -> [u8; 33] {
     PublicKey::from_secret_key(&Secp256k1::new(), &secret(seed)).serialize()
 }
 
-/// The bytes of a certificate-shaped DER sequence of `n` bytes inside.
-pub fn der(n: usize, fill: u8) -> Vec<u8> {
-    let mut out = match n {
-        0..=127 => vec![0x30, n as u8],
-        128..=255 => vec![0x30, 0x81, n as u8],
-        _ => vec![0x30, 0x82, (n >> 8) as u8, n as u8],
-    };
-    out.extend(std::iter::repeat_n(fill, n));
-    out
-}
-
-pub fn pin() -> CertPin {
-    CertPin::from_der(&der(300, 7)).expect("a pin")
-}
-
-pub fn endpoint() -> Endpoint {
-    Endpoint::parse("node.local:8080", pin()).expect("an endpoint")
-}
-
-/// A macaroon-shaped byte string.
-pub fn macaroon() -> Vec<u8> {
-    let mut m = vec![2u8];
-    m.extend((0..120).map(|i| i as u8));
-    m
-}
-
-pub fn lnd() -> Credential {
-    Credential::Lnd(LndCredential::new(endpoint(), &macaroon()).expect("lnd"))
-}
-
-/// A rune whose hash is 32 bytes and whose restrictions are the text.
-pub fn rune(restrictions: &str) -> String {
-    let mut bytes = vec![0xab; 32];
-    bytes.extend_from_slice(restrictions.as_bytes());
-    base64(&bytes, Alphabet::Url)
-        .trim_end_matches('=')
-        .to_string()
-}
-
-pub const INVOICE_RUNE: &str = "=7&method=invoice|method=listinvoices";
-
-pub fn cln() -> Credential {
-    Credential::Cln(ClnCredential::new(endpoint(), &rune(INVOICE_RUNE)).expect("cln"))
-}
-
-pub fn reply(status: u16, body: &str) -> Reply {
-    Reply {
-        status,
-        body: body.as_bytes().to_vec(),
-    }
-}
-
 pub fn ask() -> Ask {
     // 25,000 satoshis, for as long as a quote lasts.
-    Ask::sale(COUNTER, 17, 0, 25_000_000, 300).expect("an ask")
+    Ask::sale(17, 25_000_000, 300).expect("an ask")
 }
 
 // What follows writes a BOLT 11 invoice, with its own bech32 writer so that
@@ -278,134 +221,6 @@ impl Make {
         data.extend(groups_of(&bytes));
         bech32_write(&hrp, &data)
     }
-}
-
-/// The reply of LND to a request for an invoice.
-pub fn lnd_created(hash: &[u8; 32], bolt11: &str) -> Reply {
-    reply(
-        200,
-        &format!(
-            "{{\"r_hash\":\"{}\",\"payment_request\":\"{bolt11}\",\"add_index\":\"7\",\
-             \"payment_addr\":\"AAAA\"}}",
-            base64(hash, Alphabet::Standard)
-        ),
-    )
-}
-
-/// The reply of Core Lightning to a request for an invoice.
-pub fn cln_created(hash: &[u8; 32], bolt11: &str) -> Reply {
-    reply(
-        200,
-        &format!(
-            "{{\"bolt11\":\"{bolt11}\",\"payment_hash\":\"{}\",\"payment_secret\":\"{}\",\
-             \"expires_at\":1700000300,\"created_index\":3}}",
-            hex(hash),
-            hex(&[9; 32])
-        ),
-    )
-}
-
-/// The reply of LND to a lookup of an invoice by payment hash.
-pub fn lnd_lookup(
-    hash: &[u8; 32],
-    asked_msat: u64,
-    state: &str,
-    paid_msat: Option<u64>,
-    settled: Option<u64>,
-) -> Reply {
-    let mut body = format!(
-        "{{\"r_hash\":\"{}\",\"value_msat\":\"{asked_msat}\",\"state\":\"{state}\"",
-        base64(hash, Alphabet::Standard)
-    );
-    if let Some(p) = paid_msat {
-        body.push_str(&format!(",\"amt_paid_msat\":\"{p}\""));
-    }
-    if let Some(s) = settled {
-        body.push_str(&format!(",\"settle_date\":\"{s}\""));
-    }
-    body.push('}');
-    reply(200, &body)
-}
-
-/// The reply of Core Lightning to a lookup of an invoice by payment hash.
-pub fn cln_lookup(
-    hash: &[u8; 32],
-    asked_msat: u64,
-    status: &str,
-    received_msat: Option<u64>,
-    paid_at: Option<u64>,
-) -> Reply {
-    let mut item = format!(
-        "{{\"label\":\"x\",\"payment_hash\":\"{}\",\"status\":\"{status}\",\
-         \"amount_msat\":{asked_msat}",
-        hex(hash)
-    );
-    if let Some(r) = received_msat {
-        item.push_str(&format!(",\"amount_received_msat\":{r}"));
-    }
-    if let Some(t) = paid_at {
-        item.push_str(&format!(",\"paid_at\":{t}"));
-    }
-    item.push('}');
-    reply(200, &format!("{{\"invoices\":[{item}]}}"))
-}
-
-/// The reply of Core Lightning to a lookup of an invoice by label.
-pub fn cln_listed(
-    label: &str,
-    msat: u64,
-    status: &str,
-    description: &str,
-    hash: &[u8; 32],
-    bolt11: &str,
-) -> Reply {
-    reply(
-        200,
-        &format!(
-            "{{\"invoices\":[{{\"label\":\"{label}\",\"description\":\"{description}\",\
-             \"payment_hash\":\"{}\",\"status\":\"{status}\",\"expires_at\":1700000300,\
-             \"amount_msat\":{msat},\"bolt11\":\"{bolt11}\",\"created_index\":3}}]}}",
-            hex(hash)
-        ),
-    )
-}
-
-/// The `lndconnect://` text of the credential `lnd()`.
-pub fn lndconnect_text() -> String {
-    format!(
-        "lndconnect://node.local:8080?cert={}&macaroon={}",
-        base64(&der(300, 7), Alphabet::Url).trim_end_matches('='),
-        base64(&macaroon(), Alphabet::Url).trim_end_matches('=')
-    )
-}
-
-/// The SHA-256 fingerprint of the certificate of `pin()`, in hex.
-pub fn pin_fingerprint_hex() -> String {
-    hex(&pin().sha256())
-}
-
-/// The refusal of LND to a call its macaroon does not allow.
-pub fn lnd_denied() -> Reply {
-    reply(
-        500,
-        "{\"code\":2,\"message\":\"permission denied\",\"details\":[]}",
-    )
-}
-
-/// The refusal of Core Lightning to a call its rune does not allow.
-pub fn cln_denied() -> Reply {
-    reply(
-        401,
-        "{\"code\":1502,\"message\":\"Not permitted: method is not equal to getinfo\",\"data\":null}",
-    )
-}
-
-/// The reply of Core Lightning when the label of an invoice is used.
-pub fn cln_duplicate_label(label: &str) -> Reply {
-    reply(
-        500,
-        &format!("{{\"code\":900,\"message\":\"Duplicate label '{label}'\",\"data\":null}}"),
-    )
 }
 
 pub fn hash(seed: u8) -> [u8; 32] {

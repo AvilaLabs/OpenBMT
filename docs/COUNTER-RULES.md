@@ -887,18 +887,16 @@ limits in the signed settings: these rules only say when the counter uses it.
 
 ## 12. Lightning at the counter
 
-These rules join the invoices of the shop's own Lightning node
-(`docs/LIGHTNING-RULES.md`, LN-01 to LN-23; `docs/DESIGN.md` section 8) to
-the counter. The library of that document builds the requests, reads the
-replies and checks the invoice; the driver that asks the node is in
-`crates/openbmt-counter-node` (`lightning`); the judgment of a paid sale is in
-`crates/openbmt-counter`; the transport and the screens are the app's. The
-node's public key is part of the signed settings (LN-03); the credential the
-counter holds is not, and never leaves the counter.
+These rules join the invoices of Shop Lightning
+(`docs/SHOP-LIGHTNING-RULES.md`; the invoice and the code are read and made
+as `docs/LIGHTNING-RULES.md` says, LN-16 to LN-19) to the counter. The
+judgment of a paid sale is in `crates/openbmt-counter`; the node that makes
+the invoices is in `crates/openbmt-counter-node`; the screens are the
+app's.
 
 - **CR-109.** A sale is paid over Lightning when the shop's own node says
   the invoice made for it was settled for at least what a quote of the sale
-  asks (LN-14). `Counter::lightning_paid` takes the node's facts: the
+  asks (LN-21). `Counter::lightning_paid` takes the node's facts: the
   payment hash, the amount received in millisatoshis and the time the node
   says it settled. The sale is then paid and final at once, with no instant
   limit, no exposure and no wait for a block (DESIGN section 8): it shows
@@ -913,8 +911,7 @@ counter holds is not, and never leaves the counter.
   another way (accepted at once, accepted by a person, or with enough on its
   address) and for a payment below the least any quote of the sale asks: the
   invoice of an earlier quote may be paid after a newer quote asks more or
-  less, and the payment counts if it covers any of them (CR-112 keeps those
-  invoices watched). Asking again for a
+  less, and the payment counts if it covers any of them. Asking again for a
   sale that is paid over Lightning already changes nothing. The cashier's
   screen says "Lightning, final" as the check line (CR-105) and says that a
   refund for it is given in cash, never over Lightning.
@@ -940,55 +937,26 @@ counter holds is not, and never leaves the counter.
   counter holds no key that can pay.
 - **CR-217.** The owner's phone pays a refund only against payments it sees
   on the chain, and a payment over Lightning through the shop's own node is
-  not on the chain. So the counter offers only a cash refund (CR-71) for a sale whose payment is
-  all Lightning through the shop's own node, and refuses a request for a
-  bitcoin refund of it (CR-60) with "Refund in cash", for the cashier: "This
-  sale was paid over
-  Lightning, and the owner's phone can only check payments it sees on the
-  chain, so a bitcoin refund cannot be sent." and "Give the refund in cash
+  not on the chain. So the counter offers only a cash refund (CR-71) for a
+  sale whose payment is all Lightning through the shop's own node, and
+  refuses a request for a bitcoin refund of it (CR-60) with "Refund in
+  cash", for the cashier: "This sale was paid over Lightning, and the owner's
+  phone can only check payments it sees on the chain, so a bitcoin refund
+  cannot be sent." and "Give the refund in cash
   from the till." A sale paid partly over Lightning and partly on-chain can
   be refunded on-chain up to what arrived on-chain, less the requests that
   stand (withdrawn ones do not count here), and the rest in cash. A request
   past that is refused the same way. A sale that no Lightning payment
   settled has no such limit. The sale's details do not offer the request
   while nothing is left to ask on-chain. The owner's side does not change.
-- **CR-112.** The driver asks the node for an invoice for each quote of a sale:
-  the amount is the quote's satoshis times 1,000, the lifetime
-  `QUOTE_SECS` (CR-05, LN-13) and the attempt is the next one for that sale
-  and quote (LN-15). A new quote of the same sale (CR-05) asks for a new
-  invoice and drops nothing: the invoice of an earlier quote is still the
-  shop's node's, and the customer may have scanned it, so the driver keeps
-  every invoice of a sale, each with its own lifetime, until that has run out
-  (`QUOTE_SECS` after the quote, with the grace of the lookups) or the node
-  says it is settled, cancelled or unknown. The invoice of the sale's current
-  quote is looked up every 2 seconds while the sale is open and unpaid. An
-  earlier invoice of an open sale, and every invoice of a sale that is closed
-  (paid, cancelled, expired or final), is looked up every 10 seconds. At most
-  one request is out at a time for the whole driver. A node that cannot be
-  reached, or whose reply is refused, is a note in the log and never a state
-  of the sale. The driver holds no clock and no network: it hands out the
-  next request with a number and takes the reply for that number; a reply for
-  any other number, or for an invoice the driver no longer holds, is ignored.
-  An earlier invoice of an open sale that the node says is settled is a
-  payment of the sale (CR-109); one of a sale that is closed is a late payment
-  (CR-117). When the counter starts again, the driver holds nothing, so for
-  each sale from the counter's records it asks Core Lightning by label (the
-  label carries the sale and the attempt, LN-15, which is the quote's place in
-  the sale) for the invoice of every quote whose lifetime has not run out,
-  for a sale that is open and for one that is over, and watches those that
-  come back, an invoice already paid while the counter was stopped included.
-  The current quote of an open sale asks as it did when the sale began. A
-  label the node does not know is dropped. LND has no labels, so after a
-  restart only the current quote's invoice is made again there.
 - **CR-113.** The sale shows its on-chain code at once and never waits for
-  Lightning. When the invoice has passed LN-17 against the node key of the
-  signed settings, the code becomes the code of LN-18, in capitals when LN-19
-  allows. If no invoice has come 6 seconds after the quote, or it fails a
-  check, the on-chain code stays and one line says that Lightning is not
-  available for this sale, with the reason under the details (LN-22): the
-  cashier takes another kind of payment if the customer has only Lightning
-  and tells the owner what the details say. A sale opened with no Lightning
-  credential, or while Lightning is off (CR-116), has no such line.
+  Lightning. When an invoice has come and passed its checks (LN-17), the code
+  becomes the code of LN-18, in capitals when LN-19 allows. If no invoice
+  comes, or it fails a check, the on-chain code stays and one line says that
+  Lightning is not available for this sale, with the reason under the details:
+  the cashier takes another kind of payment if the customer has only
+  Lightning and tells the owner what the details say. A sale opened while
+  Lightning is off has no such line.
 - **CR-283. Over the limit, Lightning first.** A customer at the counter
   who pays on-chain for a sale above the instant limits waits for a block,
   about ten minutes; one who pays over Lightning is done at once. So when a
@@ -996,9 +964,9 @@ counter holds is not, and never leaves the counter.
   always waits, CR-10), the counter asks the instant decision (CR-12 step 7)
   for the quote's amount as if the light check had just seen a payment of
   it. If that answer is a wait, for any reason, and the sale's invoice is one
-  whose payment is final at once (from the shop's own node, CR-112, or from
-  Shop Lightning within the room of `docs/SHOP-LIGHTNING-RULES.md` SL-40 over
-  channels whose funding is confirmed), the code shown is the invoice alone,
+  whose payment is final at once (from Shop Lightning within the room of
+  `docs/SHOP-LIGHTNING-RULES.md` SL-40 over channels whose funding is
+  confirmed), the code shown is the invoice alone,
   `lightning:` and the invoice, in capitals when LN-19 allows, and the tag
   holds the same text (`docs/TAP-RULES.md` TP-01). Under the code are one
   line and one button:
@@ -1016,40 +984,6 @@ counter holds is not, and never leaves the counter.
   button. The answer is asked again at each quote,
   so a sale whose amount drops under the limit shows the code of CR-113 at
   its next quote.
-- **CR-114.** The app talks to the node over HTTPS only, with no redirect, a
-  body of at most 1,000,000 bytes, a connect timeout of 20 seconds through Tor
-  and 10 directly, and a read timeout of 15 seconds. It goes through Orbot's
-  SOCKS proxy, with the name unresolved so that the proxy resolves it, when
-  the host ends in `.onion` or the shop's Tor setting is on (CR-87), and
-  directly otherwise. A home-network host is allowed, because the certificate
-  is pinned and every invoice must be signed by the node key of the settings
-  (LN-12, LN-17). The handshake is accepted only when the library accepts
-  the leaf certificate (`CertPin::accepts`); the host name is not checked and
-  no authority is asked. One worker thread makes the requests the node hands
-  out.
-- **CR-115.** The credential is set on the counter behind the manager's PIN
-  (CR-84 to CR-86): for LND the `lndconnect://` address, scanned or pasted;
-  for Core Lightning the address, the rune and the certificate, one field
-  each. The setup words say that the counter holds a key limited to
-  invoices, that the node must run a current release (LN-04) and that
-  running Lightning means watching liquidity, updates and backups (DESIGN
-  section 8). The connection is tested as LN-20 says, against the node key of
-  the signed settings; if the settings name no node, nothing is tested or
-  saved and the words say that the owner has not named the shop's Lightning
-  node yet. The credential is saved only after the test passes, sealed like
-  the counter's other secrets (CR-98) in the app's `noBackupFilesDir`,
-  and removing it deletes it at once. It is never part of the pairing record
-  or the settings, and is never in a log or a screen. The screen where it is
-  typed is kept out of screenshots, recordings and recent apps
-  (`FLAG_SECURE`).
-- **CR-116.** The counter's status shows a Lightning line only when a
-  credential is saved: "Lightning ready", or why not: the node cannot be
-  reached, it refused the key, or the settings name another node now. The
-  credential is kept with the node key it was tested against. When the signed
-  settings name another node or none, or the saved credential does not read
-  back, Lightning is off, the status says so, and it stays off until the
-  credential is set up again; a sale then has no Lightning line (CR-113).
-
 - **CR-117.** An invoice of a sale that the node says is settled when the
   sale is over (cancelled, expired or final) or was paid another way (accepted
   at once, by a person, or with enough on its address), or when the sale was
@@ -1063,14 +997,8 @@ counter holds is not, and never leaves the counter.
   transaction, with at least one satoshi, so that the stored sale does not
   change. The invoice that paid the sale, and one recorded already, change
   nothing. The books list it as a late payment with the hash in place of the
-  transaction ID. A write that fails leaves the invoice in the driver, which
+  transaction ID. A write that fails leaves the invoice with the node, which
   asks again.
-- **CR-118.** The driver keeps at most 8 invoices for one sale. A quote past
-  that gets no invoice: the sale keeps its on-chain code and shows the line
-  of CR-113 that Lightning is not available for this sale, with the reason
-  under the details: "this sale has had too many quotes for Lightning". The
-  earlier invoices stay watched (CR-112).
-
 ## 13. Talking to the owner through the Box
 
 These rules join the counter to the owner through a relay, which is

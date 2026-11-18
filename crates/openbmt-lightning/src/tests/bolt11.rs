@@ -352,16 +352,16 @@ fn ln_17_the_signer_is_the_node_of_the_settings_not_the_one_the_node_names() {
 
 #[test]
 fn ln_17_the_check_is_for_the_ask_made() {
-    // The test invoice of a connection test has its own amount and text.
-    let test = Ask::test(COUNTER, 5);
+    // Another sale has its own amount and text.
+    let test = Ask::sale(5, 1_000, 300).unwrap();
     let mut m = good();
     m.msat = Some(1_000);
-    m.description = Some("OpenBMT test".to_string());
+    m.description = Some("Sale 5".to_string());
     let e = Expectation {
         ask: test,
         ..expect()
     };
     assert!(check(&m.write(), &e).is_ok());
-    // A sale's invoice does not pass as a test.
+    // The invoice of sale 17 does not pass as the one of sale 5.
     assert!(check(&good().write(), &e).is_err());
 }

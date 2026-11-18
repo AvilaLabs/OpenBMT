@@ -232,11 +232,6 @@ jobs:
             script: hw-key2-e2e-core.sh
           - label: Owner own spend against Core
             script: owner-own-spend-e2e-core.sh
-          - label: Lightning against Core, LND and Core Lightning
-            script: lightning-e2e-core.sh
-            lnd: true
-            cln: true
-            kotlin: true
           - label: float against Core
             script: float-e2e-core.sh
           - label: shop Lightning against Core and LND
@@ -294,46 +289,6 @@ jobs:
           tar -xzf "$archive" -C "$RUNNER_TEMP/lnd" --strip-components=1
           test -x "$RUNNER_TEMP/lnd/lnd"
           echo "LND_DIR=$RUNNER_TEMP/lnd" >> "$GITHUB_ENV"
-      # The Ubuntu 24.04 build of the release: the runner image is Ubuntu
-      # 24.04, and no 26.04 runner is in use.
-      - name: Download verified Core Lightning v26.06.10
-        if: matrix.cln
-        shell: bash
-        run: |
-          archive="$RUNNER_TEMP/clightning-v26.06.10-Ubuntu-24.04-amd64.tar.xz"
-          curl --fail --location --retry 3 \
-            --output "$archive" \
-            https://github.com/ElementsProject/lightning/releases/download/v26.06.10/clightning-v26.06.10-Ubuntu-24.04-amd64.tar.xz
-          # SHA-256 from the release's SHA256SUMS.
-          echo "dbfb97c2a42f4446f4ac5217fff9274a3fda9996e3ea37c9c8a3e7bd8b17d200  $archive" \
-            | sha256sum --check --strict
-          mkdir -p "$RUNNER_TEMP/cln"
-          tar -xJf "$archive" -C "$RUNNER_TEMP/cln"
-          test -x "$RUNNER_TEMP/cln/usr/bin/lightningd"
-          sudo apt-get update
-          sudo apt-get install -y libpq5 libsodium23
-          echo "CLN_DIR=$RUNNER_TEMP/cln" >> "$GITHUB_ENV"
-          echo "CLN_LIBS=/usr/lib/x86_64-linux-gnu" >> "$GITHUB_ENV"
-      - name: Download verified Kotlin compiler 2.2.20
-        if: matrix.kotlin
-        shell: bash
-        run: |
-          archive="$RUNNER_TEMP/kotlin-compiler-2.2.20.zip"
-          curl --fail --location --retry 3 \
-            --output "$archive" \
-            https://github.com/JetBrains/kotlin/releases/download/v2.2.20/kotlin-compiler-2.2.20.zip
-          # SHA-256 published in JetBrains' v2.2.20 release asset metadata.
-          echo "81f0264c9073b5cbbdb3ff8418cf2c5dac076879fc156fa1a6462f5a5acc4420  $archive" \
-            | sha256sum --check --strict
-          mkdir -p "$RUNNER_TEMP/kotlin"
-          unzip -q "$archive" -d "$RUNNER_TEMP/kotlin"
-          kotlin_home="$RUNNER_TEMP/kotlin/kotlinc"
-          test -f "$kotlin_home/lib/annotations-13.0.jar"
-          echo "JAVA_HOME=$JAVA_HOME_21_X64" >> "$GITHUB_ENV"
-          echo "KOTLIN_HOME=$kotlin_home" >> "$GITHUB_ENV"
-          echo "KOTLIN_COMPILER_CP=$kotlin_home/lib/*" >> "$GITHUB_ENV"
-          echo "KOTLIN_STDLIB_JAR=$kotlin_home/lib/kotlin-stdlib.jar" >> "$GITHUB_ENV"
-          echo "KOTLIN_ANNOTATIONS_JAR=$kotlin_home/lib/annotations-13.0.jar" >> "$GITHUB_ENV"
       # Each script builds the binaries it needs when none are given, and
       # runs its ports at the defaults: every job has a machine of its own.
       - name: Run the script

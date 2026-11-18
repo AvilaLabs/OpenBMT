@@ -6,7 +6,6 @@ mod confirm;
 mod dirstore;
 mod heartbeat;
 mod kit;
-mod lightning;
 mod link;
 mod node;
 mod node_only;

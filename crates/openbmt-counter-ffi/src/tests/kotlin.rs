@@ -152,11 +152,8 @@ fn the_kotlin_results_read_their_fields_in_the_order_the_rust_types_write_them()
         "u32(), option { u64() }, u64(), option { u64() }, u64(), refundState(), role(), string(), u64(),",
         "HeartbeatOutcome(bool(), option { u64() }, words(), reports())",
         "u32(), u32(), option { Health(bool(), bool(), words()) },",
-        "option { OwnNodeStatus(bool(), words()) }, u32s(), u64(), bool(),",
-        "option { LightningStatus(bool(), words()) }",
-        "LightningSale(bool(), bool(), option { words() }, option { u64() }, option { u64() })",
-        "LnRequest(u64(), string(), lnMethod(), string(), string(), string(), option { string() })",
-        "LnStep(option { lnRequest() }, option { bytes() })",
+        "option { OwnNodeStatus(bool(), words()) }, u32s(), u64(), bool()",
+        "LightningSale(bool(), bool(), option { words() })",
         "Report.BooksFinal(u32(), u64(), string(), u64())",
         "RateSource(string(), string(), string(), string())",
         "Sample(string(), u64(), u64())",
@@ -185,16 +182,12 @@ fn the_kotlin_results_read_their_fields_in_the_order_the_rust_types_write_them()
         "Payment: record: address: string, uri: string, copy_uri: string, qr_size: u32, qr_bits: list<u8>, tag: list<u8>",
         "PumpView: record: reports: list<ReportView>, notes: list<string>, stopped: bool",
         "HeartbeatOutcome: record: verified: bool, sent_at: option<u64>, words: Words, reports: list<ReportView>",
-        "StatusView: record: checked_height: u32, tip_height: u32, health: option<HealthView>, own_node: option<OwnNodeView>, sales: list<u32>, refused_below_minimum: u64, stopped: bool, lightning: option<LightningStatusView>",
-        "LightningSaleView: record: invoice: bool, waiting: bool, unavailable: option<Words>, \
-         wait_secs_left: option<u64>, wait_secs_total: option<u64>",
-        "LightningStatusView: record: ready: bool, words: Words",
-        "LnRequestView: record: id: u64, host_port: string, method: LnMethod, path: string, header_name: string, header_value: string, body: option<string>",
-        "LnStepView: record: next: option<LnRequestView>, record: option<list<u8>>",
+        "StatusView: record: checked_height: u32, tip_height: u32, health: option<HealthView>, own_node: option<OwnNodeView>, sales: list<u32>, refused_below_minimum: u64, stopped: bool",
+        "LightningSaleView: record: invoice: bool, waiting: bool, unavailable: option<Words>",
         "HealthView: record: healthy: bool, behind: bool, words: Words",
         "OwnNodeView: record: usable: bool, words: Words",
         "OwnNodeCheckArgs: record: text: string, network: CounterNetwork, tor: bool",
-        "StartConfig: record: dir: string, now: u64, record: list<u8>, proxy: option<string>, own_node: option<string>, lightning: option<list<u8>>, link_proxy: option<string>, shop_seed: option<list<u8>>",
+        "StartConfig: record: dir: string, now: u64, record: list<u8>, proxy: option<string>, own_node: option<string>, link_proxy: option<string>, shop_seed: option<list<u8>>",
         "PairingView: record: network: CounterNetwork, settings: SettingsView, relay: RelayKind",
         "LinkView: record: words: Words, connected: bool, since: option<u64>, refused: bool, heartbeats_taken: u64, owner_records: u64, last_check_in_at: option<u64>, settings_version: u32, restart_needed: bool, settings_line: option<Words>",
         "LinkStepView: record: link: LinkView, notes: list<string>",
@@ -283,7 +276,7 @@ fn the_kotlin_wrapper_takes_no_lock_so_that_pump_and_the_screen_can_run_together
 }
 
 const START_FRAME_HEX: &str =
-    "4f424d6d010100000000000000000001000000640100000000000000010000000201010000007001010000006f0101000000030000";
+    "4f424d6d010100000000000000000001000000640100000000000000010000000201010000007001010000006f0000";
 
 #[test]
 fn the_start_request_is_the_same_bytes_in_rust_and_in_the_kotlin_harness() {
@@ -293,7 +286,6 @@ fn the_start_request_is_the_same_bytes_in_rust_and_in_the_kotlin_harness() {
         record: vec![2],
         proxy: Some("p".to_string()),
         own_node: Some("o".to_string()),
-        lightning: Some(vec![3]),
         link_proxy: None,
         shop_seed: None,
     };
@@ -307,19 +299,6 @@ fn the_start_request_is_the_same_bytes_in_rust_and_in_the_kotlin_harness() {
     // The Kotlin harness holds the same literal.
     let kotlin_hex = harness_hex("START_FRAME_HEX");
     assert_eq!(kotlin_hex, START_FRAME_HEX);
-}
-
-const LN_REPLY_FRAME_HEX: &str = "4f424d6d01330001000000000000000700000000000000c8000000\
-020000007b7d";
-
-#[test]
-fn the_ln_reply_request_is_the_same_bytes_in_rust_and_in_the_kotlin_harness() {
-    let bytes = frame(51, 1, &W::new().u64(7).u32(200).bytes(b"{}").0);
-    let hex: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
-    assert_eq!(hex, LN_REPLY_FRAME_HEX);
-    // The Kotlin harness holds the same bytes, in its own pieces.
-    let kotlin_hex = harness_hex("LN_REPLY_FRAME_HEX");
-    assert_eq!(kotlin_hex, LN_REPLY_FRAME_HEX);
 }
 
 const TAP_ANSWER_HEX: &str =

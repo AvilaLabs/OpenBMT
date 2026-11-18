@@ -15,9 +15,8 @@ use openbmt_lightning::PaidFacts;
 use openbmt_link::shopln::LightningReport;
 use openbmt_net_io::DriverConfig;
 
-use crate::lightning::SaleLightning;
 use crate::lnshim::funding::FundingEvent;
-use crate::shopln::{SeedNotTaken, Why};
+use crate::shopln::{SaleLightning, SeedNotTaken, Why};
 
 /// What the app gives the counter at its start for Shop Lightning.
 pub struct ShopLnConfig {

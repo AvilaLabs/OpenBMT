@@ -1,6 +1,6 @@
 [package]
 name = "openbmt-lightning"
-description = "A counter's own-node Lightning invoices: the text of each request to the merchant's node (LND, Core Lightning), the strict reading of each reply, the check of the BOLT 11 invoice and the BIP 321 code. No network, no clock, no TLS"
+description = "The check of a BOLT 11 invoice and the BIP 321 code of a Lightning payment for the counter. No network, no clock, no TLS"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -16,9 +16,7 @@ publish.workspace = true
 [dependencies]
 bitcoin = { version = "=0.32.8", default-features = false, features = ["std", "secp-recovery"] }
 openbmt-core = { path = "../openbmt-core" }
-openbmt-json = { path = "../openbmt-json" }
 
-# Recorded replies and an invoice writer, for the tests of the crates that drive
-# this one. Never on in a build of the app.
+# An invoice writer, for the tests of the crates that drive this one. Never on in a build of the app.
 [features]
 testing = []

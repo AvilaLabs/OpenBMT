@@ -6,11 +6,7 @@ import java.io.ByteArrayOutputStream
 object ProtocolDecoderTest {
     /** The `start` request of [sampleConfig], as the Rust test of the same name writes it. */
     private const val START_FRAME_HEX =
-        "4f424d6d010100000000000000000001000000640100000000000000010000000201010000007001010000006f0101000000030000"
-
-    /** The `ln_reply` request for handle 1, as the Rust test of the same name writes it. */
-    private const val LN_REPLY_FRAME_HEX =
-        "4f424d6d01330001000000000000000700000000000000c8000000" + "020000007b7d"
+        "4f424d6d010100000000000000000001000000640100000000000000010000000201010000007001010000006f0000"
 
     /** The `rate_parse` and `rate_combine` requests, as the Rust test of the same name writes them. */
     private const val RATE_PARSE_HEX =
@@ -342,11 +338,7 @@ object ProtocolDecoderTest {
         }
         decodeResponse(screenFrame(lightning = 6)).screen().also {
             val ln = it.lightning ?: error("a Lightning line")
-            check(ln.waiting && ln.waitSecsLeft == 4L && ln.waitSecsTotal == 6L)
-        }
-        decodeResponse(screenFrame(lightning = 1)).screen().also {
-            val ln = it.lightning ?: error("a Lightning line")
-            check(ln.waitSecsLeft == null && ln.waitSecsTotal == null)
+            check(!ln.invoice && ln.waiting && ln.unavailable == null)
         }
         rejects("a bool in the Lightning line") { decodeResponse(screenFrame(lightning = 3)).screen() }
         decodeResponse(screenFrame(check = true)).screen().also { check(it.check?.heading == "Light check") }
@@ -420,7 +412,7 @@ object ProtocolDecoderTest {
 
     /** The status with and without the own node's line (CR-107). */
     private fun statuses() {
-        fun status(own: Boolean, flag: Int = if (own) 1 else 0, lightning: Boolean = false): ByteArray {
+        fun status(own: Boolean, flag: Int = if (own) 1 else 0): ByteArray {
             val out = ByteArrayOutputStream()
             out.write(Writer().u32(5).u32(6).toByteArray())
             out.write(0) // no health answer yet
@@ -430,26 +422,13 @@ object ProtocolDecoderTest {
                 words(out, 0, 0, "Your node is not reachable".toByteArray(Charsets.UTF_8))
             }
             out.write(Writer().u32(1).u32(0).u64(0).u8(0).toByteArray())
-            if (lightning) {
-                out.write(1)
-                out.write(1) // ready
-                words(out, 1, 0, "Lightning ready".toByteArray(Charsets.UTF_8))
-            } else {
-                out.write(0)
-            }
             return header(0, out.toByteArray())
         }
         decodeResponse(status(false)).let { r ->
             val s = r.statusView()
             r.end()
             check(s.checkedHeight == 5L && s.tipHeight == 6L && s.health == null && s.ownNode == null)
-            check(s.sales == listOf(0L) && !s.stopped && s.lightning == null)
-        }
-        decodeResponse(status(false, lightning = true)).let { r ->
-            val s = r.statusView()
-            r.end()
-            val ln = s.lightning ?: error("a Lightning line")
-            check(ln.ready && ln.words.heading == "Lightning ready")
+            check(s.sales == listOf(0L) && !s.stopped)
         }
         decodeResponse(status(true)).let { r ->
             val s = r.statusView()
@@ -474,37 +453,9 @@ object ProtocolDecoderTest {
                 record = byteArrayOf(2),
                 proxy = "p",
                 ownNode = "o",
-                lightning = byteArrayOf(3),
                 linkProxy = null,
             )
         check(hex(startFrame(config)) == START_FRAME_HEX) { hex(startFrame(config)) }
-        val reply = lnReplyFrame(1, 7, 200, byteArrayOf(0x7b, 0x7d))
-        check(hex(reply) == LN_REPLY_FRAME_HEX) { hex(reply) }
-        lightning()
-    }
-
-    /** The results of the Lightning ops. */
-    private fun lightning() {
-        val request = Writer().u64(9).string("node.local:8080").u8(1).string("/v1/invoices")
-            .string("Rune").string("secret").u8(1).string("{}").toByteArray()
-        decodeResponse(header(0, Writer().u8(1).raw(request).u8(0).toByteArray())).let { r ->
-            val step = r.lnStep()
-            r.end()
-            val next = step.next ?: error("a request")
-            check(next.id == 9L && next.hostPort == "node.local:8080" && next.method == LnMethod.Post)
-            check(next.path == "/v1/invoices" && next.headerName == "Rune" && next.body == "{}")
-            check(!next.toString().contains("secret"))
-            check(step.record == null)
-        }
-        decodeResponse(header(0, Writer().u8(0).u8(1).bytes(byteArrayOf(1, 2, 3)).toByteArray())).let { r ->
-            val step = r.lnStep()
-            r.end()
-            check(step.next == null && step.record!!.contentEquals(byteArrayOf(1, 2, 3)))
-        }
-        rejects("a request method") {
-            val bad = Writer().u64(9).string("h:1").u8(2).string("/").string("n").string("v").u8(0).toByteArray()
-            decodeResponse(header(0, bad)).lnRequest()
-        }
     }
 
     private fun hex(bytes: ByteArray): String = bytes.joinToString("") { "%02x".format(it) }
@@ -644,15 +595,6 @@ object ProtocolDecoderTest {
             }
             6 -> out.write(byteArrayOf(1, 0, 1, 0))
             else -> out.write(byteArrayOf(1, 2, 0, 0))
-        }
-        // CR-286: the seconds of the wait for the invoice follow the Lightning line, when there is one.
-        if (lightning == 6) {
-            out.write(1)
-            out.write(Writer().u64(4).toByteArray())
-            out.write(1)
-            out.write(Writer().u64(6).toByteArray())
-        } else if (lightning != 0) {
-            out.write(byteArrayOf(0, 0))
         }
         out.write(lightningFirst)
         out.write(Writer().u64(0).toByteArray())

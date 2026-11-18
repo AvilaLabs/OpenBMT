@@ -40,10 +40,7 @@ use openbmt_counter_node::say::{change_confirmed_words, switch_dropped_words, sw
 use openbmt_counter_node::{effective_settings_of, own_node_setting};
 use openbmt_counter_node::{
     DirStore, DriverPort, HeartbeatNotTaken, Launch, Node, NodeConfig, PairedRecord, RecordRefused,
-    SaleLightning, SettingsFault, SetupStep, ShopLnConfig, StartError, NOTE_LOG,
-};
-use openbmt_lightning::{
-    CertPin, ClnCredential, Credential, Endpoint, LndCredential, Reply as LnReply,
+    SaleLightning, SettingsFault, ShopLnConfig, StartError, NOTE_LOG,
 };
 use openbmt_net_io::{
     Clock, Driver, DriverConfig, EventReceiver, FileStorage, OsRandomness, OwnNodeEvent,
@@ -60,8 +57,7 @@ use crate::relay::{LinkPlan, LinkSlot, LEASE_WAIT};
 use crate::say::words_for;
 use crate::views::{
     ActorView, AddNoteArgs, CancelArgs, CashArgs, ChangeStateView, DayTotalsArgs, DayTotalsView,
-    HealthView, HeartbeatOutcome, LightningSaleView, LightningStatusView, LinkStepView, LinkView,
-    LnFailArgs, LnKind, LnReplyArgs, LnRequestView, LnSetupArgs, LnStepView, OpenArgs,
+    HealthView, HeartbeatOutcome, LightningSaleView, LinkStepView, LinkView, OpenArgs,
     OpenRequestArgs, OpenTipArgs, OpenedView, OverrideArgs, OwnNodeView, PendingChangeView,
     PendingSwitchView, PumpView, RefundArgs, RefundAskView, RefundRow, ReportView, RequestRow,
     RequoteArgs, SaleInfoView, ScreenView, ShopLightningView, StaffArgs, StartConfig, StatusView,
@@ -455,8 +451,6 @@ fn check_start(
     // holds.
     config.announce_settings = record.relay().is_some();
     config.clock = Box::new(AppClock(Arc::clone(clock)));
-    // CR-115: the saved Lightning connection, if the app has one.
-    config.lightning = req.lightning;
     // SL-70 to SL-78: Shop Lightning, which runs only if the settings name
     // this counter. The relay of the pairing is the Box that keeps the second
     // copy, and the counter's identity seals what is sent to it.
@@ -928,15 +922,10 @@ impl Entry {
                 // the on-chain code alone, with no Lightning line.
                 SaleLightning::Waiting | SaleLightning::Invoice(_) if part_paid => {}
                 SaleLightning::Waiting => {
-                    // CR-286: the wait of CR-113 shows its seconds; the ring
-                    // goes when the time is over, it does not stay at 0.
-                    let wait = node.lightning_wait(index);
                     lightning = Some(LightningSaleView {
                         invoice: false,
                         waiting: true,
                         unavailable: None,
-                        wait_secs_left: wait.map(|(left, _)| left),
-                        wait_secs_total: wait.map(|(_, total)| total),
                     });
                 }
                 SaleLightning::Invoice(checked) => {
@@ -948,8 +937,6 @@ impl Entry {
                         invoice: code.is_some(),
                         waiting: false,
                         unavailable: None,
-                        wait_secs_left: None,
-                        wait_secs_total: None,
                     });
                     if code.is_some() {
                         payment = code;
@@ -971,8 +958,6 @@ impl Entry {
                         invoice: false,
                         waiting: false,
                         unavailable: Some(WordsView(words)),
-                        wait_secs_left: None,
-                        wait_secs_total: None,
                     });
                 }
             }
@@ -1327,99 +1312,7 @@ impl Entry {
                 sales: node.sales().collect(),
                 refused_below_minimum: node.counter().refused_below_minimum(),
                 stopped: node.stopped(),
-                lightning: node.lightning_status().map(|s| LightningStatusView {
-                    ready: s.ready,
-                    words: WordsView(s.words),
-                }),
             })
-        })
-    }
-
-    // Lightning (CR-112 to CR-116).
-
-    /// CR-115: begin the test of a connection a manager scanned or typed.
-    pub(crate) fn ln_setup(&self, a: LnSetupArgs) -> Result<LnRequestView, CounterError> {
-        let refused = |e: openbmt_lightning::CredentialRefused| from_rule(e.rule(), &e, e.words());
-        let credential = match a.kind {
-            LnKind::Lnd => {
-                Credential::Lnd(LndCredential::from_lndconnect(a.address.trim()).map_err(refused)?)
-            }
-            LnKind::Cln => {
-                let cert = a.cert.trim();
-                let pin = if cert.contains("-----BEGIN") {
-                    CertPin::from_pem(cert)
-                } else {
-                    CertPin::from_sha256_hex(cert)
-                }
-                .map_err(refused)?;
-                let endpoint = Endpoint::parse(a.address.trim(), pin).map_err(refused)?;
-                Credential::Cln(ClnCredential::new(endpoint, a.secret.trim()).map_err(refused)?)
-            }
-        };
-        self.run(None, |node, _, _| {
-            node.lightning_setup(credential)
-                .map(LnRequestView::from)
-                .map_err(|e| from_rule(e.rule(), &e, e.words()))
-        })
-    }
-
-    /// CR-112, CR-115: the answer to a request. For a setup request it is
-    /// the next one of the test or the record to keep; for the node's own
-    /// requests it changes the sale and returns nothing.
-    pub(crate) fn ln_reply(&self, a: LnReplyArgs) -> Result<LnStepView, CounterError> {
-        let status = u16::try_from(a.status)
-            .map_err(|_| refused_by("ln-status", "an HTTP status is at most 65535"))?;
-        let reply = LnReply {
-            status,
-            body: a.body,
-        };
-        self.run(None, |node, _, _| {
-            if !node.lightning_is_setup(a.id) {
-                node.lightning_reply(a.id, &reply);
-                return Ok(LnStepView {
-                    next: None,
-                    record: None,
-                });
-            }
-            match node.lightning_setup_answer(a.id, &reply) {
-                Ok(SetupStep::More(next)) => Ok(LnStepView {
-                    next: Some(next.into()),
-                    record: None,
-                }),
-                Ok(SetupStep::Done(record)) => Ok(LnStepView {
-                    next: None,
-                    record: Some(record),
-                }),
-                Err(e) => Err(from_rule(e.rule(), &e, e.words())),
-            }
-        })
-    }
-
-    /// CR-114: the request got no answer. A setup request says why the test
-    /// stopped; the node's own requests are tried again by the driver.
-    pub(crate) fn ln_failed(&self, a: LnFailArgs) -> Result<(), CounterError> {
-        self.run(None, |node, _, _| {
-            if node.lightning_is_setup(a.id) {
-                let e = node.lightning_setup_failed(a.id, a.why.of());
-                return Err(from_rule(e.rule(), &e, e.words()));
-            }
-            node.lightning_failed(a.id, a.why.of());
-            Ok(())
-        })
-    }
-
-    /// CR-114: whether the certificate the node showed is the pinned one for
-    /// the request with this number.
-    pub(crate) fn ln_pin(&self, id: u64, der: &[u8]) -> Result<bool, CounterError> {
-        self.run(None, |node, _, _| {
-            Ok(node.lightning_pin(id).is_some_and(|pin| pin.accepts(der)))
-        })
-    }
-
-    /// CR-112: the next request the node must send, if one is due.
-    pub(crate) fn ln_next(&self, now: u64) -> Result<Option<LnRequestView>, CounterError> {
-        self.run(Some(now), |node, _, _| {
-            Ok(node.lightning_next().map(LnRequestView::from))
         })
     }
 
@@ -1458,14 +1351,6 @@ impl Entry {
                     ))
                 }),
             })
-        })
-    }
-
-    /// CR-115: remove the Lightning connection at once.
-    pub(crate) fn ln_remove(&self) -> Result<(), CounterError> {
-        self.run(None, |node, _, _| {
-            node.lightning_remove();
-            Ok(())
         })
     }
 

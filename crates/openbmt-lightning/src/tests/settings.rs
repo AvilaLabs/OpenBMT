@@ -41,10 +41,7 @@ fn ln_03_changing_the_node_in_the_settings_loosens() {
     assert_eq!(classify_change(&b, &a), Change::Tightening);
     a.lightning_node = Some(node_key(2));
     assert_eq!(classify_change(&a, &b), Change::Loosening);
-    // The credential is not in the settings: they hold no secret of the
-    // counter, only the public key of the node.
+    // The settings hold only the public key of the node.
     let bytes = b.encode();
-    let macaroon = macaroon();
-    assert!(!bytes.windows(macaroon.len()).any(|w| w == macaroon));
     assert!(bytes.windows(33).any(|w| w == node_key(1)));
 }

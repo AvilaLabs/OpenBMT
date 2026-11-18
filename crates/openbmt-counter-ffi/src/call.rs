@@ -53,12 +53,6 @@
 //!   (CR-228, CR-229).
 //! - 49 `own_node_check` reads the own node's address a manager typed
 //!   (CR-100 to CR-102) and works on no node.
-//! - 50 to 55 Lightning through the shop's own node (CR-112 to CR-116):
-//!   `ln_setup` begins the test of a connection and `ln_reply` and
-//!   `ln_failed` take the answers to its requests and to the ones `ln_next`
-//!   hands out; `ln_pin` says whether the certificate a node showed is the
-//!   pinned one; `ln_remove` deletes the connection. The app sends the
-//!   requests (HTTPS only, CR-114); the library decides everything else.
 //! - 56 `take_relay` takes the owner's signed relay for counters into a
 //!   pairing record (CR-132) and works on no node.
 //! - 57 `staff_record` writes a change to the cashiers as a record (CR-143)
@@ -148,13 +142,12 @@ use crate::till::{TillRow, TillSaleView, TillStartArgs};
 use crate::views::{
     put_words, ActorRole, ActorView, AddNoteArgs, CancelArgs, CashArgs, ChangeFieldView,
     ChangeStateView, ChangeValueKind, ChangeValueView, CounterNetwork, DayTotalsArgs,
-    DayTotalsView, HealthView, HeartbeatOutcome, LightningSaleView, LightningStatusView,
-    LinkStepView, LinkView, LnFailArgs, LnKind, LnMethod, LnReplyArgs, LnRequestView, LnSetupArgs,
-    LnStepView, LnTransportView, OpenArgs, OpenRequestArgs, OpenTipArgs, OpenedView, OverrideArgs,
-    OwnNodeCheckArgs, OwnNodeView, OwnWalletKind, PairBeginArgs, PairStartedView, PairingView,
-    PendingChangeView, PendingSwitchView, PersonLineView, PumpView, RefundArgs, RefundAskView,
-    RefundRow, RefundStateView, RelayKind, ReportView, RequestRow, RequoteArgs, SaleInfoView,
-    ScreenView, ShopLightningView, StaffArgs, StartConfig, StateView, StatusView, SwitchSameView,
+    DayTotalsView, HealthView, HeartbeatOutcome, LightningSaleView, LinkStepView, LinkView,
+    OpenArgs, OpenRequestArgs, OpenTipArgs, OpenedView, OverrideArgs, OwnNodeCheckArgs,
+    OwnNodeView, OwnWalletKind, PairBeginArgs, PairStartedView, PairingView, PendingChangeView,
+    PendingSwitchView, PersonLineView, PumpView, RefundArgs, RefundAskView, RefundRow,
+    RefundStateView, RelayKind, ReportView, RequestRow, RequoteArgs, SaleInfoView, ScreenView,
+    ShopLightningView, StaffArgs, StartConfig, StateView, StatusView, SwitchSameView,
     SwitchStateView, TallyView, TipChoiceView, TipTallyView, TurnView, WithdrawArgs, WordsView,
 };
 
@@ -514,20 +507,6 @@ fn build_ops() -> Vec<Op> {
         op(49, "own_node_check", Zero, |_, a: OwnNodeCheckArgs| {
             own_node_check(a)
         }),
-        op(50, "ln_setup", Node, |c, a: LnSetupArgs| {
-            c.entry()?.ln_setup(a)
-        }),
-        op(51, "ln_reply", Node, |c, a: LnReplyArgs| {
-            c.entry()?.ln_reply(a)
-        }),
-        op(52, "ln_failed", Node, |c, a: LnFailArgs| {
-            c.entry()?.ln_failed(a)
-        }),
-        op(53, "ln_pin", Node, |c, (id, der): (u64, Vec<u8>)| {
-            c.entry()?.ln_pin(id, &der)
-        }),
-        op(54, "ln_next", Node, |c, now: u64| c.entry()?.ln_next(now)),
-        op(55, "ln_remove", Node, |c, ()| c.entry()?.ln_remove()),
         op(
             56,
             "take_relay",
@@ -837,16 +816,7 @@ fn definitions() -> Vec<TypeDef> {
         RateView::define(),
         PlaceView::define(),
         SettingsView::define(),
-        LnKind::define(),
-        LnSetupArgs::define(),
-        LnMethod::define(),
-        LnRequestView::define(),
-        LnReplyArgs::define(),
-        LnTransportView::define(),
-        LnFailArgs::define(),
-        LnStepView::define(),
         LightningSaleView::define(),
-        LightningStatusView::define(),
         ChangeValueKind::define(),
         BillKindView::define(),
         PartWayView::define(),

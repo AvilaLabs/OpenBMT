@@ -60,7 +60,6 @@ impl W {
             .bytes(&c.record)
             .opt_string(c.proxy.as_deref())
             .opt_string(c.own_node.as_deref())
-            .opt_bytes(c.lightning.as_deref())
             .opt_string(c.link_proxy.as_deref())
             .opt_bytes(c.shop_seed.as_deref())
     }
@@ -397,8 +396,6 @@ impl<'a> Rd<'a> {
                 invoice: r.bool(),
                 waiting: r.bool(),
                 unavailable: r.opt(Rd::words),
-                wait_secs_left: r.opt(Rd::u64),
-                wait_secs_total: r.opt(Rd::u64),
             }),
             lightning_first: self.bool(),
             missing: self.u64(),
@@ -527,6 +524,4 @@ pub struct LnSale {
     pub invoice: bool,
     pub waiting: bool,
     pub unavailable: Option<Words>,
-    pub wait_secs_left: Option<u64>,
-    pub wait_secs_total: Option<u64>,
 }

@@ -36,11 +36,6 @@ import org.openbmt.counter.ActorRole
 import org.openbmt.counter.CounterException
 import org.openbmt.counter.DayTotals
 import org.openbmt.counter.CounterNetwork
-import org.openbmt.counter.LnKind
-import org.openbmt.counter.LnMethod
-import org.openbmt.counter.LnRequest
-import org.openbmt.counter.LnStep
-import org.openbmt.counter.LnTransport
 import org.openbmt.counter.OwnWalletKind
 import org.openbmt.counter.Payment
 import org.openbmt.counter.PersonLine
@@ -706,44 +701,6 @@ object AppModelTest {
         ok(ShopPrices.sources(Money.of("SAT")!!, table).isEmpty() && ShopPrices.sources(Money.of("GBP")!!, table).isEmpty(), "Bitcoin Standard asks no source (CR-197), and a currency with none asks none")
     }
 
-    // ---- Lightning: the inputs and the steps of the test (CR-115) --------------------------------------
-
-    private fun lightningTests() {
-        ok(LightningSetup.lnd("  ") == null && LightningSetup.lnd("") == null, "no LND code")
-        ok(LightningSetup.lnd(" lndconnect://h:1?cert=a&macaroon=b \n")!!.let { it.kind == LnKind.Lnd && it.address == "lndconnect://h:1?cert=a&macaroon=b" && it.secret.isEmpty() && it.cert.isEmpty() }, "an LND code, trimmed")
-        ok(LightningSetup.cln("", "r", "c") == null && LightningSetup.cln("h:1", " ", "c") == null && LightningSetup.cln("h:1", "r", "") == null, "a Core Lightning field left empty")
-        ok(LightningSetup.cln(" h:1 ", " r ", "-----BEGIN CERTIFICATE-----\nAA\n-----END CERTIFICATE-----\n")!!.let { it.kind == LnKind.Cln && it.address == "h:1" && it.secret == "r" && it.cert.startsWith("-----BEGIN") && it.cert.endsWith("-----") }, "Core Lightning fields, trimmed, the PEM kept whole")
-
-        fun req(id: Long) = LnRequest(id, "h:1", LnMethod.Get, "/p", "n", "v", null)
-        val sent = ArrayList<Long>()
-        val replied = ArrayList<Triple<Long, Long, Int>>()
-        val record = byteArrayOf(9, 8)
-        // Two requests, then the record.
-        val got = LightningSetup.drive(
-            req(1),
-            { r -> sent.add(r.id); LnOutcome.Answer(200, ByteArray(3)) },
-            { id, status, body -> replied.add(Triple(id, status, body.size)); if (id == 1L) LnStep(req(2), null) else LnStep(null, record) },
-            { _, _ -> error("no failure here") },
-        )
-        ok(got.contentEquals(record) && sent == listOf(1L, 2L) && replied == listOf(Triple(1L, 200L, 3), Triple(2L, 200L, 3)), "a test of two requests ends with the record")
-        // A request with no answer goes to failed, with the reason, and nothing is saved.
-        var why: LnTransport? = null
-        val none = LightningSetup.drive(req(1), { LnOutcome.Failed(LnTransport.PinRefused) }, { _, _, _ -> error("no answer") }, { id, w -> ok(id == 1L, "the id that failed"); why = w })
-        ok(none == null && why == LnTransport.PinRefused, "a refused pin stops the test, with its reason")
-        // The library may throw from `failed` (the words of why the test stopped): it goes up.
-        var thrown = false
-        try {
-            LightningSetup.drive(req(1), { LnOutcome.Failed(LnTransport.TimedOut) }, { _, _, _ -> error("no answer") }, { _, _ -> throw CounterException("ln", "the words", 4) })
-        } catch (_: CounterException) {
-            thrown = true
-        }
-        ok(thrown, "the words of a stopped test are thrown on")
-        // A reply with neither a record nor a request ends it; a test that never ends is given up.
-        ok(LightningSetup.drive(req(1), { LnOutcome.Answer(200, ByteArray(0)) }, { _, _, _ -> LnStep(null, null) }, { _, _ -> }) == null, "an empty step ends the test")
-        var rounds = 0
-        ok(LightningSetup.drive(req(1), { rounds++; LnOutcome.Answer(200, ByteArray(0)) }, { id, _, _ -> LnStep(req(id + 1), null) }, { _, _ -> }) == null && rounds == LightningSetup.MAX_STEPS, "a test that never ends is given up")
-    }
-
     // ---- the cashiers (CR-140, CR-141) -----------------------------------------------------------
 
     private fun cr141CashierRulesTests() {
@@ -1001,19 +958,10 @@ object AppModelTest {
         ok(model.none { it.readText().replace(Regex("//.*"), "").contains("currentTimeMillis") }, "the PIN files read no date")
     }
 
-    // ---- the Lightning credentials are never on a screenshot (CR-115) --------------------------------
+    // ---- the counter reads no picked address ------------------------------------------------------------
 
-    private fun cr115LightningCaptureTests(appDir: File?) {
+    private fun pickedAddressTests(appDir: File?) {
         if (appDir == null) return
-        val controller = File(appDir, "src/android/Controller.kt").readText()
-        val lightning = controller.substringAfter("private fun showLightning(").substringBefore("private fun forgetLightningDraft(")
-        ok(lightning.contains("act.keepOutOfCapture()") && lightning.indexOf("act.keepOutOfCapture()") > lightning.lastIndexOf("show("), "the Lightning page keeps itself out of captures once it is on show")
-        val activity = File(appDir, "src/android/MainActivity.kt").readText()
-        val show = activity.substringAfter("fun show(page: View)").substringBefore("/** Keeps the screen")
-        ok(show.contains("clearFlags(WindowManager.LayoutParams.FLAG_SECURE)") && show.indexOf("clearFlags(") < show.indexOf("setContentView("), "every screen shown clears the flag, so that it is on the Lightning page only")
-        ok(activity.contains("fun keepOutOfCapture()") && activity.substringAfter("fun keepOutOfCapture()").contains("addFlags(WindowManager.LayoutParams.FLAG_SECURE)"), "the flag is added by the one call")
-        ok(controller.split("keepOutOfCapture()").size == 2, "no other screen of the counter sets the flag")
-        ok(!activity.substringAfter("override fun onCreate").substringBefore("override fun onStart").contains("FLAG_SECURE"), "the window does not start with the flag")
         // The counter takes no picker's result: nothing is read from or written to a picked address.
         val sources = File(appDir, "src/android").listFiles { f -> f.name.endsWith(".kt") }!!
         ok(sources.none { f -> f.readText().let { it.contains("openInputStream(") || it.contains("openOutputStream(") || it.contains("ACTION_OPEN_DOCUMENT") || it.contains("ACTION_CREATE_DOCUMENT") || it.contains("ACTION_GET_CONTENT") || it.contains("onActivityResult") } }, "the counter takes no picker's result")
@@ -1255,7 +1203,7 @@ object AppModelTest {
     private fun torReply(text: String) = ControlReader(java.io.ByteArrayInputStream(text.toByteArray(Charsets.ISO_8859_1))).next()!!
 
     private fun cr201BuiltInTorTests(appDir: File?) {
-        // The node, the price fetches and the Lightning transport are given the port Tor reported, where Orbot's address was.
+        // The node and the price fetches are given the port Tor reported, where Orbot's address was.
         var asked: Pair<String, Int>? = null
         val gate = TorGate(true, "127.0.0.1:41233", SocksProbe { h, p -> asked = h to p; true })
         ok(gate.proxy == "127.0.0.1:41233" && gate.address == "127.0.0.1:41233" && gate.available() && asked == "127.0.0.1" to 41233, "CR-201: with Tor on the proxy is the built-in Tor's port, and it answers")
@@ -1275,7 +1223,7 @@ object AppModelTest {
         ok(start.contains("val builtIn = torOn && cfg.tor == TorChoice.BuiltIn"), "CR-201: the built-in Tor is wanted only with Tor on in the settings and the choice of it")
         ok(start.indexOf("ensureTor().awaitPort(TOR_WAIT_MS)") in 1 until start.indexOf("CounterNode.start("), "CR-201: the node starts only after the built-in Tor has a port")
         ok(start.contains("} else {\n                    releaseTor()\n                    address = cfg.proxy"), "CR-201: with Tor off or Orbot chosen no Tor of the app runs")
-        ok(start.contains("TorGate(torOn, address)") && start.contains("gate.proxy") && controller.contains("HttpsFetcher(gate)") && controller.contains("LightningTransport(gate.torOn, gate.address)"), "CR-201: the node, the price fetches and the Lightning transport use that address")
+        ok(start.contains("TorGate(torOn, address)") && start.contains("gate.proxy") && controller.contains("HttpsFetcher(gate)"), "CR-201: the node and the price fetches use that address")
         val hidden = controller.substringAfter("fun hidden() {").substringBefore("/** CR-91")
         ok(hidden.indexOf("stopNode()") in 0 until hidden.indexOf("releaseTor()"), "CR-201: Tor is let go of when the app is hidden, after the node")
         ok(controller.contains("if (!visible) throw TorStartException(\"the app is hidden\")"), "CR-201: a start that comes after the app was hidden does not take Tor")
@@ -1559,7 +1507,6 @@ object AppModelTest {
         ok(ShopLightningWords.all().none { it.second.startsWith("WORDS_NEEDED_") } && ShopLightningWords.all().map { it.second }.toSet().size == 5, "SL-76: every text of the Lightning key page is written, once each")
         ok(SayCheck.problem(ShopLightningWords.kept) == null && !ShopLightningWords.isPlaceholder(ShopLightningWords.kept), "SL-76: the line that says the key was kept passes the checks of the words: ${SayCheck.problem(ShopLightningWords.kept)}")
         ok(ShopLightningWords.kept.tone == Tones.GOOD && ShopLightningWords.kept.who == Who.MANAGER, "SL-76: the key kept is good news for the manager")
-        ok(ShopLightningWords.FILE != LightningSetup.FILE && ShopLightningWords.KEY_ALIAS != LightningSetup.KEY_ALIAS, "SL-76: the seed has its own file and its own Keystore key")
         ok(SwitchWords.BAR == "New wallet to check" && SwitchWords.SAME == "Same address" && SwitchWords.DIFFERENT == "Different", "CR-260: the menu row and the two buttons are as the rules name them")
         ok(ConfirmSwitch.address("bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq") == "bc1q ar0s rrr7 xfkv y5l6 43ly dnw9 re59 gtzz wf5m dq", "CR-260: the address is shown in groups of four")
         ok(FirstAddress.kindLine(OwnWalletKind.TwoOfThree) == "Wallet with 2 of 3 keys", "CR-260: the kind of wallet beneath the address")
@@ -1972,7 +1919,6 @@ object AppModelTest {
         priceTests()
         linkTests()
         torTests()
-        lightningTests()
         screenTests()
         cr141CashierRulesTests()
         cr140CashierFileTests()
@@ -1996,7 +1942,7 @@ object AppModelTest {
         cr277OnePhoneTests(screensMd?.parentFile?.parentFile?.parentFile?.let { File(it, "apps/counter-android") })
         cr273StarterTests(screensMd?.parentFile?.parentFile?.parentFile?.let { File(it, "apps/counter-android") })
         cr85HoldClockTests(screensMd?.parentFile?.parentFile?.parentFile?.let { File(it, "apps/counter-android") })
-        cr115LightningCaptureTests(screensMd?.parentFile?.parentFile?.parentFile?.let { File(it, "apps/counter-android") })
+        pickedAddressTests(screensMd?.parentFile?.parentFile?.parentFile?.let { File(it, "apps/counter-android") })
         gv14GivingTests(screensMd?.parentFile?.parentFile?.parentFile?.let { File(it, "apps/counter-android") })
         cr283LightningFirstTests(screensMd?.parentFile?.parentFile?.parentFile?.let { File(it, "apps/counter-android") })
         cr284NoticesTests()

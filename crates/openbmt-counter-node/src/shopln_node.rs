@@ -101,11 +101,10 @@ use openbmt_link::{Client, ClientConfig, Inbox, Outbox, Route};
 use openbmt_net_io::DriverConfig;
 use tokio::runtime::{Builder, Runtime};
 
-use crate::lightning::SaleLightning;
 use crate::relaylink::link_route;
 use crate::shopln::{
-    role, take_seed, Book, InvoiceEntry, Role, SeedNotTaken, SeedRecord, SweepAddress, Unmatched,
-    Why, MAX_INVOICES,
+    role, take_seed, Book, InvoiceEntry, Role, SaleLightning, SeedNotTaken, SeedRecord,
+    SweepAddress, Unmatched, Why, MAX_INVOICES,
 };
 
 /// How often a node that did not start is started again, in seconds.
