@@ -72,6 +72,33 @@ class CheckoutAuthorityActivitySourceTest(unittest.TestCase):
         self.assertIn("AndroidCheckoutAuthorityStorage(appContext, scope)", flow)
         self.assertIn("authority().signIn(actorId, pin)", flow)
 
+    def test_staff_administration_is_manager_routed_audited_and_lifecycle_gated(self):
+        activity = (ROOT / "src/android/CheckoutActivity.kt").read_text()
+        flow = (ROOT / "src/android/AndroidCheckoutAuthorityFlow.kt").read_text()
+        controller = (ROOT / "src/model/CheckoutAuthorityController.kt").read_text()
+        tools = activity.split("private fun showShopTools", 1)[1].split("private fun showCartReview", 1)[0]
+        request = activity.split("private fun requestStaffAdministration", 1)[1].split("private fun renderStaffAdministration", 1)[0]
+        self.assertIn("authorityFlow.isManager()", tools)
+        self.assertIn("staffAdministrationVisible", request)
+        self.assertIn("staffAdministrationRevision", request)
+        self.assertIn("CheckoutAuthorityAuditJournal", flow)
+        self.assertIn("createStaffPrepared", controller)
+        self.assertIn("renameStaffPrepared", controller)
+        self.assertIn("changeRolePrepared", controller)
+        self.assertIn("changePinPrepared", controller)
+        self.assertIn("disableStaffPrepared", controller)
+
+    def test_queued_staff_commands_are_dropped_after_lifecycle_generation_changes(self):
+        flow = (ROOT / "src/android/AndroidCheckoutAuthorityFlow.kt").read_text()
+        staff_operation = self._function_section(flow, "staffOperation")
+        worker = staff_operation.split("executor.execute {", 1)[1]
+        guard = worker.index("if (closed || generation.get() != ticket)")
+        clear_secrets = worker.index("secrets.forEach { it.fill('\\u0000') }")
+        command = worker.index("operation()")
+        self.assertLess(guard, clear_secrets)
+        self.assertLess(clear_secrets, command)
+        self.assertIn("return@execute", worker[guard:command])
+
     def test_cash_writes_use_the_opaque_session_bridge(self):
         activity = (ROOT / "src/android/CheckoutActivity.kt").read_text()
         cash = (ROOT / "src/android/CheckoutCashController.kt").read_text()

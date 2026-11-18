@@ -1,0 +1,59 @@
+{
+  "schema_version": 1,
+  "date": "2026-11-17",
+  "base_commit": "4393ea12",
+  "scope": "experimental standalone Android checkout, Regtest/test-only",
+  "validation": {
+    "checkout_jvm_groups": 13,
+    "android_source_contract_tests": 13,
+    "openbmt_core_adoption_tests": 7,
+    "cargo_fmt_check": "passed",
+    "git_diff_check": "passed",
+    "apk_build": "passed",
+    "android_emulator": {
+      "serial": "emulator-5554",
+      "api_level": 35,
+      "non_expiry_suite": "passed",
+      "five_minute_expiry_probe": "not_run"
+    }
+  },
+  "apk": {
+    "path": "/tmp/openbmt-checkout-authority-next/openbmt-checkout-test.apk",
+    "bytes": 62723887,
+    "sha256": "95036991df92b6df63cf24843d6035ec40f4aaf99f70bb97cc107e1a4439cea6"
+  },
+  "emulator_scenarios": [
+    "fresh_manager_enrollment_and_recovery_acknowledgement",
+    "manager_sign_in_and_authorized_regtest_pairing",
+    "cashier_creation_and_policy_reauthentication",
+    "manager_pin_change_and_policy_reauthentication",
+    "cashier_manager_route_hiding",
+    "process_recreation_lock",
+    "background_foreground_lock",
+    "report_picker_process_death_and_reauthorized_export",
+    "manager_recovery_and_replacement_code_acknowledgement",
+    "corrupt_and_missing_authority_fail_closed",
+    "completed_descriptor_loss_fail_closed",
+    "business_file_hash_preservation",
+    "existing_business_data_blocks_fresh_enrollment",
+    "pairing_picker_process_death_discards_import"
+  ],
+  "implemented_boundaries": {
+    "staff_admin": "Android-wired with prepared/terminal sealed audit rows; unresolved uncertain intent blocks later staff writes",
+    "ledger_v8": "domain-local atomic attributed sale-creation events; typed tender/refund/provider-observation writers are deferred and current Android callers remain compatibility/unattributed",
+    "generic_business_journal": "live-session, fixed-scope, closed-event prepare/reconcile model only; not a cross-file atomicity mechanism",
+    "adoption": "strict core request/grant protocol and fail-closed Kotlin descriptor seam; no FFI or Android product flow"
+  },
+  "not_validated": [
+    "physical_device",
+    "real_prior_version_upgrade",
+    "android_keystore_invalidation_fault",
+    "five_minute_device_expiry",
+    "merchant_shift",
+    "production_card_hardware",
+    "mainnet",
+    "integrated_lightning_tender",
+    "end_to_end_existing_install_adoption"
+  ],
+  "canonical_capability_statuses_changed": false
+}

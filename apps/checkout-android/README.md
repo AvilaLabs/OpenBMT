@@ -15,7 +15,7 @@ The USD flow uses the fixed developer rate of 10,000,000 minor units per BTC
 price. The app accepts only a Regtest pairing record with USD or SAT pricing.
 The Regtest pairing is watch-only for checkout and cannot sign spends.
 
-## Current unpublished native batch
+## Current native checkout state
 
 The current Android batch adds a durable local catalog with product revisions,
 create/edit/archive, a bounded one-variant item editor, optional SKU/barcode
@@ -68,21 +68,31 @@ corruption and uncertain writes.
 The Android test host now connects that model to a Keystore-sealed authority
 store, authenticated installation descriptor, first-manager enrollment,
 staff PIN sign-in, manager recovery, five-minute expiry and lifecycle lock.
+Managers can administer local staff through the app; each staff mutation first
+persists an intent in a separate Keystore-sealed authority audit journal. An
+uncertain intent blocks further staff changes. Automatic reconciliation of
+such an intent is not implemented yet, so this path fails closed after that
+rare storage fault.
 Current merchant-started sale, tender, refund, catalog, inventory and report
 commands pass exact capability checks. Cash-session v4 records persist actor
 and scope attribution; v1-v3 labels remain explicitly legacy/unverified.
-Non-cash business records do not yet persist the returned actor attribution,
-and the model audit journal is not Android-wired or transactionally atomic
-with authority changes. No staff-permission capability is claimed complete
-from this integration alone.
+Ledger v8 now has same-file command events for an opaque-session-authorized
+sale-creation path. A safe typed writer for provider/native observations is
+deliberately deferred. Existing Android checkout callers still use
+compatibility methods, which are explicitly marked unattributed;
+catalog and inventory stores also remain unattributed. The generic business
+prepare/reconcile journal is model-only and does not make separate store files
+atomic. Staff audit intent and authority mutation are likewise separate files,
+so the implementation makes no cross-file atomicity claim.
 
 The coordinator's current implementation and validation record is
 [native POS foundations (17 November 2026)](../../docs/research/native-pos-foundations-2026-11-17.md).
-The later [Android authority and cash-attribution record](../../docs/research/android-authority-cash-foundation-2026-11-17.md)
-lists the exact local proof and remaining boundaries. No emulator or physical
-device authority workflow has yet been claimed. The Shop Lightning work in
-this batch is an owner-app readiness report only. **The native checkout still
-has no integrated Lightning tender path.**
+The historical [Android authority and cash-attribution milestone](../../docs/research/android-authority-cash-foundation-2026-11-17.md)
+and [staff, ledger-attribution, adoption-core, and emulator record](../../docs/research/android-authority-ledger-adoption-2026-11-17.md)
+list the exact proof and remaining boundaries. API 35 emulator authority flows
+are now covered; no physical-device workflow is claimed. The Shop Lightning
+work in this batch is an owner-app readiness report only. **The native checkout
+still has no integrated Lightning tender path.**
 
 ## Pairing and fixture setup
 
@@ -146,18 +156,20 @@ reconciled.
 
 Legacy staff/operator labels are not authentication. New cash-session writes
 require a signed-in actor, and current Android merchant commands enforce local
-capabilities, but non-cash actor persistence, Android admin-audit wiring,
-tamper-evident business journals, and device workflow evidence remain open.
-Physical devices, production card provider approval, merchant onboarding,
+capabilities, but Android non-cash callers do not yet use Ledger v8 attribution.
+The staff audit journal is Android-wired, although its file and the authority
+mutation are not cross-file atomic; an uncertain prepared intent blocks more
+staff changes. API 35 emulator workflows are recorded, while physical devices,
+tamper-evident business storage, production card approval, merchant onboarding,
 independent Lightning recovery, actual merchant shifts, and mainnet/real-funds
-gates remain open. Partial native UI and model tests do not establish POS
-parity or merchant readiness. The browser checkout is a separate explicitly
-labeled simulation and does not use these native payment observations.
+gates remain open. Partial native UI and model tests do not establish POS parity
+or merchant readiness. The browser checkout is a separate explicitly labeled
+simulation and does not use these native payment observations.
 
 ## Historical validation milestone: 16 November 2026
 
 The following is the prior November 16 milestone, not validation of the current
-unpublished native batch. At that milestone, the coordinator built both Android
+native checkout state. At that milestone, the coordinator built both Android
 ABIs, the APK and Square SDK module, and verified matching native method
 signatures. The checkout saved a native sample basket as an immutable sale
 snapshot in ledger version 4; force-stop recovery restored the sale, and the

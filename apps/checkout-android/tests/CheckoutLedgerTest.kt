@@ -18,6 +18,7 @@ object CheckoutLedgerTest {
         refundSurvivesBitcoinReorgRestart()
         immutableBasketAndLegacyMigration()
         pricedSaleRoundTripAndV6Upgrade()
+        authenticatedSaleCommandIsAtomicAndIdempotent()
         stableSaleSerializesLocalCommit()
         cashAcknowledgmentAndMigration()
         duplicateAndCorruptStorage()
@@ -348,6 +349,7 @@ object CheckoutLedgerTest {
         val oldSale = oldLedger.getSale("legacy-v6")
         check(oldSale.amountMinor == 100L && oldSale.pricing == null && oldSale.cashPayments.single().changeMinor == 20L)
         check(legacy.bytes!!.contentEquals(rawBefore)) // v6 read stays read-only
+        check(oldLedger.eventSnapshot().legacyHistoryUnattributed)
         oldLedger.createPricedSale("new-after-v6", "USD", 3, CheckoutPricing.freeze(
             listOf(CheckoutLineInput("cookie-line", "cookie", "Cookie", 125, 1))))
         val upgraded = CheckoutLedger(legacy)
@@ -358,6 +360,59 @@ object CheckoutLedgerTest {
             upgraded.createPricedSale("bad-snapshot", "USD", 4,
                 CheckoutPricing.freeze(listOf(CheckoutLineInput("overflow", "p", "Huge", Long.MAX_VALUE, 1)), tipMinor = 1))
         }.isFailure)
+        check(ledger.eventSnapshot().legacyHistoryUnattributed)
+    }
+
+    private fun authenticatedSaleCommandIsAtomicAndIdempotent() {
+        val scope = CheckoutAuthorityScope("merchant-ledger", "store-ledger", "location-ledger", "register-ledger", "device-ledger")
+        val authorityClock = LedgerAuthorityClock()
+        val authority = CheckoutAuthority(LedgerAuthorityStorage(), authorityClock, defaultIterations = 1_000)
+        val draft = authority.prepareBootstrap()
+        val manager = authority.bootstrapManager(draft, scope, "Ledger Manager", "123456".toCharArray())
+        val session = authority.authenticate(manager.managerActorId, "123456".toCharArray(), scope)
+        val storage = MemoryStorage()
+        var ledger = CheckoutLedger(storage, authority, scope)
+        val items = listOf(SaleItem("tea", "Tea", 225, 2))
+        val saved = ledger.createSale(session, "sale-op-1", "sale-authenticated", 450, "USD", 50, items)
+        check(saved.items == items)
+        val command = ledger.commandEvents().single()
+        check(command.operationId == "sale-op-1" && command.eventType == "sale.create")
+        check(command.origin == CheckoutLedgerEventOrigin.HUMAN && command.attribution != null)
+        check(command.attribution!!.actorId == manager.managerActorId)
+        check(command.attribution.capabilityId == CheckoutAuthorityCapability.SALE_CREATE.id)
+        check(command.attribution.scope == scope && command.attribution.policyGeneration > 0)
+        check(command.payloadDigest.size == 32 && command.commitIdentity == "sale-authenticated@0")
+        check(!ledger.eventSnapshot().legacyHistoryUnattributed)
+
+        ledger = CheckoutLedger(storage, authority, scope)
+        check(ledger.createSale(session, "sale-op-1", "sale-authenticated", 450, "USD", 50, items) == saved)
+        check(ledger.commandEvents().size == 1) // replay finds the co-committed event and does not write again
+        val committedBytes = storage.bytes!!.copyOf()
+        check(runCatching {
+            ledger.createSale(session, "sale-op-1", "sale-authenticated", 451, "USD", 50, items)
+        }.isFailure)
+        check(storage.bytes!!.contentEquals(committedBytes))
+
+        val uncertainStorage = MemoryStorage().also { it.failNextWrite = true }
+        val first = CheckoutLedger(uncertainStorage, authority, scope)
+        check(runCatching { first.createSale(session, "sale-op-uncertain", "sale-uncertain", 100, "USD", 51) }.isFailure)
+        check(runCatching { first.getSale("sale-uncertain") }.isFailure)
+        val recovered = CheckoutLedger(uncertainStorage, authority, scope)
+        check(recovered.createSale(session, "sale-op-uncertain", "sale-uncertain", 100, "USD", 51).saleId == "sale-uncertain")
+        check(recovered.commandEvents().single().operationId == "sale-op-uncertain")
+
+        val legacyV7Storage = MemoryStorage().also { it.bytes = legacyV7WithCash() }
+        val originalV7 = legacyV7Storage.bytes!!.copyOf()
+        val legacyV7 = CheckoutLedger(legacyV7Storage)
+        check(legacyV7.getSale("legacy-v7").cashPayments.single().changeMinor == 20L)
+        check(legacyV7.eventSnapshot().legacyHistoryUnattributed && legacyV7.commandEvents().isEmpty())
+        check(legacyV7Storage.bytes!!.contentEquals(originalV7)) // reading v7 does not rewrite it
+        legacyV7.createSale("legacy-v7-followup", 50, "USD", 53)
+        val migratedV7 = CheckoutLedger(legacyV7Storage)
+        check(migratedV7.getSale("legacy-v7").cashPayments.single().paymentId == "cash-v7")
+        check(migratedV7.getSale("legacy-v7-followup").saleId == "legacy-v7-followup")
+        check(migratedV7.eventSnapshot().legacyHistoryUnattributed)
+        check(migratedV7.commandEvents().isEmpty()) // no actor is inferred for v7 or compatibility writes
     }
 
     /** v6 uninitialized event ledger with one cash-only manual sale. */
@@ -369,6 +424,19 @@ object CheckoutLedgerTest {
             out.writeInt(1); writeString(out, "cash-v6"); out.writeLong(100); out.writeLong(120); out.writeLong(20); out.writeLong(2)
             out.writeBoolean(false); out.writeBoolean(false); out.writeLong(0); out.writeLong(0)
             out.writeInt(0); out.writeInt(0) // sale versions, events
+        }
+    }.toByteArray()
+
+    /** v7 file contains the v6 cash record plus the v7 pricing marker. */
+    private fun legacyV7WithCash(): ByteArray = ByteArrayOutputStream().also { bytes ->
+        DataOutputStream(bytes).use { out ->
+            out.writeInt(0x4f42434c); out.writeInt(7); out.writeInt(1)
+            writeString(out, "legacy-v7"); out.writeLong(100); writeString(out, "USD"); out.writeLong(1)
+            out.writeInt(0); out.writeInt(0); out.writeInt(0)
+            out.writeInt(1); writeString(out, "cash-v7"); out.writeLong(100); out.writeLong(120); out.writeLong(20); out.writeLong(2)
+            out.writeBoolean(false) // no pricing snapshot
+            out.writeBoolean(false); out.writeBoolean(false); out.writeLong(0); out.writeLong(0)
+            out.writeInt(0); out.writeInt(0)
         }
     }.toByteArray()
 
@@ -463,6 +531,27 @@ object CheckoutLedgerTest {
         override fun writeAtomically(bytes: ByteArray) {
             if (failNextWrite) { failNextWrite = false; this.bytes = bytes.copyOf(); error("simulated post-commit write failure") }
             this.bytes = bytes.copyOf()
+        }
+    }
+
+    private class LedgerAuthorityClock : CheckoutAuthorityClock {
+        var elapsed = 10_000L
+        var wall = 1_800_000_000_000L
+        override fun elapsedRealtimeMillis() = elapsed
+        override fun wallTimeMillis() = wall++
+        override fun bootIdentity() = "ledger-test-boot"
+    }
+
+    private class LedgerAuthorityStorage : CheckoutAuthorityStorage {
+        private var bytes: ByteArray? = null
+        override fun read() = bytes?.copyOf()
+        override fun compareAndSwap(expectedBytes: ByteArray?, nextBytes: ByteArray): Boolean {
+            val current = bytes
+            val matches = if (current == null || expectedBytes == null) current == null && expectedBytes == null
+            else current.contentEquals(expectedBytes)
+            if (!matches) return false
+            bytes = nextBytes.copyOf()
+            return true
         }
     }
 

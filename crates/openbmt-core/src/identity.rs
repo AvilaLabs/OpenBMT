@@ -75,6 +75,12 @@ pub const TAG_SESSION_RESPONSE: &str = "OpenBMT/session-response/v1";
 pub const TAG_SESSION_HASH: &str = "OpenBMT/session-hash/v1";
 /// Tag for the approver's signed answer to a session health check.
 pub const TAG_SESSION_HEALTH: &str = "OpenBMT/session-health/v1";
+/// Tag for the hash of the fixed existing-install adoption manifest.
+pub const TAG_CHECKOUT_ADOPTION_MANIFEST: &str = "OpenBMT/checkout-adoption-manifest/v1";
+/// Tag for a counter's existing-install adoption request.
+pub const TAG_CHECKOUT_ADOPTION_REQUEST: &str = "OpenBMT/checkout-adoption-request/v1";
+/// Tag for the owner root's approval of an existing-install adoption request.
+pub const TAG_CHECKOUT_ADOPTION_GRANT: &str = "OpenBMT/checkout-adoption-grant/v1";
 
 pub(crate) fn secp() -> &'static Secp256k1<All> {
     static CTX: OnceLock<Secp256k1<All>> = OnceLock::new();

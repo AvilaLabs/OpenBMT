@@ -11,6 +11,8 @@ import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardCopyOption
 import java.nio.file.StandardOpenOption
+import java.security.MessageDigest
+import java.util.Collections
 import java.util.UUID
 
 private const val MAX_LEDGER_FILE_BYTES = 4 * 1024 * 1024
@@ -165,16 +167,59 @@ data class CheckoutEvent(val eventId: String, val epoch: String, val cursor: Lon
                          val saleVersion: Long, val type: CheckoutEventType)
 data class EventSnapshot(val epoch: String?, val highWater: Long, val floor: Long,
                          val saleVersions: Map<String, Long>, val initialized: Boolean,
-                         val sales: List<Sale>)
+                         val sales: List<Sale>, val legacyHistoryUnattributed: Boolean = false)
 data class EventPage(val events: List<CheckoutEvent>, val highWater: Long, val floor: Long,
                      val resyncRequired: Boolean, val nextCursor: Long, val hasMore: Boolean)
 
-/** Append-only observations and stable attempt identifiers. Every successful mutation is durable on return. */
-class CheckoutLedger(private val storage: DurableLedgerStorage) {
+/** Stable attempt identifiers and sale state. Every successful mutation is durable on return. */
+enum class CheckoutLedgerEventOrigin { HUMAN, SYSTEM }
+
+/** A v8 durable command envelope. SYSTEM is reserved for a future typed observation writer. */
+internal data class CheckoutLedgerCommandEvent(
+    val sequence: Long,
+    val operationId: String,
+    val eventType: String,
+    val origin: CheckoutLedgerEventOrigin,
+    val attribution: ActorAttribution?,
+    val targetIdentity: String,
+    val payloadDigest: ByteArray,
+    val linkedOperationId: String?,
+    val sourceIdentity: String?,
+    val sourceObservedAt: Long?,
+    val recordedAtMillis: Long,
+    val commitIdentity: String,
+) {
+    override fun equals(other: Any?): Boolean = other is CheckoutLedgerCommandEvent &&
+        sequence == other.sequence && operationId == other.operationId && eventType == other.eventType &&
+        origin == other.origin && attribution == other.attribution && targetIdentity == other.targetIdentity &&
+        payloadDigest.contentEquals(other.payloadDigest) && linkedOperationId == other.linkedOperationId &&
+        sourceIdentity == other.sourceIdentity && sourceObservedAt == other.sourceObservedAt &&
+        recordedAtMillis == other.recordedAtMillis && commitIdentity == other.commitIdentity
+    override fun hashCode(): Int = 31 * sequence.hashCode() + operationId.hashCode()
+}
+
+private data class PendingLedgerCommand(
+    val operationId: String,
+    val eventType: String,
+    val origin: CheckoutLedgerEventOrigin,
+    val attribution: ActorAttribution?,
+    val targetIdentity: String,
+    val payloadDigest: ByteArray,
+    val linkedOperationId: String?,
+    val sourceIdentity: String?,
+    val sourceObservedAt: Long?,
+)
+
+class CheckoutLedger(
+    private val storage: DurableLedgerStorage,
+    private val commandAuthority: CheckoutAuthority? = null,
+    private val commandScope: CheckoutAuthorityScope? = null,
+) {
     private val lock = Any()
     private var state: State = decode(storage.read())
     private var poisoned = false
     private var stableSaleCallbackActive = false
+    private var activeCommand: PendingLedgerCommand? = null
 
     /** Explicitly commits the event epoch; legacy reads alone never rewrite their source file.
      * Restoring an older raw ledger file is not detectable here; callers must rotate the epoch
@@ -201,6 +246,11 @@ class CheckoutLedger(private val storage: DurableLedgerStorage) {
     }
 
     fun eventSnapshot(): EventSnapshot = synchronized(lock) { ensureHealthy(); eventSnapshotLocked() }
+
+    /** Attributed command history. Access control for this read belongs to the caller. */
+    internal fun commandEvents(): List<CheckoutLedgerCommandEvent> = synchronized(lock) {
+        ensureHealthy(); Collections.unmodifiableList(state.commandEvents.map { it.copy(payloadDigest = it.payloadDigest.copyOf()) })
+    }
 
     /** Runs one synchronous local commit against a verified sale version while ledger mutations are excluded.
      * The callback must not perform network or UI waits. Reentrant reads are allowed; reentrant mutations fail.
@@ -231,13 +281,36 @@ class CheckoutLedger(private val storage: DurableLedgerStorage) {
     }
 
     private fun eventSnapshotLocked() = EventSnapshot(state.eventEpoch, state.eventHighWater, state.eventFloor,
-        state.saleVersions.toMap(), state.eventsInitialized, state.sales.values.map(::view))
+        state.saleVersions.toMap(), state.eventsInitialized, state.sales.values.map(::view), state.legacyHistoryUnattributed)
 
+    fun createSale(session: CheckoutAuthoritySession, operationId: String, saleId: String, amountMinor: Long,
+                   currency: String, createdAt: Long, items: List<SaleItem> = emptyList()): Sale = humanCommand(
+        session, operationId, CheckoutAuthorityCapability.SALE_CREATE, "sale.create", saleId,
+        saleCommandDigest(saleId, amountMinor, currency, createdAt, items, null),
+        replay = { getSale(saleId) },
+    ) { createSale(saleId, amountMinor, currency, createdAt, items) }
+
+    /** Compatibility API; resulting rows are v8 legacy/unattributed history. */
     fun createSale(saleId: String, amountMinor: Long, currency: String, createdAt: Long,
                    items: List<SaleItem> = emptyList()): Sale = createSaleInternal(saleId, amountMinor, currency, createdAt, items, null)
 
     /** Creates a sale from a frozen canonical price. Its total is the amount due for every tender. */
     fun createPricedSale(saleId: String, currency: String, createdAt: Long,
+                         pricing: CheckoutPricingSnapshot): Sale {
+        return createPricedSaleInternal(saleId, currency, createdAt, pricing)
+    }
+
+    fun createPricedSale(session: CheckoutAuthoritySession, operationId: String, saleId: String,
+                         currency: String, createdAt: Long, pricing: CheckoutPricingSnapshot): Sale {
+        val frozen = freezePricing(pricing)
+        return humanCommand(
+            session, operationId, CheckoutAuthorityCapability.SALE_CREATE, "sale.create", saleId,
+            saleCommandDigest(saleId, frozen.totalMinor, currency, createdAt, pricingItems(frozen), frozen),
+            replay = { getSale(saleId) },
+        ) { createPricedSaleInternal(saleId, currency, createdAt, frozen) }
+    }
+
+    private fun createPricedSaleInternal(saleId: String, currency: String, createdAt: Long,
                          pricing: CheckoutPricingSnapshot): Sale {
         require(currency == "USD") { "priced checkout currently supports USD only" }
         val frozen = freezePricing(pricing)
@@ -262,6 +335,7 @@ class CheckoutLedger(private val storage: DurableLedgerStorage) {
     }
 
     /** Must complete before invoking the external receiver/payment SDK. counterIndex is the existing payment request index. */
+    /** Compatibility API; resulting rows are v8 legacy/unattributed history. */
     fun beginBitcoinAttempt(saleId: String, attemptId: String, counterIndex: Long, expectedMinor: Long,
                             expectedSats: Long, quoteId: String, quotedAt: Long): PaymentAttempt = mutate {
         val sale = sale(saleId); validId(attemptId, "attempt id"); positive(expectedMinor, "attempt amount")
@@ -277,6 +351,7 @@ class CheckoutLedger(private val storage: DurableLedgerStorage) {
     }
 
     /** Persist the stable provider id before calling the card SDK. */
+    /** Compatibility API; resulting rows are v8 legacy/unattributed history. */
     fun beginCardAttempt(saleId: String, attemptId: String, provider: String, stableId: String, amountMinor: Long): PaymentAttempt = mutate {
         val sale = sale(saleId); validId(attemptId, "attempt id"); validId(stableId, "provider idempotency id")
         validText(provider, "provider"); positive(amountMinor, "attempt amount")
@@ -291,6 +366,7 @@ class CheckoutLedger(private val storage: DurableLedgerStorage) {
     }
 
     /** Records a manual cash acknowledgment. This records operator input, not processor or cash verification. */
+    /** Compatibility API; resulting rows are v8 legacy/unattributed history. */
     fun recordCashPayment(saleId: String, paymentId: String, tenderedMinor: Long, recordedAt: Long): CashPayment = mutate {
         val sale = sale(saleId)
         validId(paymentId, "cash payment id"); positive(tenderedMinor, "cash tendered amount")
@@ -323,12 +399,16 @@ class CheckoutLedger(private val storage: DurableLedgerStorage) {
             view(sale).let { it.remainingMinor > 0 && !it.requiresReview } && canStartTender(sale)
     }
 
+    /** Compatibility API; resulting rows are v8 legacy/unattributed history. */
     fun requestCancellation(saleId: String, attemptId: String): PaymentAttempt = mutate {
         val a = attempt(saleId, attemptId); a.cancellationRequested = true; a.cancellationAcknowledged = false; a.cancellationUnknown = false; attemptView(a)
     }
 
     /** Call only after the native CounterNode.cancel operation returns success. Late evidence can reopen the derived state. */
-    fun acknowledgeBitcoinCancellation(saleId: String, attemptId: String): PaymentAttempt = mutate {
+    fun acknowledgeBitcoinCancellation(saleId: String, attemptId: String): PaymentAttempt =
+        acknowledgeBitcoinCancellationInternal(saleId, attemptId)
+
+    private fun acknowledgeBitcoinCancellationInternal(saleId: String, attemptId: String): PaymentAttempt = mutate {
         val a = attempt(saleId, attemptId); require(a.tender == Tender.BITCOIN) { "not a Bitcoin attempt" }
         require(a.cancellationRequested) { "cancellation was not requested" }
         a.cancellationAcknowledged = true
@@ -336,7 +416,10 @@ class CheckoutLedger(private val storage: DurableLedgerStorage) {
     }
 
     /** Reconciliation response that says the cancel outcome is still unknown. */
-    fun markCancellationUnknown(saleId: String, attemptId: String): PaymentAttempt = mutate {
+    fun markCancellationUnknown(saleId: String, attemptId: String): PaymentAttempt =
+        markCancellationUnknownInternal(saleId, attemptId)
+
+    private fun markCancellationUnknownInternal(saleId: String, attemptId: String): PaymentAttempt = mutate {
         val a = attempt(saleId, attemptId); require(a.tender == Tender.CARD) { "cancellation reconciliation applies to card attempts" }
         a.cancellationRequested = true; a.cancellationUnknown = true; attemptView(a)
     }
@@ -344,7 +427,13 @@ class CheckoutLedger(private val storage: DurableLedgerStorage) {
     /** receivedSats is the current cumulative amount for evidenceId, not a fiat conversion or a delta. */
     fun recordBitcoinEvidence(saleId: String, attemptId: String, evidenceId: String, sourceId: String, receivedSats: Long,
                               confirmations: Int, requiredConfirmations: Int, observedAt: Long,
-                              chainState: BitcoinChainState = BitcoinChainState.ACTIVE): PaymentAttempt = mutate {
+                              chainState: BitcoinChainState = BitcoinChainState.ACTIVE): PaymentAttempt =
+        recordBitcoinEvidenceInternal(saleId, attemptId, evidenceId, sourceId, receivedSats, confirmations,
+            requiredConfirmations, observedAt, chainState)
+
+    private fun recordBitcoinEvidenceInternal(saleId: String, attemptId: String, evidenceId: String, sourceId: String, receivedSats: Long,
+                              confirmations: Int, requiredConfirmations: Int, observedAt: Long,
+                              chainState: BitcoinChainState): PaymentAttempt = mutate {
         val a = attempt(saleId, attemptId); require(a.tender == Tender.BITCOIN) { "not a Bitcoin attempt" }
         validId(evidenceId, "evidence id"); validId(sourceId, "evidence source"); nonnegative(receivedSats, "received sats")
         require(confirmations >= 0 && requiredConfirmations >= 0 && observedAt >= 0) { "invalid evidence values" }
@@ -358,6 +447,10 @@ class CheckoutLedger(private val storage: DurableLedgerStorage) {
     }
 
     fun recordCardEvidence(saleId: String, attemptId: String, evidenceId: String, stableId: String,
+                           result: CardResult, amountMinor: Long, observedAt: Long): PaymentAttempt =
+        recordCardEvidenceInternal(saleId, attemptId, evidenceId, stableId, result, amountMinor, observedAt)
+
+    private fun recordCardEvidenceInternal(saleId: String, attemptId: String, evidenceId: String, stableId: String,
                            result: CardResult, amountMinor: Long, observedAt: Long): PaymentAttempt = mutate {
         val a = attempt(saleId, attemptId); require(a.tender == Tender.CARD) { "not a card attempt" }
         validId(evidenceId, "evidence id"); require(stableId == a.stableId) { "provider id does not match attempt" }
@@ -371,6 +464,7 @@ class CheckoutLedger(private val storage: DurableLedgerStorage) {
         attemptView(a)
     }
 
+    /** Compatibility API; resulting rows are v8 legacy/unattributed history. */
     fun requestRefund(saleId: String, refundId: String, paymentAttemptId: String, amountMinor: Long, amountSats: Long, requestedAt: Long): Refund = mutate {
         val sale = sale(saleId); validId(refundId, "refund id"); nonnegative(amountMinor, "refund amount"); nonnegative(amountSats, "refund sats")
         require(requestedAt >= 0) { "invalid request time" }
@@ -392,6 +486,10 @@ class CheckoutLedger(private val storage: DurableLedgerStorage) {
 
     /** pending evidence means no funds are claimed returned; paid evidence accumulates to the requested amount. */
     fun recordRefundEvidence(saleId: String, refundId: String, evidenceId: String, actualPaidMinor: Long, actualPaidSats: Long,
+                             pending: Boolean, observedAt: Long): Refund =
+        recordRefundEvidenceInternal(saleId, refundId, evidenceId, actualPaidMinor, actualPaidSats, pending, observedAt)
+
+    private fun recordRefundEvidenceInternal(saleId: String, refundId: String, evidenceId: String, actualPaidMinor: Long, actualPaidSats: Long,
                              pending: Boolean, observedAt: Long): Refund = mutate {
         val r = refund(saleId, refundId); validId(evidenceId, "refund evidence id")
         nonnegative(actualPaidMinor, "refund paid amount"); nonnegative(actualPaidSats, "refund paid sats")
@@ -406,12 +504,75 @@ class CheckoutLedger(private val storage: DurableLedgerStorage) {
         refundView(r)
     }
 
+    private fun <T> humanCommand(
+        session: CheckoutAuthoritySession,
+        operationId: String,
+        capability: CheckoutAuthorityCapability,
+        eventType: String,
+        targetIdentity: String,
+        digest: ByteArray,
+        replay: () -> T,
+        operation: () -> T,
+    ): T = synchronized(lock) {
+        ensureHealthy()
+        check(activeCommand == null) { "nested ledger commands are not allowed" }
+        val authority = commandAuthority ?: throw CheckoutAuthorityUnavailableException()
+        val scope = commandScope ?: throw CheckoutAuthorityUnavailableException()
+        validId(operationId, "operation id")
+        validId(targetIdentity, "command target")
+        require(digest.size == COMMAND_DIGEST_BYTES) { "invalid ledger command digest" }
+        val attribution = authority.authorize(session, capability, scope)
+        val pending = PendingLedgerCommand(operationId, eventType, CheckoutLedgerEventOrigin.HUMAN,
+            attribution, targetIdentity, digest.copyOf(), null, null, null)
+        val prior = state.commandEvents.firstOrNull { it.operationId == operationId }
+        if (prior != null) {
+            if (!sameCommand(prior, pending)) throw IllegalStateException("ledger operation ID conflicts with prior command")
+            return@synchronized replay()
+        }
+        activeCommand = pending
+        try { operation() } finally { activeCommand = null }
+    }
+
+    private fun sameCommand(event: CheckoutLedgerCommandEvent, pending: PendingLedgerCommand): Boolean {
+        val old = event.attribution
+        val next = pending.attribution
+        val actorMatches = if (old == null || next == null) old == null && next == null else
+            old.actorId == next.actorId && old.role == next.role && old.capabilityId == next.capabilityId &&
+                old.policyGeneration == next.policyGeneration && old.scope == next.scope
+        return event.operationId == pending.operationId && event.eventType == pending.eventType &&
+            event.origin == pending.origin && actorMatches && event.targetIdentity == pending.targetIdentity &&
+            MessageDigest.isEqual(event.payloadDigest, pending.payloadDigest) &&
+            event.linkedOperationId == pending.linkedOperationId && event.sourceIdentity == pending.sourceIdentity &&
+            event.sourceObservedAt == pending.sourceObservedAt
+    }
+
+    private fun saleCommandDigest(
+        saleId: String,
+        amountMinor: Long,
+        currency: String,
+        createdAt: Long,
+        items: List<SaleItem>,
+        pricing: CheckoutPricingSnapshot?,
+    ): ByteArray = commandDigest { out ->
+        out.str("sale.create"); out.str(saleId); out.writeLong(amountMinor); out.str(currency); out.writeLong(createdAt)
+        out.writeInt(items.size)
+        items.forEach { out.str(it.productId); out.str(it.name); out.writeLong(it.unitMinor); out.writeInt(it.quantity) }
+        writePricing(out, pricing)
+    }
+
+    private fun commandDigest(write: (DataOutputStream) -> Unit): ByteArray {
+        val bytes = ByteArrayOutputStream()
+        DataOutputStream(bytes).use(write)
+        return MessageDigest.getInstance("SHA-256").digest(bytes.toByteArray())
+    }
+
     fun getSale(saleId: String): Sale = synchronized(lock) { ensureHealthy(); view(sale(saleId)) }
     fun listSales(): List<Sale> = synchronized(lock) { ensureHealthy(); state.sales.values.map(::view) }
 
     private inline fun <T> mutate(block: State.() -> T): T = synchronized(lock) {
         ensureHealthy()
         check(!stableSaleCallbackActive) { "ledger mutation is blocked during stable sale callback" }
+        if (activeCommand != null) require(state.commandEvents.size < MAX_COMMAND_EVENTS) { "ledger command history limit reached" }
         val beforeSales = state.sales.keys.associateWith { view(state.sales.getValue(it)) }
         val before = encode(state)
         val result = try { state.block() } catch (e: Throwable) { state = decode(before); throw e }
@@ -439,6 +600,30 @@ class CheckoutLedger(private val storage: DurableLedgerStorage) {
                 state.eventFloor = state.events.firstOrNull()?.cursor?.minus(1) ?: state.eventHighWater
             } catch (e: Throwable) { state = decode(before); throw e }
         }
+        try {
+            val command = activeCommand
+            if (command == null) {
+                // Compatibility writes remain available while existing Android call sites migrate.
+                // Their history is never backfilled with whichever actor happens to be signed in later.
+                state.legacyHistoryUnattributed = true
+            } else {
+                val sequence = Math.addExact(state.commandEvents.lastOrNull()?.sequence ?: 0L, 1L)
+                val matchedSale = state.sales.values.firstOrNull { candidate ->
+                    candidate.id == command.targetIdentity || candidate.attempts.any { it.attemptId == command.targetIdentity } ||
+                        candidate.refunds.any { it.refundId == command.targetIdentity } ||
+                        candidate.cashPayments.any { it.paymentId == command.targetIdentity }
+                }
+                val commitIdentity = matchedSale?.let { "${it.id}@${state.saleVersions[it.id] ?: 0L}" } ?: command.targetIdentity
+                val recordedAt = command.attribution?.eventTimeMillis
+                    ?: error("system command writer is unavailable")
+                require(recordedAt >= 0) { "invalid ledger event time" }
+                state.commandEvents.add(CheckoutLedgerCommandEvent(
+                    sequence, command.operationId, command.eventType, command.origin, command.attribution,
+                    command.targetIdentity, command.payloadDigest.copyOf(), command.linkedOperationId,
+                    command.sourceIdentity, command.sourceObservedAt, recordedAt, commitIdentity,
+                ))
+            }
+        } catch (e: Throwable) { state = decode(before); throw e }
         val next = try { encode(state) } catch (e: Throwable) { state = decode(before); throw e }
         try { storage.writeAtomically(next) } catch (e: Throwable) {
             poisoned = true
@@ -534,7 +719,9 @@ class CheckoutLedger(private val storage: DurableLedgerStorage) {
                         var eventsInitialized: Boolean = false, var eventEpoch: String? = null,
                         var eventHighWater: Long = 0, var eventFloor: Long = 0,
                         val saleVersions: LinkedHashMap<String, Long> = LinkedHashMap(),
-                        val events: MutableList<CheckoutEvent> = ArrayList())
+                        val events: MutableList<CheckoutEvent> = ArrayList(),
+                        var legacyHistoryUnattributed: Boolean = false,
+                        val commandEvents: MutableList<CheckoutLedgerCommandEvent> = ArrayList())
     private data class SaleData(val id: String, val amountMinor: Long, val currency: String, val createdAt: Long, val items: List<SaleItem> = emptyList(),
                                 val cashPayments: MutableList<CashPayment> = ArrayList(),
                                 val attempts: MutableList<AttemptData> = ArrayList(), val refunds: MutableList<RefundData> = ArrayList(),
@@ -726,6 +913,40 @@ class CheckoutLedger(private val storage: DurableLedgerStorage) {
         }
     }
 
+    private fun validateCommandEvents(s: State) {
+        require(s.commandEvents.size <= MAX_COMMAND_EVENTS)
+        val byOperation = HashMap<String, CheckoutLedgerCommandEvent>()
+        s.commandEvents.forEachIndexed { index, event ->
+            validId(event.operationId, "command operation id"); validText(event.eventType, "command event type")
+            validId(event.targetIdentity, "command target"); validId(event.commitIdentity, "command commit identity")
+            require(event.sequence == index + 1L && event.payloadDigest.size == COMMAND_DIGEST_BYTES && event.recordedAtMillis >= 0)
+            require(byOperation.put(event.operationId, event) == null) { "duplicate ledger operation id" }
+            when (event.origin) {
+                CheckoutLedgerEventOrigin.HUMAN -> {
+                    val actor = event.attribution ?: error("human command lacks attribution")
+                    require(event.sourceIdentity == null && event.linkedOperationId == null && event.sourceObservedAt == null)
+                    require(actor.actorId.isNotBlank() && actor.displayNameAtEvent.isNotBlank() && actor.policyGeneration >= 0 && actor.eventTimeMillis >= 0)
+                    require(CheckoutAuthorityCapability.fromId(actor.capabilityId) != null)
+                    require(actor.eventTimeMillis == event.recordedAtMillis)
+                    val expected = when (event.eventType) {
+                        "sale.create" -> CheckoutAuthorityCapability.SALE_CREATE
+                        "tender.bitcoin.begin", "tender.card.begin", "tender.cash.record", "tender.cancel.request" -> CheckoutAuthorityCapability.TENDER_BEGIN
+                        "refund.request" -> CheckoutAuthorityCapability.REFUND_REQUEST
+                        else -> error("unknown human ledger event type")
+                    }
+                    require(actor.capabilityId == expected.id) { "command capability does not match event type" }
+                }
+                CheckoutLedgerEventOrigin.SYSTEM -> {
+                    require(event.attribution == null && event.sourceIdentity != null && event.sourceObservedAt != null && event.sourceObservedAt >= 0)
+                    validId(event.sourceIdentity, "system event source")
+                    event.linkedOperationId?.let { linked ->
+                        require(byOperation[linked]?.origin == CheckoutLedgerEventOrigin.HUMAN) { "system event link is not a human command" }
+                    }
+                }
+            }
+        }
+    }
+
     private fun encode(s: State): ByteArray {
         require(s.sales.size <= MAX_SALES) { "sale limit reached" }
         val bytes = ByteArrayOutputStream()
@@ -767,6 +988,17 @@ class CheckoutLedger(private val storage: DurableLedgerStorage) {
             for (event in s.events) {
                 out.str(event.eventId); out.str(event.epoch); out.writeLong(event.cursor); out.str(event.saleId)
                 out.writeLong(event.saleVersion); out.writeInt(event.type.ordinal)
+            }
+            out.writeBoolean(s.legacyHistoryUnattributed)
+            require(s.commandEvents.size <= MAX_COMMAND_EVENTS) { "ledger command history limit reached" }
+            out.writeInt(s.commandEvents.size)
+            s.commandEvents.forEach { event ->
+                out.writeLong(event.sequence); out.str(event.operationId); out.str(event.eventType)
+                out.writeInt(event.origin.ordinal); out.writeBoolean(event.attribution != null)
+                event.attribution?.let { out.actor(it) }
+                out.str(event.targetIdentity); out.writeInt(event.payloadDigest.size); out.write(event.payloadDigest)
+                out.nullStr(event.linkedOperationId); out.nullStr(event.sourceIdentity); out.nullLong(event.sourceObservedAt)
+                out.writeLong(event.recordedAtMillis); out.str(event.commitIdentity)
             }
         }
         return bytes.toByteArray().also { require(it.size <= MAX_LEDGER_FILE_BYTES) { "ledger exceeds storage limit" } }
@@ -891,6 +1123,24 @@ class CheckoutLedger(private val storage: DurableLedgerStorage) {
                         }
                     } else require(state.eventEpoch == null && state.events.isEmpty() && state.saleVersions.isEmpty() && state.eventHighWater == 0L && state.eventFloor == 0L)
                 }
+                if (version >= COMMAND_EVENT_VERSION) {
+                    state.legacyHistoryUnattributed = input.readBool()
+                    repeat(input.count(MAX_COMMAND_EVENTS)) {
+                        val sequence = input.readLong(); val operationId = input.str(); val eventType = input.str()
+                        val origin = CheckoutLedgerEventOrigin.entries.getOrNull(input.readInt()) ?: error("invalid command origin")
+                        val attribution = if (input.readBool()) input.actor() else null
+                        val target = input.str(); val digestSize = input.count(COMMAND_DIGEST_BYTES)
+                        require(digestSize == COMMAND_DIGEST_BYTES) { "invalid command digest size" }
+                        val digest = ByteArray(digestSize); input.readFully(digest)
+                        val linked = input.nullStr(); val source = input.nullStr(); val sourceAt = input.nullLong()
+                        val recordedAt = input.readLong(); val commit = input.str()
+                        state.commandEvents.add(CheckoutLedgerCommandEvent(sequence, operationId, eventType, origin,
+                            attribution, target, digest, linked, source, sourceAt, recordedAt, commit))
+                    }
+                    validateCommandEvents(state)
+                } else {
+                    state.legacyHistoryUnattributed = state.sales.isNotEmpty()
+                }
                 validateDecoded(state, version)
                 require(input.available() == 0) { "trailing ledger data" }
                 return state
@@ -908,6 +1158,20 @@ class CheckoutLedger(private val storage: DurableLedgerStorage) {
     private fun DataInputStream.nullLong(): Long? = if (readBool()) readLong() else null
     private fun DataInputStream.count(max: Int): Int = readInt().also { require(it in 0..max) }
 
+    private fun DataOutputStream.actor(actor: ActorAttribution) {
+        str(actor.actorId); str(actor.displayNameAtEvent); writeInt(actor.role.ordinal); str(actor.capabilityId)
+        writeLong(actor.policyGeneration); str(actor.scope.merchantId); str(actor.scope.storeId); str(actor.scope.locationId)
+        str(actor.scope.registerId); str(actor.scope.deviceId); writeLong(actor.eventTimeMillis)
+    }
+
+    private fun DataInputStream.actor(): ActorAttribution {
+        val actorId = str(); val name = str(); val role = CheckoutAuthorityRole.entries.getOrNull(readInt()) ?: error("invalid actor role")
+        val capability = str(); val generation = readLong()
+        val scope = CheckoutAuthorityScope(str(), str(), str(), str(), str())
+        val at = readLong()
+        return ActorAttribution.create(actorId, name, role, capability, generation, scope, at)
+    }
+
     private companion object {
         const val MAGIC = 0x4f42434c // OBCL
         const val LEGACY_VERSION_2 = 2
@@ -916,7 +1180,10 @@ class CheckoutLedger(private val storage: DurableLedgerStorage) {
         const val CASH_PAYMENT_VERSION = 5
         const val EVENT_VERSION = 6
         const val PRICING_SNAPSHOT_VERSION = 7
-        const val VERSION = 7
+        const val COMMAND_EVENT_VERSION = 8
+        const val VERSION = 8
+        const val COMMAND_DIGEST_BYTES = 32
+        const val MAX_COMMAND_EVENTS = 5_000
         const val MAX_TEXT_BYTES = 1024
         const val MAX_ITEM_NAME_CHARS = 120
         const val MAX_ITEM_NAME_BYTES = 320

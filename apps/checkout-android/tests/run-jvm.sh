@@ -29,6 +29,7 @@ object CheckoutTestRunner {
         CheckoutReportTest.run()
         CheckoutAuthorityTest.run()
         CheckoutAuthorityAuditJournalTest.run()
+        CheckoutBusinessEventJournalTest.run()
         CheckoutAuthorityControllerTest.run()
     }
 }

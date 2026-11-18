@@ -114,7 +114,10 @@ private class AndroidCheckoutInstallationMarker : CheckoutInstallationMarker {
     }
 
     private fun mac(): Mac = try {
-        Mac.getInstance("HmacSHA256", PROVIDER)
+        // AndroidKeyStore owns the non-exportable key, but it is not the JCA provider that
+        // implements Mac on every supported Android release. Provider selection routes the
+        // AndroidKeyStore SecretKey to the platform HMAC implementation correctly.
+        Mac.getInstance("HmacSHA256")
     } catch (_: Exception) {
         throw IOException("Checkout installation marker is unavailable")
     }

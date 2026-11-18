@@ -49,11 +49,75 @@ interface CheckoutInstallationMarker {
 }
 
 enum class CheckoutProvisioningState { PENDING_ENROLLMENT, COMPLETED }
+enum class CheckoutInstallationMode { FRESH, EXISTING_INSTALL_ADOPTION }
+enum class CheckoutAdoptionState { NONE, REQUIRED, PENDING_MANAGER_ENROLLMENT }
 
 data class CheckoutInstallationDescriptor(
     val scope: CheckoutAuthorityScope,
     val provisioningState: CheckoutProvisioningState,
+    val mode: CheckoutInstallationMode = CheckoutInstallationMode.FRESH,
+    val adoptionState: CheckoutAdoptionState = CheckoutAdoptionState.NONE,
 )
+
+/**
+ * Model seam only: this value is not proof of Owner approval. The Android product flow must stay
+ * closed until a typed native verifier validates an Owner-signed grant and durable manifest/nonce
+ * evidence is added to the descriptor.
+ */
+internal class CheckoutInstallationAdoptionPermit internal constructor(
+    val scope: CheckoutAuthorityScope,
+    internal val approvalReference: String,
+) {
+    init {
+        require(approvalReference.length in 16..128 && approvalReference.all { it.isLetterOrDigit() || it in "-_" }) {
+            "Invalid adoption approval"
+        }
+    }
+
+    override fun toString(): String = "CheckoutInstallationAdoptionPermit(redacted)"
+
+    companion object {
+        /** App code should call this only after its selected manager approval policy succeeds. */
+        internal fun approved(scope: CheckoutAuthorityScope, approvalReference: String) =
+            CheckoutInstallationAdoptionPermit(scope, approvalReference)
+    }
+}
+
+/** Scope-bound result of read-only existing-install inspection; not cryptographic approval. */
+internal class CheckoutInstallationAdoptionPreflightPermit internal constructor(
+    val scope: CheckoutAuthorityScope,
+    internal val reviewReference: String,
+) {
+    init {
+        require(reviewReference.length in 16..128 && reviewReference.all { it.isLetterOrDigit() || it in "-_" }) {
+            "Invalid adoption preflight"
+        }
+    }
+
+    override fun toString(): String = "CheckoutInstallationAdoptionPreflightPermit(redacted)"
+
+    companion object {
+        internal fun verified(scope: CheckoutAuthorityScope, reviewReference: String) =
+            CheckoutInstallationAdoptionPreflightPermit(scope, reviewReference)
+    }
+}
+
+/**
+ * App-owned read-only inspection of legacy business/pairing files and the authority location.
+ * It must report an existing business install and must fail if any authority record is present or
+ * its presence cannot be determined. It does not grant manager authority.
+ */
+internal fun interface CheckoutExistingInstallAdoptionPreflight {
+    fun inspect(scope: CheckoutAuthorityScope): CheckoutInstallationAdoptionPreflightPermit?
+}
+
+/**
+ * Model/test injection seam, not a trust boundary. Production must not supply this from ordinary
+ * Kotlin app code; a future typed native Owner-grant verifier must be the only caller.
+ */
+internal fun interface CheckoutExistingInstallAdoptionCeremony {
+    fun authorize(scope: CheckoutAuthorityScope): CheckoutInstallationAdoptionPermit?
+}
 
 /**
  * Strict, public descriptor for the exact authority installation scope. The file is intentionally
@@ -96,7 +160,7 @@ class CheckoutInstallationScopeStore(
             throw IOException("Checkout installation scope does not match")
         }
         if (!marker.isDescriptorCommitted()) marker.commitDescriptor()
-        if (payload[4].toInt() == VERSION_V1) writeDescriptor(descriptor)
+        if (payload[4].toInt() < FORMAT_VERSION) writeDescriptor(descriptor)
         descriptor
     }
 
@@ -127,7 +191,78 @@ class CheckoutInstallationScopeStore(
         } catch (_: Exception) {
             throw IOException("Checkout installation scope could not be created")
         }
-        val descriptor = CheckoutInstallationDescriptor(scope, CheckoutProvisioningState.PENDING_ENROLLMENT)
+        val descriptor = CheckoutInstallationDescriptor(
+            scope,
+            CheckoutProvisioningState.PENDING_ENROLLMENT,
+            CheckoutInstallationMode.FRESH,
+            CheckoutAdoptionState.NONE,
+        )
+        writeInitialDescriptor(descriptor)
+        descriptor
+    }
+
+    /**
+     * Creates a non-authorizing adoption gate for an existing business installation. The caller
+     * must verify that the existing ledger/catalog/inventory/cash and pairing files are intact
+     * before invoking this method. It never reads, rewrites, or replaces those files.
+     */
+    internal fun createAdoptionRequired(
+        scope: CheckoutAuthorityScope,
+        preflight: CheckoutExistingInstallAdoptionPreflight,
+    ): CheckoutInstallationDescriptor {
+        val permit = preflight.inspect(scope) ?: throw CheckoutAuthorityDeniedException()
+        if (permit.scope != scope || permit.reviewReference.length !in 16..128) {
+            throw CheckoutAuthorityDeniedException()
+        }
+        return withLock {
+            if (file.exists() || marker.isDescriptorCommitted()) {
+                throw IOException("Checkout installation scope already exists")
+            }
+            if (marker.isEstablished()) {
+                if (!marker.canResumeInitialCreation()) throw IOException("Checkout installation marker already exists")
+            } else if (!marker.establish()) {
+                throw IOException("Checkout installation marker already exists")
+            }
+            val descriptor = CheckoutInstallationDescriptor(
+                scope,
+                CheckoutProvisioningState.PENDING_ENROLLMENT,
+                CheckoutInstallationMode.EXISTING_INSTALL_ADOPTION,
+                CheckoutAdoptionState.REQUIRED,
+            )
+            writeInitialDescriptor(descriptor)
+            descriptor
+        }
+    }
+
+    /**
+     * Enables the ordinary one-manager recovery-code/PIN ceremony only after an external,
+     * product-owned manager adoption gate has issued a scope-bound permit.
+     */
+    internal fun approveExistingInstallAdoption(
+        permit: CheckoutInstallationAdoptionPermit,
+    ): CheckoutInstallationDescriptor = withLock {
+        val current = loadDescriptorUnlocked(permit.scope)
+        if (current.mode != CheckoutInstallationMode.EXISTING_INSTALL_ADOPTION ||
+            current.adoptionState != CheckoutAdoptionState.REQUIRED ||
+            permit.approvalReference.length !in 16..128) {
+            throw IOException("Existing-install adoption is not awaiting approval")
+        }
+        val approved = current.copy(adoptionState = CheckoutAdoptionState.PENDING_MANAGER_ENROLLMENT)
+        writeDescriptor(approved)
+        approved
+    }
+
+    /** Runs the external ceremony before taking the store lock, then atomically consumes its permit. */
+    internal fun approveExistingInstallAdoption(
+        scope: CheckoutAuthorityScope,
+        ceremony: CheckoutExistingInstallAdoptionCeremony,
+    ): CheckoutInstallationDescriptor {
+        val permit = ceremony.authorize(scope) ?: throw CheckoutAuthorityDeniedException()
+        if (permit.scope != scope) throw CheckoutAuthorityDeniedException()
+        return approveExistingInstallAdoption(permit)
+    }
+
+    private fun writeInitialDescriptor(descriptor: CheckoutInstallationDescriptor) {
         val payload = encode(descriptor)
         val authenticator = try { marker.authenticate(payload) } catch (_: Exception) {
             payload.fill(0)
@@ -153,7 +288,6 @@ class CheckoutInstallationScopeStore(
             authenticator.fill(0)
             encoded.fill(0)
         }
-        descriptor
     }
 
     /** One-way transition after the authority store confirms its manager record is durable. */
@@ -162,6 +296,10 @@ class CheckoutInstallationScopeStore(
         authority: CheckoutAuthority,
     ): CheckoutInstallationDescriptor = withLock {
         val current = loadDescriptorUnlocked(expectedScope)
+        if (current.mode == CheckoutInstallationMode.EXISTING_INSTALL_ADOPTION &&
+            current.adoptionState != CheckoutAdoptionState.PENDING_MANAGER_ENROLLMENT) {
+            throw IOException("Existing-install manager approval is required")
+        }
         val profile = authority.loginProfile() ?: throw IOException("Manager authority record is unavailable")
         if (profile.scope != expectedScope || profile.enabledStaff.none { it.role == CheckoutAuthorityRole.MANAGER }) {
             throw IOException("Manager authority record is not confirmed")
@@ -176,6 +314,10 @@ class CheckoutInstallationScopeStore(
     fun validateAuthorityRecord(authority: CheckoutAuthority): CheckoutAuthorityLoginProfile? = withLock {
         val descriptor = loadDescriptorUnlocked()
         val profile = authority.loginProfile()
+        if (descriptor.mode == CheckoutInstallationMode.EXISTING_INSTALL_ADOPTION &&
+            descriptor.adoptionState == CheckoutAdoptionState.REQUIRED) {
+            throw CheckoutAuthorityUnavailableException()
+        }
         if (profile == null && descriptor.provisioningState == CheckoutProvisioningState.COMPLETED) {
             throw CheckoutAuthorityUnavailableException()
         }
@@ -206,7 +348,7 @@ class CheckoutInstallationScopeStore(
         if (expectedScope != null && descriptor.scope != expectedScope) {
             throw IOException("Checkout installation scope does not match")
         }
-        if (payload[4].toInt() == VERSION_V1) writeDescriptor(descriptor)
+        if (payload[4].toInt() < FORMAT_VERSION) writeDescriptor(descriptor)
         return descriptor
     }
 
@@ -300,14 +442,17 @@ class CheckoutInstallationScopeStore(
 
     private companion object {
         const val DEFAULT_NAME = "checkout-installation-scope.obis"
-        const val FORMAT_VERSION = 2
+        const val FORMAT_VERSION = 3
         const val VERSION_V1 = 1
+        const val VERSION_V2 = 2
         const val MAX_PART_BYTES = 64
         const val AUTHENTICATOR_BYTES = 32
-        const val MAX_PAYLOAD_BYTES = 4 + 1 + 1 + 5 * (2 + MAX_PART_BYTES)
+        const val MAX_PAYLOAD_BYTES = 4 + 1 + 3 + 5 * (2 + MAX_PART_BYTES)
         const val MIN_V1_PAYLOAD_BYTES = 4 + 1 + 5 * 3
         const val MIN_V2_PAYLOAD_BYTES = MIN_V1_PAYLOAD_BYTES + 1
-        const val MAX_V1_PAYLOAD_BYTES = MAX_PAYLOAD_BYTES - 1
+        const val MIN_V3_PAYLOAD_BYTES = MIN_V1_PAYLOAD_BYTES + 3
+        const val MAX_V1_PAYLOAD_BYTES = MAX_PAYLOAD_BYTES - 3
+        const val MAX_V2_PAYLOAD_BYTES = MAX_PAYLOAD_BYTES - 2
         const val MAX_BYTES = MAX_PAYLOAD_BYTES + 2 + AUTHENTICATOR_BYTES
         const val MIN_ENVELOPE_BYTES = MIN_V1_PAYLOAD_BYTES + 2 + AUTHENTICATOR_BYTES
         val MAGIC = byteArrayOf('O'.code.toByte(), 'B'.code.toByte(), 'I'.code.toByte(), 'S'.code.toByte())
@@ -326,7 +471,13 @@ class CheckoutInstallationScopeStore(
             DataOutputStream(out).use { data ->
                 data.write(MAGIC)
                 data.writeByte(FORMAT_VERSION)
-                data.writeByte(descriptor.provisioningState.ordinal)
+                data.writeByte(if (descriptor.provisioningState == CheckoutProvisioningState.COMPLETED) 1 else 0)
+                data.writeByte(if (descriptor.mode == CheckoutInstallationMode.EXISTING_INSTALL_ADOPTION) 1 else 0)
+                data.writeByte(when (descriptor.adoptionState) {
+                    CheckoutAdoptionState.NONE -> 0
+                    CheckoutAdoptionState.REQUIRED -> 1
+                    CheckoutAdoptionState.PENDING_MANAGER_ENROLLMENT -> 2
+                })
                 val scope = descriptor.scope
                 listOf(scope.merchantId, scope.storeId, scope.locationId, scope.registerId, scope.deviceId).forEach {
                     val bytes = it.toByteArray(Charsets.UTF_8)
@@ -349,26 +500,59 @@ class CheckoutInstallationScopeStore(
                         throw IOException("Checkout installation scope format is unsupported")
                     }
                     val version = data.readUnsignedByte()
-                    val provisioningState = when (version) {
-                        VERSION_V1 -> CheckoutProvisioningState.PENDING_ENROLLMENT.also {
+                    val (provisioningState, mode, adoptionState) = when (version) {
+                        VERSION_V1 -> Triple(
+                            CheckoutProvisioningState.PENDING_ENROLLMENT,
+                            CheckoutInstallationMode.FRESH,
+                            CheckoutAdoptionState.NONE,
+                        ).also {
                             if (bytes.size !in MIN_V1_PAYLOAD_BYTES..MAX_V1_PAYLOAD_BYTES) {
                                 throw IOException("Checkout installation scope has an invalid size")
                             }
                         }
-                        FORMAT_VERSION -> when (data.readUnsignedByte()) {
-                            0 -> CheckoutProvisioningState.PENDING_ENROLLMENT.also {
-                                if (bytes.size !in MIN_V2_PAYLOAD_BYTES..MAX_PAYLOAD_BYTES) {
-                                    throw IOException("Checkout installation scope has an invalid size")
-                                }
+                        VERSION_V2 -> Triple(
+                            when (data.readUnsignedByte()) {
+                                0 -> CheckoutProvisioningState.PENDING_ENROLLMENT
+                                1 -> CheckoutProvisioningState.COMPLETED
+                                else -> throw IOException("Checkout installation state is unsupported")
+                            },
+                            CheckoutInstallationMode.FRESH,
+                            CheckoutAdoptionState.NONE,
+                        ).also {
+                            if (bytes.size !in MIN_V2_PAYLOAD_BYTES..MAX_V2_PAYLOAD_BYTES) {
+                                throw IOException("Checkout installation scope has an invalid size")
                             }
-                            1 -> CheckoutProvisioningState.COMPLETED.also {
-                                if (bytes.size !in MIN_V2_PAYLOAD_BYTES..MAX_PAYLOAD_BYTES) {
-                                    throw IOException("Checkout installation scope has an invalid size")
-                                }
+                        }
+                        FORMAT_VERSION -> {
+                            val state = when (data.readUnsignedByte()) {
+                                0 -> CheckoutProvisioningState.PENDING_ENROLLMENT
+                                1 -> CheckoutProvisioningState.COMPLETED
+                                else -> throw IOException("Checkout installation state is unsupported")
                             }
-                            else -> throw IOException("Checkout installation state is unsupported")
+                            val descriptorMode = when (data.readUnsignedByte()) {
+                                0 -> CheckoutInstallationMode.FRESH
+                                1 -> CheckoutInstallationMode.EXISTING_INSTALL_ADOPTION
+                                else -> throw IOException("Checkout installation mode is unsupported")
+                            }
+                            val adoption = when (data.readUnsignedByte()) {
+                                0 -> CheckoutAdoptionState.NONE
+                                1 -> CheckoutAdoptionState.REQUIRED
+                                2 -> CheckoutAdoptionState.PENDING_MANAGER_ENROLLMENT
+                                else -> throw IOException("Checkout adoption state is unsupported")
+                            }
+                            if (bytes.size !in MIN_V3_PAYLOAD_BYTES..MAX_PAYLOAD_BYTES) {
+                                throw IOException("Checkout installation scope has an invalid size")
+                            }
+                            Triple(state, descriptorMode, adoption)
                         }
                         else -> throw IOException("Checkout installation scope format is unsupported")
+                    }
+                    if ((mode == CheckoutInstallationMode.FRESH && adoptionState != CheckoutAdoptionState.NONE) ||
+                        (mode == CheckoutInstallationMode.EXISTING_INSTALL_ADOPTION && adoptionState == CheckoutAdoptionState.NONE) ||
+                        (adoptionState == CheckoutAdoptionState.REQUIRED && provisioningState != CheckoutProvisioningState.PENDING_ENROLLMENT) ||
+                        (mode == CheckoutInstallationMode.EXISTING_INSTALL_ADOPTION &&
+                            provisioningState == CheckoutProvisioningState.COMPLETED && adoptionState != CheckoutAdoptionState.PENDING_MANAGER_ENROLLMENT)) {
+                        throw IOException("Checkout installation state is inconsistent")
                     }
                     val parts = List(5) {
                         val size = data.readUnsignedShort()
@@ -384,6 +568,8 @@ class CheckoutInstallationScopeStore(
                     return CheckoutInstallationDescriptor(
                         CheckoutAuthorityScope(parts[0], parts[1], parts[2], parts[3], parts[4]),
                         provisioningState,
+                        mode,
+                        adoptionState,
                     )
                 }
             } catch (error: IOException) {

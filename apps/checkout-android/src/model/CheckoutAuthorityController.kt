@@ -1,6 +1,7 @@
 package org.openbmt.checkout
 
 import java.security.MessageDigest
+import java.util.UUID
 
 /**
  * A caller supplied, fail-closed check that every durable business store is demonstrably fresh.
@@ -31,6 +32,16 @@ sealed interface CheckoutAccessState {
     data class Unavailable(val managerRecoveryAvailable: Boolean = false) : CheckoutAccessState
 }
 
+data class CheckoutStaffAdministrationSnapshot(
+    val staff: List<CheckoutStaffSummary>,
+    val message: String? = null,
+)
+
+sealed interface CheckoutStaffAdministrationResult {
+    data class Ready(val snapshot: CheckoutStaffAdministrationSnapshot) : CheckoutStaffAdministrationResult
+    data class Failed(val message: String) : CheckoutStaffAdministrationResult
+}
+
 /**
  * Process-local enrollment and sign-in state. It never stores PINs, sessions, or drafts in saved
  * UI state. Call [lock] on every background transition and on any stale or uncertain error.
@@ -41,6 +52,7 @@ class CheckoutAuthorityController(
     private val authority: CheckoutAuthority,
     private val scope: CheckoutAuthorityScope,
     private val businessFreshness: CheckoutBusinessFreshnessCheck,
+    private val auditCommands: CheckoutAuthorityCommandService? = null,
 ) {
     private val monitor = Any()
     private var state: CheckoutAccessState = CheckoutAccessState.Loading
@@ -272,6 +284,127 @@ class CheckoutAuthorityController(
         state
     }
 
+    /** Read the complete staff directory only after a fresh manager capability check. */
+    fun staffAdministration(): CheckoutStaffAdministrationSnapshot = synchronized(monitor) {
+        val active = managerSession()
+        try {
+            CheckoutStaffAdministrationSnapshot(authority.listStaff(active, scope))
+        } catch (error: CheckoutAuthorityDeniedException) {
+            requireSignIn()
+            throw error
+        } catch (error: CheckoutAuthorityUnavailableException) {
+            failClosed()
+            throw error
+        }
+    }
+
+    fun createStaffMember(
+        displayName: String,
+        role: CheckoutAuthorityRole,
+        pin: CharArray,
+    ): CheckoutStaffAdministrationResult = synchronized(monitor) {
+        try {
+            val active = managerSession()
+            checkNotNull(auditCommands) { "Audited staff administration is unavailable" }
+                .createStaffPrepared(newOperationId(), active, scope, displayName, role, pin)
+            invalidateAfterPolicyChange("Staff member created. Sign in again to continue.")
+            CheckoutStaffAdministrationResult.Ready(CheckoutStaffAdministrationSnapshot(emptyList(), "Staff member created."))
+        } catch (_: CheckoutAuthorityDeniedException) {
+            CheckoutStaffAdministrationResult.Failed("Staff change was rejected. Check the details and PIN, then try again.")
+        } catch (_: CheckoutAuthorityAuditUnavailableException) {
+            failClosed()
+            CheckoutStaffAdministrationResult.Failed("Staff audit storage is unavailable. No further staff changes can be made in this session.")
+        } catch (_: CheckoutAuthorityUnavailableException) {
+            failClosed()
+            CheckoutStaffAdministrationResult.Failed("Staff access storage is unavailable. No further changes can be made in this session.")
+        } catch (_: Exception) {
+            CheckoutStaffAdministrationResult.Failed("Staff change was rejected. Check the details and try again.")
+        } finally {
+            pin.fill('\u0000')
+        }
+    }
+
+    fun renameStaffMember(actorId: String, displayName: String): CheckoutStaffAdministrationResult = synchronized(monitor) {
+        try {
+            val active = managerSession()
+            checkNotNull(auditCommands) { "Audited staff administration is unavailable" }
+                .renameStaffPrepared(newOperationId(), active, scope, actorId, displayName)
+            refreshManagerSnapshot("Staff name updated.")
+        } catch (_: CheckoutAuthorityDeniedException) {
+            CheckoutStaffAdministrationResult.Failed("Name change was rejected. Check staff status and try again.")
+        } catch (_: CheckoutAuthorityAuditUnavailableException) {
+            failClosed()
+            CheckoutStaffAdministrationResult.Failed("Staff audit storage is unavailable. No further staff changes can be made in this session.")
+        } catch (_: CheckoutAuthorityUnavailableException) {
+            failClosed()
+            CheckoutStaffAdministrationResult.Failed("Staff access storage is unavailable. No further changes can be made in this session.")
+        } catch (_: Exception) {
+            CheckoutStaffAdministrationResult.Failed("Name change was rejected. Check the name and try again.")
+        }
+    }
+
+    fun changeStaffRole(actorId: String, role: CheckoutAuthorityRole): CheckoutStaffAdministrationResult = synchronized(monitor) {
+        try {
+            val active = managerSession()
+            checkNotNull(auditCommands) { "Audited staff administration is unavailable" }
+                .changeRolePrepared(newOperationId(), active, scope, actorId, role)
+            invalidateAfterPolicyChange("Staff role updated. Sign in again to continue.")
+            CheckoutStaffAdministrationResult.Ready(CheckoutStaffAdministrationSnapshot(emptyList(), "Staff role updated."))
+        } catch (_: CheckoutAuthorityDeniedException) {
+            CheckoutStaffAdministrationResult.Failed("Role change was rejected. Keep an active recovery manager enabled.")
+        } catch (_: CheckoutAuthorityAuditUnavailableException) {
+            failClosed()
+            CheckoutStaffAdministrationResult.Failed("Staff audit storage is unavailable. No further staff changes can be made in this session.")
+        } catch (_: CheckoutAuthorityUnavailableException) {
+            failClosed()
+            CheckoutStaffAdministrationResult.Failed("Staff access storage is unavailable. No further changes can be made in this session.")
+        } catch (_: Exception) {
+            CheckoutStaffAdministrationResult.Failed("Role change was rejected. Check staff status and try again.")
+        }
+    }
+
+    fun changeStaffPin(actorId: String, newPin: CharArray): CheckoutStaffAdministrationResult = synchronized(monitor) {
+        try {
+            val active = managerSession()
+            checkNotNull(auditCommands) { "Audited staff administration is unavailable" }
+                .changePinPrepared(newOperationId(), active, scope, actorId, newPin)
+            invalidateAfterPolicyChange("PIN updated. Sign in again to continue.")
+            CheckoutStaffAdministrationResult.Ready(CheckoutStaffAdministrationSnapshot(emptyList(), "PIN updated."))
+        } catch (_: CheckoutAuthorityDeniedException) {
+            CheckoutStaffAdministrationResult.Failed("PIN change was rejected. Check the PIN and try again.")
+        } catch (_: CheckoutAuthorityAuditUnavailableException) {
+            failClosed()
+            CheckoutStaffAdministrationResult.Failed("Staff audit storage is unavailable. No further staff changes can be made in this session.")
+        } catch (_: CheckoutAuthorityUnavailableException) {
+            failClosed()
+            CheckoutStaffAdministrationResult.Failed("Staff access storage is unavailable. No further changes can be made in this session.")
+        } catch (_: Exception) {
+            CheckoutStaffAdministrationResult.Failed("PIN change was rejected. Check the PIN and try again.")
+        } finally {
+            newPin.fill('\u0000')
+        }
+    }
+
+    fun disableStaffMember(actorId: String): CheckoutStaffAdministrationResult = synchronized(monitor) {
+        try {
+            val active = managerSession()
+            checkNotNull(auditCommands) { "Audited staff administration is unavailable" }
+                .disableStaffPrepared(newOperationId(), active, scope, actorId)
+            invalidateAfterPolicyChange("Staff access disabled. Sign in again to continue.")
+            CheckoutStaffAdministrationResult.Ready(CheckoutStaffAdministrationSnapshot(emptyList(), "Staff access disabled."))
+        } catch (_: CheckoutAuthorityDeniedException) {
+            CheckoutStaffAdministrationResult.Failed("Staff access could not be disabled. Keep an active recovery manager enabled.")
+        } catch (_: CheckoutAuthorityAuditUnavailableException) {
+            failClosed()
+            CheckoutStaffAdministrationResult.Failed("Staff audit storage is unavailable. No further staff changes can be made in this session.")
+        } catch (_: CheckoutAuthorityUnavailableException) {
+            failClosed()
+            CheckoutStaffAdministrationResult.Failed("Staff access storage is unavailable. No further changes can be made in this session.")
+        } catch (_: Exception) {
+            CheckoutStaffAdministrationResult.Failed("Staff access could not be disabled. Check staff status and try again.")
+        }
+    }
+
     /** Check a capability immediately before acting; a stale/error result locks the whole session. */
     fun authorize(capability: CheckoutAuthorityCapability): ActorAttribution? = synchronized(monitor) {
         val active = session ?: return null
@@ -342,6 +475,44 @@ class CheckoutAuthorityController(
     }
 
     private fun freshBusinessState(): Boolean = try { businessFreshness.isFresh() } catch (_: Exception) { false }
+
+    private fun managerSession(): CheckoutAuthoritySession {
+        val active = session ?: throw CheckoutAuthorityDeniedException()
+        val signedIn = state as? CheckoutAccessState.SignedIn ?: throw CheckoutAuthorityDeniedException()
+        if (signedIn.actor.role != CheckoutAuthorityRole.MANAGER) throw CheckoutAuthorityDeniedException()
+        try {
+            state = CheckoutAccessState.SignedIn(authority.authorize(active, CheckoutAuthorityCapability.STAFF_MANAGE, scope))
+        } catch (denied: CheckoutAuthorityDeniedException) {
+            requireSignIn()
+            throw denied
+        } catch (unavailable: CheckoutAuthorityUnavailableException) {
+            failClosed()
+            throw unavailable
+        }
+        return active
+    }
+
+    private fun invalidateAfterPolicyChange(message: String) {
+        session = null
+        try { authority.lock() } catch (_: Exception) { }
+        val profile = try { authority.loginProfile() } catch (_: Exception) { null }
+        if (profile == null || profile.scope != scope) {
+            failClosed()
+        } else {
+            state = CheckoutAccessState.SignInRequired(profile.enabledStaff, message)
+        }
+    }
+
+    private fun refreshManagerSnapshot(message: String): CheckoutStaffAdministrationResult {
+        val active = managerSession()
+        val attribution = authority.authorize(active, CheckoutAuthorityCapability.SALES_READ, scope)
+        state = CheckoutAccessState.SignedIn(attribution)
+        return CheckoutStaffAdministrationResult.Ready(
+            CheckoutStaffAdministrationSnapshot(authority.listStaff(active, scope), message),
+        )
+    }
+
+    private fun newOperationId(): String = UUID.randomUUID().toString()
 
     private fun unavailableState(): CheckoutAccessState.Unavailable {
         val readable = try { authority.loginProfile()?.scope == scope } catch (_: Exception) { false }

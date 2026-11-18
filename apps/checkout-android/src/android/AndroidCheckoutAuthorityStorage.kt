@@ -12,6 +12,7 @@ import java.security.MessageDigest
 class AndroidCheckoutAuthorityStorage(
     context: Context,
     scope: CheckoutAuthorityScope,
+    name: String = DEFAULT_FILE_NAME,
 ) : CheckoutAuthorityStorage {
     /** Reopens only from the previously authenticated installation descriptor. */
     constructor(context: Context) : this(
@@ -23,6 +24,7 @@ class AndroidCheckoutAuthorityStorage(
         context.applicationContext.noBackupFilesDir,
         scope,
         AndroidAuthorityRecordSealer(KeystoreSealer(keyAlias(scope))),
+        name,
     )
 
     override fun read(): ByteArray? = delegate.read()
@@ -34,6 +36,7 @@ class AndroidCheckoutAuthorityStorage(
 
     companion object {
         private const val KEY_ALIAS_PREFIX = "openbmt-checkout-authority-v1-"
+        private const val DEFAULT_FILE_NAME = "checkout-authority.obis"
 
         /** A deterministic, non-secret scope tag keeps unrelated installation keys independent. */
         private fun keyAlias(scope: CheckoutAuthorityScope): String {

@@ -127,6 +127,10 @@ open class CheckoutActivity : Activity() {
     private var businessStoresInitialized = false
     private var businessStartupFault: String? = null
     private var pendingSavedUiState: Bundle? = null
+    private var staffAdministrationVisible = false
+    private var staffAdministrationSnapshot: CheckoutStaffAdministrationSnapshot? = null
+    private var staffAdministrationMessage: String? = null
+    private var staffAdministrationRevision = 0L
 
     /** The plain APK has no Square class on its class path. The Sandbox project overrides this. */
     protected open fun createCardCheckoutBridge(): CardCheckoutBridge? = null
@@ -196,6 +200,8 @@ open class CheckoutActivity : Activity() {
             // Timeout, denial, recovery and storage faults must stop the payment observer just as
             // backgrounding does. Native state remains durable and is reconciled after sign-in.
             stopCounterForAuthorityLock()
+            staffAdministrationVisible = false
+            staffAdministrationRevision++
             renderAuthorityGate(state)
             return
         }
@@ -229,6 +235,62 @@ open class CheckoutActivity : Activity() {
                 authorityFlow.prepareManagerRecovery(currentCode, newPin)
             override fun confirmNextRecoveryCode(value: CharArray) = authorityFlow.confirmNextRecoveryCode(value)
         })
+    }
+
+    private fun openStaffAdministration() {
+        if (!authorityFlow.isManager()) return
+        window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        staffAdministrationVisible = true
+        staffAdministrationSnapshot = null
+        staffAdministrationMessage = "Loading staff directory…"
+        renderStaffAdministration()
+        requestStaffAdministration { flow, done -> flow.loadStaffAdministration(done) }
+    }
+
+    private fun requestStaffAdministration(
+        request: (AndroidCheckoutAuthorityFlow, (CheckoutStaffAdministrationResult) -> Unit) -> Unit,
+    ) {
+        val ticket = ++staffAdministrationRevision
+        request(authorityFlow, { result ->
+            if (staffAdministrationVisible && ticket == staffAdministrationRevision && authorityFlow.isManager()) {
+                when (result) {
+                    is CheckoutStaffAdministrationResult.Ready -> {
+                        staffAdministrationSnapshot = result.snapshot
+                        staffAdministrationMessage = result.snapshot.message
+                    }
+                    is CheckoutStaffAdministrationResult.Failed -> staffAdministrationMessage = result.message
+                }
+                renderStaffAdministration()
+            }
+        })
+    }
+
+    private fun renderStaffAdministration() {
+        if (!staffAdministrationVisible || !authorityFlow.isManager()) return
+        authorityUi.renderStaffAdministration(staffAdministrationSnapshot, staffAdministrationMessage,
+            object : CheckoutAuthorityUi.StaffActions {
+                override fun reload() {
+                    staffAdministrationMessage = "Loading staff directory…"
+                    renderStaffAdministration()
+                    requestStaffAdministration { flow, done -> flow.loadStaffAdministration(done) }
+                }
+                override fun create(name: String, role: CheckoutAuthorityRole, pin: CharArray) =
+                    requestStaffAdministration { flow, done -> flow.createStaffMember(name, role, pin, done) }
+                override fun rename(actorId: String, name: String) =
+                    requestStaffAdministration { flow, done -> flow.renameStaffMember(actorId, name, done) }
+                override fun changeRole(actorId: String, role: CheckoutAuthorityRole) =
+                    requestStaffAdministration { flow, done -> flow.changeStaffRole(actorId, role, done) }
+                override fun changePin(actorId: String, pin: CharArray) =
+                    requestStaffAdministration { flow, done -> flow.changeStaffPin(actorId, pin, done) }
+                override fun disable(actorId: String) =
+                    requestStaffAdministration { flow, done -> flow.disableStaffMember(actorId, done) }
+                override fun close() {
+                    staffAdministrationVisible = false
+                    staffAdministrationRevision++
+                    window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+                    showHome()
+                }
+            })
     }
 
     /** Business stores are opened only after local authority has produced a signed-in actor. */
@@ -859,11 +921,14 @@ open class CheckoutActivity : Activity() {
             ui.text("TEST ONLY · local app data · no real funds", 14f, bold = true),
             ui.text("Local test-only staff authority is active. Provider catalog sync, camera or physical scanner, and production payment processing are not connected. Inventory counts are configured separately from item prices.", 13f, colour = ui.pal.secondary),
             ui.button("Manual amount") { showManualCheckout(healthy) },
+            ui.button("Cash sessions · test only") { showCashSessions() },
+        )
+        if (authorityFlow.isManager()) body.addAll(listOf(
             ui.button("Manage items") { showCatalogManagement(healthy) },
             ui.button("Local inventory · test only") { showInventoryStock() },
-            ui.button("Cash sessions · test only") { showCashSessions() },
             ui.button("Reports · local ledger") { reportController.show() },
-        )
+            ui.button("Manage staff · local authority") { openStaffAdministration() },
+        ))
         showUiPage(ui.bar("Shop tools", back = { showCatalog(healthy) }), body,
             listOf(ui.secondary("Back to checkout") { showCatalog(healthy) }))
     }
@@ -931,12 +996,18 @@ open class CheckoutActivity : Activity() {
         )
         val review = ui.primary("Review amount · choose payment") { createManualSale(field.text.toString()) }
         review.isEnabled = true
+        val actions = mutableListOf(
+            review,
+            ui.secondary("Cash sessions · test only") { showCashSessions() },
+            ui.quiet("Sales and receipts") { showSales() },
+        )
+        if (authorityFlow.isManager()) {
+            actions.add(2, ui.secondary("Reports · local ledger") { reportController.show() })
+        }
         showUiPage(
             ui.bar(if (currency == "SAT") "Amount in sats" else "Manual amount", back = { if (currency == "USD") showCatalog(healthy) else showHome() }, logo = true),
             body,
-            listOf(review, ui.secondary("Cash sessions · test only") { showCashSessions() },
-                ui.secondary("Reports · local ledger") { reportController.show() },
-                ui.quiet("Sales and receipts") { showSales() }),
+            actions,
         )
         homeStatusView = statusView
         homePrimaryButton = review

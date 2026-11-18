@@ -17,8 +17,74 @@ object CheckoutInstallationScopeStoreTest {
         markerEstablishmentCanResumeOnlyBeforeCommit()
         legacyEstablishedMarkerCannotRegenerate()
         provisioningCompletesOnlyAfterManagerDurability()
+        existingInstallAdoptionRequiresCeremonyAndPreservesBusinessFiles()
         corruptAndUnsupportedDescriptorsFailClosed()
         concurrentCreateRunsFactoryOnce()
+    }
+
+    private fun existingInstallAdoptionRequiresCeremonyAndPreservesBusinessFiles() {
+        val directory = Files.createTempDirectory("checkout-install-adoption-").toFile()
+        val ledgerFile = File(directory, "checkout-ledger.bin").apply { writeBytes(byteArrayOf(5, 4, 3, 2, 1)) }
+        val pairingFile = File(directory, "pairing.obks").apply { writeBytes(byteArrayOf(9, 8, 7, 6)) }
+        val ledgerBefore = ledgerFile.readBytes()
+        val pairingBefore = pairingFile.readBytes()
+        val store = CheckoutInstallationScopeStore(directory, MemoryMarker())
+        try {
+            val deniedPreflight = CheckoutExistingInstallAdoptionPreflight { null }
+            check(runCatching { store.createAdoptionRequired(SCOPE, deniedPreflight) }
+                .exceptionOrNull() is CheckoutAuthorityDeniedException)
+            val wrongScopePreflight = CheckoutExistingInstallAdoptionPreflight { scope ->
+                CheckoutInstallationAdoptionPreflightPermit.verified(scope.copy(registerId = "other-register"), "preflight-review-0000")
+            }
+            check(runCatching { store.createAdoptionRequired(SCOPE, wrongScopePreflight) }
+                .exceptionOrNull() is CheckoutAuthorityDeniedException)
+            val preflight = CheckoutExistingInstallAdoptionPreflight { scope ->
+                CheckoutInstallationAdoptionPreflightPermit.verified(scope, "preflight-review-0001")
+            }
+            val required = store.createAdoptionRequired(SCOPE, preflight)
+            check(required.mode == CheckoutInstallationMode.EXISTING_INSTALL_ADOPTION)
+            check(required.adoptionState == CheckoutAdoptionState.REQUIRED)
+            check(store.loadDescriptor() == required)
+            check(ledgerFile.readBytes().contentEquals(ledgerBefore))
+            check(pairingFile.readBytes().contentEquals(pairingBefore))
+
+            val authority = CheckoutAuthority(
+                NioCheckoutAuthorityStorage(directory.toPath().resolve("authority.bin")),
+                TestClock(), TestRandom(), defaultIterations = 1_000,
+            )
+            authority.bootstrapManager(authority.prepareBootstrap(), SCOPE, "Manager", "123456".toCharArray())
+            check(runCatching { store.validateAuthorityRecord(authority) }
+                .exceptionOrNull() is CheckoutAuthorityUnavailableException)
+
+            val wrongScopeCeremony = CheckoutExistingInstallAdoptionCeremony { scope ->
+                CheckoutInstallationAdoptionPermit.approved(scope.copy(registerId = "other-register"), "approval-reference-0001")
+            }
+            check(runCatching { store.approveExistingInstallAdoption(SCOPE, wrongScopeCeremony) }
+                .exceptionOrNull() is CheckoutAuthorityDeniedException)
+            check(store.loadDescriptor().adoptionState == CheckoutAdoptionState.REQUIRED)
+
+            var ceremonyCalls = 0
+            val ceremony = CheckoutExistingInstallAdoptionCeremony { scope ->
+                ceremonyCalls++
+                CheckoutInstallationAdoptionPermit.approved(scope, "approval-reference-0002")
+            }
+            val approved = store.approveExistingInstallAdoption(SCOPE, ceremony)
+            check(ceremonyCalls == 1)
+            check(approved.adoptionState == CheckoutAdoptionState.PENDING_MANAGER_ENROLLMENT)
+            check(store.loadDescriptor() == approved)
+            check(store.validateAuthorityRecord(authority)?.scope == SCOPE)
+            check(runCatching { store.approveExistingInstallAdoption(SCOPE, ceremony) }.isFailure)
+            check(ledgerFile.readBytes().contentEquals(ledgerBefore))
+            check(pairingFile.readBytes().contentEquals(pairingBefore))
+
+            var regenerated = false
+            check(runCatching {
+                store.createOnFreshInstall(EVIDENCE) { regenerated = true; SCOPE }
+            }.exceptionOrNull() is IOException)
+            check(!regenerated)
+        } finally {
+            removeStoreFiles(directory)
+        }
     }
 
     private fun legacyEstablishedMarkerCannotRegenerate() {

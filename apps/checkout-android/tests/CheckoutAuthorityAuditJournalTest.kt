@@ -6,6 +6,7 @@ import java.nio.file.Files
 object CheckoutAuthorityAuditJournalTest {
     fun run() {
         recordsAdminAndRecoveryEventsWithInternalAttribution()
+        preparedStaffWritesAreAuditedAndUnresolvedIntentsBlockFurtherAdmin()
         operationIdsAreIdempotentAndConflictsFailClosed()
         viewsAndStringsDoNotExposeSecretsOrMutableState()
         corruptAndUncertainJournalWritesFailClosed()
@@ -52,6 +53,48 @@ object CheckoutAuthorityAuditJournalTest {
             CheckoutAuthorityAuditAction.MANAGER_RECOVERED,CheckoutAuthorityAuditAction.LIFECYCLE_LOCKED))
         check(events[1].actorId==draft.managerActorId && events[1].actorDisplayName=="Root Manager")
         check(events.none{it.capabilityId.isBlank() || it.scope!=SCOPE})
+    }
+
+    private fun preparedStaffWritesAreAuditedAndUnresolvedIntentsBlockFurtherAdmin() {
+        val auth = MemoryStorage(); val audit = MemoryStorage(); val clock = TestClock()
+        val authority = newAuthority(auth, clock)
+        val journal = CheckoutAuthorityAuditJournal(audit)
+        val service = CheckoutAuthorityCommandService(authority, journal, clock)
+        val draft = authority.prepareBootstrap()
+        service.bootstrap("bootstrap-prepared-01", draft, SCOPE, "Manager", chars("123456"))
+        val manager = service.signIn(draft.managerActorId, chars("123456"), SCOPE)
+        val created = service.createStaffPrepared(
+            "create-prepared-01", manager, SCOPE, "Cashier", CheckoutAuthorityRole.CASHIER, chars("234567"),
+        )
+        val events = journal.snapshot()
+        check(events.map { it.action } == listOf(
+            CheckoutAuthorityAuditAction.BOOTSTRAP,
+            CheckoutAuthorityAuditAction.STAFF_CREATE_PREPARED,
+            CheckoutAuthorityAuditAction.STAFF_CREATED,
+        ))
+        check(events[1].actorId == draft.managerActorId && events[1].capabilityId == CheckoutAuthorityCapability.STAFF_MANAGE.id)
+        check(events[2].subjectActorId == created.subjectActorId)
+
+        val audit2 = MemoryStorage(); val authority2Storage = MemoryStorage()
+        val authority2 = newAuthority(authority2Storage, clock)
+        val journal2 = CheckoutAuthorityAuditJournal(audit2)
+        val service2 = CheckoutAuthorityCommandService(authority2, journal2, clock)
+        val draft2 = authority2.prepareBootstrap()
+        service2.bootstrap("bootstrap-prepared-02", draft2, SCOPE, "Manager", chars("654321"))
+        val manager2 = service2.signIn(draft2.managerActorId, chars("654321"), SCOPE)
+        audit2.permitWritesBeforeReject = 1 // persist prepare; fail every attempt to append the commit.
+        check(runCatching {
+            service2.createStaffPrepared("create-prepared-02", manager2, SCOPE, "Cashier", CheckoutAuthorityRole.CASHIER, chars("345678"))
+        }.exceptionOrNull() is CheckoutAuthorityAuditUnavailableException)
+        audit2.permitWritesBeforeReject = null
+        val unresolvedJournal = CheckoutAuthorityAuditJournal(audit2)
+        check(unresolvedJournal.snapshot().any { it.action == CheckoutAuthorityAuditAction.STAFF_CREATE_PREPARED })
+        val managerAfterWrite = authority2.authenticate(draft2.managerActorId, chars("654321"), SCOPE)
+        check(authority2.listStaff(managerAfterWrite, SCOPE).size == 2) // mutation committed, journal remains explicitly unresolved.
+        val reopenedService = CheckoutAuthorityCommandService(authority2, unresolvedJournal, clock)
+        check(runCatching {
+            reopenedService.renameStaffPrepared("rename-prepared-02", managerAfterWrite, SCOPE, draft2.managerActorId, "Other")
+        }.exceptionOrNull() is CheckoutAuthorityAuditUnavailableException)
     }
 
     private fun operationIdsAreIdempotentAndConflictsFailClosed() {
@@ -133,9 +176,15 @@ object CheckoutAuthorityAuditJournalTest {
         override fun elapsedRealtimeMillis()=elapsed; override fun wallTimeMillis()=wall; override fun bootIdentity()="audit-test-boot" }
     private class Random:CheckoutAuthorityRandom { private var n=0; override fun bytes(count:Int)=ByteArray(count){(++n).toByte()} }
     private class MemoryStorage:CheckoutAuthorityStorage { var bytes:ByteArray?=null; var writeThenThrowAfterCommit=false
+        var permitWritesBeforeReject:Int?=null
         override fun read()=bytes?.copyOf()
         override fun compareAndSwap(expectedBytes:ByteArray?,nextBytes:ByteArray):Boolean {
             val current=bytes; if(expectedBytes==null){if(current!=null)return false}else if(current==null||!current.contentEquals(expectedBytes))return false
+            val permitted = permitWritesBeforeReject
+            if (permitted != null) {
+                if (permitted == 0) return false
+                permitWritesBeforeReject = permitted - 1
+            }
             bytes=nextBytes.copyOf(); if(writeThenThrowAfterCommit){writeThenThrowAfterCommit=false;throw IllegalStateException("uncertain commit")}; return true
         }
     }

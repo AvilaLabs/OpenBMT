@@ -12,6 +12,8 @@ import java.util.Collections
 enum class CheckoutAuthorityAuditAction {
     BOOTSTRAP, STAFF_CREATED, STAFF_RENAMED, STAFF_ROLE_CHANGED, STAFF_PIN_CHANGED,
     STAFF_DISABLED, MANAGER_RECOVERED, LIFECYCLE_LOCKED,
+    STAFF_CREATE_PREPARED, STAFF_RENAME_PREPARED, STAFF_ROLE_PREPARED, STAFF_PIN_PREPARED,
+    STAFF_DISABLE_PREPARED, STAFF_OPERATION_REJECTED,
 }
 
 /** Immutable snapshot. Construction is internal; only the authenticated command service creates events. */
@@ -161,6 +163,19 @@ class CheckoutAuthorityAuditJournal(private val storage: CheckoutAuthorityStorag
             CheckoutAuthorityAuditAction.STAFF_PIN_CHANGED, CheckoutAuthorityAuditAction.STAFF_DISABLED -> require(e.subjectActorId != null)
             CheckoutAuthorityAuditAction.MANAGER_RECOVERED -> require(e.subjectActorId != null && e.capabilityId == "authority.recovery")
             CheckoutAuthorityAuditAction.LIFECYCLE_LOCKED -> require(e.capabilityId == "authority.lifecycle.lock")
+            CheckoutAuthorityAuditAction.STAFF_CREATE_PREPARED -> require(
+                e.subjectActorId == null && e.subjectDisplayNameAfter != null && e.subjectRoleAfter != null && e.capabilityId == "staff.manage",
+            )
+            CheckoutAuthorityAuditAction.STAFF_RENAME_PREPARED -> require(
+                e.subjectActorId != null && e.subjectDisplayNameBefore != null && e.subjectDisplayNameAfter != null && e.capabilityId == "staff.manage",
+            )
+            CheckoutAuthorityAuditAction.STAFF_ROLE_PREPARED -> require(
+                e.subjectActorId != null && e.subjectRoleBefore != null && e.subjectRoleAfter != null && e.capabilityId == "staff.manage",
+            )
+            CheckoutAuthorityAuditAction.STAFF_PIN_PREPARED, CheckoutAuthorityAuditAction.STAFF_DISABLE_PREPARED -> require(
+                e.subjectActorId != null && e.capabilityId == "staff.manage",
+            )
+            CheckoutAuthorityAuditAction.STAFF_OPERATION_REJECTED -> require(e.capabilityId == "staff.manage")
         }
     }
 
@@ -217,6 +232,7 @@ class CheckoutAuthorityCommandService(
             "authority.bootstrap",1,scope,wallTime(),result.managerActorId,afterName=name,afterRole=CheckoutAuthorityRole.MANAGER)
     } } finally { pin.fill('\u0000') }
 
+    /** Legacy post-write staff paths retained for compatibility tests; production UI uses the prepared variants below. */
     fun createStaff(op:String,session:CheckoutAuthoritySession,scope:CheckoutAuthorityScope,name:String,role:CheckoutAuthorityRole,pin:CharArray)=try {
         execute(op,CheckoutAuthorityAuditAction.STAFF_CREATED,
             expectedScope = scope, expectedName = name.trim(), expectedRole = role) {
@@ -261,6 +277,163 @@ class CheckoutAuthorityCommandService(
     fun lockForLifecycle(op:String,scope:CheckoutAuthorityScope)=execute(op,CheckoutAuthorityAuditAction.LIFECYCLE_LOCKED, expectedScope = scope) {
         authority.lock()
         event(op,CheckoutAuthorityAuditAction.LIFECYCLE_LOCKED,null,null,null,"authority.lifecycle.lock",0,scope,wallTime())
+    }
+
+    /** Staff mutation with a durable intent record written before the authority commit. */
+    fun createStaffPrepared(op: String, session: CheckoutAuthoritySession, scope: CheckoutAuthorityScope,
+                            name: String, role: CheckoutAuthorityRole, pin: CharArray): CheckoutAuthorityAuditEvent = try {
+        staffWrite(
+            op, session, scope, CheckoutAuthorityAuditAction.STAFF_CREATE_PREPARED,
+            commit = { actor, commitId ->
+                val staff = authority.createStaff(session, scope, name, role, pin)
+                event(commitId, CheckoutAuthorityAuditAction.STAFF_CREATED, actor, staff.actorId,
+                    afterName = staff.displayName, afterRole = staff.role)
+            },
+            prepare = { actor, prepareId ->
+                event(prepareId, CheckoutAuthorityAuditAction.STAFF_CREATE_PREPARED, actor,
+                    afterName = name.trim(), afterRole = role)
+            },
+        )
+    } finally { pin.fill('\u0000') }
+
+    fun renameStaffPrepared(op: String, session: CheckoutAuthoritySession, scope: CheckoutAuthorityScope,
+                            actorId: String, name: String): CheckoutAuthorityAuditEvent =
+        staffWrite(
+            op, session, scope, CheckoutAuthorityAuditAction.STAFF_RENAME_PREPARED,
+            commit = { actor, commitId ->
+                val before = staff(session, scope, actorId)
+                val after = authority.renameStaff(session, scope, actorId, name)
+                event(commitId, CheckoutAuthorityAuditAction.STAFF_RENAMED, actor, actorId,
+                    beforeName = before.displayName, afterName = after.displayName,
+                    beforeRole = before.role, afterRole = after.role)
+            },
+            prepare = { actor, prepareId ->
+                val before = staff(session, scope, actorId)
+                event(prepareId, CheckoutAuthorityAuditAction.STAFF_RENAME_PREPARED, actor, actorId,
+                    beforeName = before.displayName, afterName = name.trim(),
+                    beforeRole = before.role, afterRole = before.role)
+            },
+        )
+
+    fun changeRolePrepared(op: String, session: CheckoutAuthoritySession, scope: CheckoutAuthorityScope,
+                           actorId: String, role: CheckoutAuthorityRole): CheckoutAuthorityAuditEvent =
+        staffWrite(
+            op, session, scope, CheckoutAuthorityAuditAction.STAFF_ROLE_PREPARED,
+            commit = { actor, commitId ->
+                val before = staff(session, scope, actorId)
+                val after = authority.changeRole(session, scope, actorId, role)
+                event(commitId, CheckoutAuthorityAuditAction.STAFF_ROLE_CHANGED, actor, actorId,
+                    beforeName = before.displayName, afterName = after.displayName,
+                    beforeRole = before.role, afterRole = after.role)
+            },
+            prepare = { actor, prepareId ->
+                val before = staff(session, scope, actorId)
+                event(prepareId, CheckoutAuthorityAuditAction.STAFF_ROLE_PREPARED, actor, actorId,
+                    beforeName = before.displayName, afterName = before.displayName,
+                    beforeRole = before.role, afterRole = role)
+            },
+        )
+
+    fun changePinPrepared(op: String, session: CheckoutAuthoritySession, scope: CheckoutAuthorityScope,
+                          actorId: String, pin: CharArray): CheckoutAuthorityAuditEvent = try {
+        staffWrite(
+            op, session, scope, CheckoutAuthorityAuditAction.STAFF_PIN_PREPARED,
+            commit = { actor, commitId ->
+                authority.changePin(session, scope, actorId, pin)
+                event(commitId, CheckoutAuthorityAuditAction.STAFF_PIN_CHANGED, actor, actorId)
+            },
+            prepare = { actor, prepareId ->
+                staff(session, scope, actorId)
+                event(prepareId, CheckoutAuthorityAuditAction.STAFF_PIN_PREPARED, actor, actorId)
+            },
+        )
+    } finally { pin.fill('\u0000') }
+
+    fun disableStaffPrepared(op: String, session: CheckoutAuthoritySession, scope: CheckoutAuthorityScope,
+                             actorId: String): CheckoutAuthorityAuditEvent =
+        staffWrite(
+            op, session, scope, CheckoutAuthorityAuditAction.STAFF_DISABLE_PREPARED,
+            commit = { actor, commitId ->
+                val before = staff(session, scope, actorId)
+                val after = authority.disableStaff(session, scope, actorId)
+                event(commitId, CheckoutAuthorityAuditAction.STAFF_DISABLED, actor, actorId,
+                    beforeName = before.displayName, afterName = after.displayName,
+                    beforeRole = before.role, afterRole = after.role)
+            },
+            prepare = { actor, prepareId ->
+                val before = staff(session, scope, actorId)
+                event(prepareId, CheckoutAuthorityAuditAction.STAFF_DISABLE_PREPARED, actor, actorId,
+                    beforeName = before.displayName, afterName = before.displayName,
+                    beforeRole = before.role, afterRole = before.role)
+            },
+        )
+
+    private fun staffWrite(
+        operationId: String,
+        session: CheckoutAuthoritySession,
+        scope: CheckoutAuthorityScope,
+        preparedAction: CheckoutAuthorityAuditAction,
+        commit: (ActorAttribution, String) -> CheckoutAuthorityAuditEvent,
+        prepare: (ActorAttribution, String) -> CheckoutAuthorityAuditEvent,
+    ): CheckoutAuthorityAuditEvent = synchronized(this) {
+        ensureAvailable()
+        require(operationId.length in 8..126 && operationId.all { it.isLetterOrDigit() && it.code < 128 || it == '-' || it == '_' })
+        ensureNoUnresolvedStaffIntent()
+        val actor = principal(session, scope)
+        val prepareId = "p-$operationId"
+        val commitId = "c-$operationId"
+        val rejectId = "r-$operationId"
+        val intent = prepare(actor, prepareId)
+        require(intent.action == preparedAction && intent.capabilityId == CheckoutAuthorityCapability.STAFF_MANAGE.id)
+        val previousIntent = try { journal.findOperation(prepareId) } catch (_: Exception) { poison() }
+        if (previousIntent != null) {
+            if (!sameStaffIntent(previousIntent, intent)) throw CheckoutAuthorityAuditOperationConflictException()
+            val previousCommit = try { journal.findOperation(commitId) } catch (_: Exception) { poison() }
+            if (previousCommit != null) return@synchronized previousCommit
+            val previousRejection = try { journal.findOperation(rejectId) } catch (_: Exception) { poison() }
+            if (previousRejection != null) throw CheckoutAuthorityDeniedException()
+            poison()
+        }
+        try { journal.append(intent) } catch (_: Exception) { poison() }
+        val committed = try {
+            commit(actor, commitId)
+        } catch (denied: CheckoutAuthorityDeniedException) {
+            val rejected = event(rejectId, CheckoutAuthorityAuditAction.STAFF_OPERATION_REJECTED, actor,
+                intent.subjectActorId, beforeName = intent.subjectDisplayNameBefore,
+                afterName = intent.subjectDisplayNameAfter, beforeRole = intent.subjectRoleBefore,
+                afterRole = intent.subjectRoleAfter)
+            try { journal.append(rejected) } catch (_: Exception) { poison() }
+            throw denied
+        } catch (_: Exception) {
+            // The mutation may have committed. Keep the durable prepare row unresolved and block
+            // further admin writes until an explicit recovery/reconciliation path exists.
+            poison()
+        }
+        try { journal.append(committed) } catch (_: Exception) { poison() }
+        committed
+    }
+
+    private fun sameStaffIntent(a: CheckoutAuthorityAuditEvent, b: CheckoutAuthorityAuditEvent): Boolean =
+        a.action == b.action && a.actorId == b.actorId && a.actorRole == b.actorRole &&
+            a.capabilityId == b.capabilityId && a.scope == b.scope && a.subjectActorId == b.subjectActorId &&
+            a.subjectDisplayNameAfter == b.subjectDisplayNameAfter && a.subjectRoleAfter == b.subjectRoleAfter
+
+    private fun ensureNoUnresolvedStaffIntent() {
+        val events = try { journal.snapshot() } catch (_: Exception) { poison() }
+        val operationIds = events.mapTo(HashSet()) { it.operationId }
+        val preparedActions = setOf(
+            CheckoutAuthorityAuditAction.STAFF_CREATE_PREPARED,
+            CheckoutAuthorityAuditAction.STAFF_RENAME_PREPARED,
+            CheckoutAuthorityAuditAction.STAFF_ROLE_PREPARED,
+            CheckoutAuthorityAuditAction.STAFF_PIN_PREPARED,
+            CheckoutAuthorityAuditAction.STAFF_DISABLE_PREPARED,
+        )
+        val unresolved = events.any { event ->
+            event.action in preparedActions && event.operationId.startsWith("p-") &&
+                "c-${event.operationId.removePrefix("p-")}" !in operationIds &&
+                "r-${event.operationId.removePrefix("p-")}" !in operationIds
+        }
+        if (unresolved) poison()
     }
 
     private fun principal(s:CheckoutAuthoritySession,scope:CheckoutAuthorityScope)=authority.authorize(s,CheckoutAuthorityCapability.STAFF_MANAGE,scope)

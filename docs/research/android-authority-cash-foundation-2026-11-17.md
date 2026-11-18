@@ -1,5 +1,7 @@
 # Android authority and cash-attribution integration record
 
+> Historical milestone: this file records the earlier `afcb7563` tranche and is superseded for current staff-administration status by [the later authority, ledger, adoption-core, and emulator record](android-authority-ledger-adoption-2026-11-17.md).
+
 **Date:** 17 November 2026
 
 **Base commit:** `afcb756313b531847c3f70b1b4e61d61e3cf7159`

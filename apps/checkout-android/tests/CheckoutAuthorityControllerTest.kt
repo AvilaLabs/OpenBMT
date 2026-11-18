@@ -8,6 +8,7 @@ object CheckoutAuthorityControllerTest {
         staleStoresAndWrongCredentialsFailClosed()
         managerRecoveryRequiresReplacementCodeAcknowledgement()
         uncertainRecoveryKeepsReplacementCodeVisible()
+        managerStaffAdministrationRequiresCapabilityAndInvalidatesPolicySessions()
     }
 
     private fun recoveryAcknowledgementPrecedesEnrollmentAndSessionIsVolatile() {
@@ -116,16 +117,74 @@ object CheckoutAuthorityControllerTest {
         check(readRequired.staff.any { it.actorId == actorId })
     }
 
+    private fun managerStaffAdministrationRequiresCapabilityAndInvalidatesPolicySessions() {
+        val fixture = Fixture()
+        val controller = fixture.controller()
+        val bootstrap = controller.prepareManagerEnrollment() as CheckoutAccessState.RecoveryCodeConfirmation
+        controller.confirmRecoveryCode(bootstrap.recoveryCode.toCharArray())
+        val enrolled = controller.enrollManager("Manager", "112233".toCharArray()) as CheckoutAccessState.SignInRequired
+        val managerId = enrolled.staff.single().actorId
+        controller.signIn(managerId, "112233".toCharArray())
+
+        val created = controller.createStaffMember("Cashier", CheckoutAuthorityRole.CASHIER, "445566".toCharArray())
+        check(created is CheckoutStaffAdministrationResult.Ready)
+        check(controller.state() is CheckoutAccessState.SignInRequired)
+        val directory = fixture.controller()
+        directory.refresh()
+        val cashierId = (directory.signIn(managerId, "112233".toCharArray()) as CheckoutAccessState.SignedIn).actor.actorId
+        val staff = directory.staffAdministration().staff
+        val cashier = staff.single { it.actorId != managerId }
+        check(cashierId == managerId)
+
+        val cashierSessionController = fixture.controller()
+        cashierSessionController.refresh()
+        cashierSessionController.signIn(cashier.actorId, "445566".toCharArray())
+        check(runCatching { cashierSessionController.staffAdministration() }.exceptionOrNull() is CheckoutAuthorityDeniedException)
+        check((cashierSessionController.state() as CheckoutAccessState.SignedIn).actor.role == CheckoutAuthorityRole.CASHIER)
+
+        val manager = fixture.controller()
+        manager.refresh()
+        manager.signIn(managerId, "112233".toCharArray())
+        val renamed = manager.renameStaffMember(cashier.actorId, "Front Cashier") as CheckoutStaffAdministrationResult.Ready
+        check(renamed.snapshot.staff.first { it.actorId == cashier.actorId }.displayName == "Front Cashier")
+        check(manager.changeStaffRole(cashier.actorId, CheckoutAuthorityRole.MANAGER) is CheckoutStaffAdministrationResult.Ready)
+        check(manager.state() is CheckoutAccessState.SignInRequired)
+
+        manager.signIn(managerId, "112233".toCharArray())
+        check(manager.changeStaffPin(cashier.actorId, "778899".toCharArray()) is CheckoutStaffAdministrationResult.Ready)
+        check(manager.state() is CheckoutAccessState.SignInRequired)
+        manager.signIn(managerId, "112233".toCharArray())
+        check(manager.disableStaffMember(cashier.actorId) is CheckoutStaffAdministrationResult.Ready)
+        check(manager.state() is CheckoutAccessState.SignInRequired)
+
+        val audit = CheckoutAuthorityAuditJournal(fixture.auditStorage).snapshot()
+        check(audit.map { it.action }.count { it in setOf(
+            CheckoutAuthorityAuditAction.STAFF_CREATE_PREPARED,
+            CheckoutAuthorityAuditAction.STAFF_RENAME_PREPARED,
+            CheckoutAuthorityAuditAction.STAFF_ROLE_PREPARED,
+            CheckoutAuthorityAuditAction.STAFF_PIN_PREPARED,
+            CheckoutAuthorityAuditAction.STAFF_DISABLE_PREPARED,
+        ) } == 5)
+        check(audit.filter { it.action in setOf(
+            CheckoutAuthorityAuditAction.STAFF_CREATED,
+            CheckoutAuthorityAuditAction.STAFF_RENAMED,
+            CheckoutAuthorityAuditAction.STAFF_ROLE_CHANGED,
+            CheckoutAuthorityAuditAction.STAFF_PIN_CHANGED,
+            CheckoutAuthorityAuditAction.STAFF_DISABLED,
+        ) }.all { it.actorId == managerId && it.capabilityId == CheckoutAuthorityCapability.STAFF_MANAGE.id })
+    }
+
     private class Fixture(var fresh: Boolean = true) {
         val storage = MemoryAuthorityStorage()
+        val auditStorage = MemoryAuthorityStorage()
         private val clock = FakeClock()
         private val scope = CheckoutAuthorityScope("merchant", "store", "location", "register", "device")
 
-        fun controller(): CheckoutAuthorityController = CheckoutAuthorityController(
-            CheckoutAuthority(storage, clock, FakeRandom(), defaultIterations = 1_000),
-            scope,
-            CheckoutBusinessFreshnessCheck { fresh },
-        )
+        fun controller(): CheckoutAuthorityController {
+            val authority = CheckoutAuthority(storage, clock, FakeRandom(), defaultIterations = 1_000)
+            val commands = CheckoutAuthorityCommandService(authority, CheckoutAuthorityAuditJournal(auditStorage), clock)
+            return CheckoutAuthorityController(authority, scope, CheckoutBusinessFreshnessCheck { fresh }, commands)
+        }
     }
 
     private class MemoryAuthorityStorage : CheckoutAuthorityStorage {

@@ -21,7 +21,8 @@
 //! `OBM/` (bundle), `OBM:` (the counter's record) and `OBM;` (the range
 //! book), beside `OBM)` and `OBM*` of `pinned_wallet`, and `OBM<` carries signed settings
 //! with a counter's confirmation (`confirmed`). The address book (`OBMA`) and the header store (`OBMW`) have
-//! their own magics in the crates that write them.
+//! their own magics in the crates that write them. Existing-install adoption
+//! requests and grants use `OBAR` and `OBAG`.
 //!
 //! [`Reader`], [`start`], [`put_opt_u64`] and [`len_u32`] are public so that
 //! other crates in the workspace write their snapshots the same way.
@@ -107,6 +108,10 @@ pub const MAGIC_STARTER_LINE: [u8; 4] = *b"OBM\x1b";
 /// Magic of a [`SignedRelayHint`](crate::relay::SignedRelayHint), the relay
 /// for counters (CR-132).
 pub const MAGIC_RELAY_FOR_COUNTERS: [u8; 4] = *b"OBMz";
+/// Magic of an [`AdoptionRequest`](crate::adoption::AdoptionRequest).
+pub const MAGIC_ADOPTION_REQUEST: [u8; 4] = *b"OBAR";
+/// Magic of a [`SignedAdoptionGrant`](crate::adoption::SignedAdoptionGrant).
+pub const MAGIC_ADOPTION_GRANT: [u8; 4] = *b"OBAG";
 
 /// Why bytes were not accepted as a message.
 #[derive(Debug, Clone, PartialEq, Eq)]
