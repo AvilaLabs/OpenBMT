@@ -152,13 +152,6 @@ doc = false
 bench = false
 
 [[bin]]
-name = "watch_box_proof"
-path = "fuzz_targets/watch_box_proof.rs"
-test = false
-doc = false
-bench = false
-
-[[bin]]
 name = "watch_block"
 path = "fuzz_targets/watch_block.rs"
 test = false

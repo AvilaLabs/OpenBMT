@@ -645,14 +645,6 @@ fn owner_refusal_words(group: RefusalGroup) -> Words {
             "Stop relying on new wallet checks and report this limit to the OpenBMT project.",
         )
         .code("WR-08"),
-        RefusalGroup::ProofNotBelieved => Words::new(
-            Tone::Ended,
-            "Block proof not accepted",
-            "A block proof did not pass the checks, so the owner app did not use it.",
-            Who::Nobody,
-            "Nothing to do. The owner app checks later blocks as they arrive.",
-        )
-        .code("WR-10"),
         RefusalGroup::BlockNotBelieved => Words::new(
             Tone::Ended,
             "Block not accepted",

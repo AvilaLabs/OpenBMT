@@ -66,7 +66,6 @@ file again.
 | BlockRefusal::HeaderFromTheFuture | Block time is ahead | A block's time is too far ahead of this device's clock, so it was left out. | Check this device's clock. The owner app tries the block again later. | Owner | WR-06 |
 | BlockRefusal::SavedHeadersUnusable | Saved chain needs repair | The saved chain data could not be used, so the owner app cannot continue from it. | Restart the owner app. If the problem returns, report it to the OpenBMT project. | Owner | WR-08 |
 | BlockRefusal::HeaderStoreFull | Saved block list is full | The owner app cannot save more blocks, so it stopped checking new ones. | Stop relying on new wallet checks and report this limit to the OpenBMT project. | Owner | WR-08 |
-| BlockRefusal::ProofNotBelieved | Block proof not accepted | A block proof did not pass the checks, so the owner app did not use it. | Nothing to do. The owner app checks later blocks as they arrive. | Nobody | WR-10 |
 | BlockRefusal::BlockNotBelieved | Block not accepted | A block did not pass the checks, so the saved coin list was left unchanged. | Nothing to do. The owner app checks the next block. | Nobody | WR-20 |
 | BlockRefusal::PaysNothing | Payment not recognized | The reported payment did not match the wallet's payment checks, so it was left out. | Nothing to do. The owner app keeps checking the chain. | Nobody | WR-30 |
 | BlockRefusal::NeedsAPerson | Wallet check needs review | The owner app could not finish checking the reported payment data. | Pause wallet actions and report this check to the OpenBMT project. | Owner | WR-34 |

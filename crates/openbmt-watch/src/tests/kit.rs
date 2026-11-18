@@ -1,21 +1,18 @@
-//! Chains, transactions, mined blocks and proofs for the tests.
+//! Chains, transactions and mined blocks for the tests.
 //!
 //! Blocks are mined on regtest difficulty: the nonce is tried until the
-//! header meets its own target. Proofs are made with `PartialMerkleTree`
-//! or, when a test needs a tree that the library would never build, written
-//! out byte by byte.
+//! header meets its own target.
 
 use std::collections::BTreeMap;
 
 use bitcoin::absolute::LockTime;
 use bitcoin::block::{Header, Version as BlockVersion};
-use bitcoin::consensus::encode::{serialize, VarInt};
+use bitcoin::consensus::encode::serialize;
 use bitcoin::hashes::Hash;
-use bitcoin::merkle_tree::PartialMerkleTree;
 use bitcoin::transaction::Version;
 use bitcoin::{
-    Amount, Block, BlockHash, CompactTarget, MerkleBlock, OutPoint, ScriptBuf, Sequence,
-    Transaction, TxIn, TxMerkleNode, TxOut, Txid, Witness,
+    Amount, Block, BlockHash, CompactTarget, OutPoint, ScriptBuf, Sequence, Transaction, TxIn,
+    TxMerkleNode, TxOut, Txid, Witness,
 };
 
 use crate::proof::ProvenPayment;
@@ -209,69 +206,6 @@ pub fn block_with_root(txs: Vec<Transaction>, root: TxMerkleNode) -> Block {
     Block {
         header: mine_header(root, 1_000),
         txdata: txs,
-    }
-}
-
-/// A proof for the transactions at these positions of the block.
-pub fn proof_bytes(block: &Block, positions: &[usize]) -> Vec<u8> {
-    let txids: Vec<Txid> = block.txdata.iter().map(Transaction::compute_txid).collect();
-    let matches: Vec<bool> = (0..txids.len()).map(|i| positions.contains(&i)).collect();
-    let txn = PartialMerkleTree::from_txids(&txids, &matches);
-    serialize(&MerkleBlock {
-        header: block.header,
-        txn,
-    })
-}
-
-/// A proof written byte by byte: header, transaction count, hashes, flag
-/// bits (least significant bit of each byte first).
-pub fn raw_proof(header: &Header, count: u32, hashes: &[[u8; 32]], bits: &[bool]) -> Vec<u8> {
-    let mut out = serialize(header);
-    out.extend(count.to_le_bytes());
-    out.extend(serialize(&VarInt(hashes.len() as u64)));
-    for hash in hashes {
-        out.extend(hash);
-    }
-    let flag_bytes: Vec<u8> = bits
-        .chunks(8)
-        .map(|chunk| {
-            chunk
-                .iter()
-                .enumerate()
-                .fold(0u8, |byte, (i, bit)| byte | (u8::from(*bit) << i))
-        })
-        .collect();
-    out.extend(serialize(&VarInt(flag_bytes.len() as u64)));
-    out.extend(flag_bytes);
-    out
-}
-
-/// A block with a coinbase and a payment, the proof for both, and a chain
-/// that knows the block at height 100 with the tip at 100.
-pub struct Setup {
-    pub block: Block,
-    pub chain: TestChain,
-    pub proof: Vec<u8>,
-    pub coinbase: Vec<u8>,
-    pub payment: Vec<u8>,
-}
-
-pub fn setup(pay_to: &ScriptBuf, sats: u64) -> Setup {
-    let txs = vec![
-        coinbase(1),
-        spend(1, &[(&script(0x77), 1_000)]),
-        spend(2, &[(pay_to, sats)]),
-        spend(3, &[(&script(0x78), 1_000)]),
-        spend(4, &[(&script(0x79), 1_000)]),
-    ];
-    let block = block(txs);
-    let chain = TestChain::new(100).with(&block, 100);
-    Setup {
-        proof: proof_bytes(&block, &[0, 2]),
-        coinbase: bytes(&block.txdata[0]),
-        payment: bytes(&block.txdata[2]),
-        block,
-        chain,
     }
 }
 

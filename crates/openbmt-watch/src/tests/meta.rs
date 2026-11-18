@@ -12,7 +12,7 @@ const TEST_SOURCES: [&str; 8] = [
     include_str!("netgroup.rs"),
     include_str!("node_only.rs"),
     include_str!("own_node.rs"),
-    include_str!("proof.rs"),
+    include_str!("chain.rs"),
     include_str!("sale.rs"),
 ];
 
@@ -34,7 +34,7 @@ fn rule_ids() -> Vec<String> {
 #[test]
 fn the_rules_file_defines_the_rules_the_tests_name() {
     let ids = rule_ids();
-    assert_eq!(ids.len(), 45);
+    assert_eq!(ids.len(), 38);
     assert!(ids.contains(&"WR-01".to_string()) && ids.contains(&"WR-68".to_string()));
 }
 
@@ -79,26 +79,6 @@ fn every_refusal_names_a_rule_of_the_file_and_says_so_in_words() {
             index: 1,
             why: Box::new(Refusal::UnknownParent),
         },
-        Refusal::ProofTooLarge { len: 1 },
-        Refusal::ProofMalformed,
-        Refusal::CoinbaseTooLarge { len: 1 },
-        Refusal::PaymentTooLarge { len: 1 },
-        Refusal::TreeTransactionCount { count: 1 },
-        Refusal::TreeTooManyHashes,
-        Refusal::TreeBitsAndHashes,
-        Refusal::TreeEqualChildren,
-        Refusal::TreePadding,
-        Refusal::TreeRootMismatch,
-        Refusal::ProofCoversWrongCount { found: 1 },
-        Refusal::CoinbaseNotFirst { position: 1 },
-        Refusal::CoinbaseMalformed,
-        Refusal::CoinbaseIdMismatch,
-        Refusal::NotACoinbase,
-        Refusal::PaymentMalformed,
-        Refusal::PaymentIdMismatch,
-        Refusal::PaymentIsCoinbase,
-        Refusal::CoinbaseSixtyFourBytes,
-        Refusal::PaymentSixtyFourBytes,
         Refusal::BlockTooLarge { len: 1 },
         Refusal::BlockMalformed,
         Refusal::BlockMerkleRoot,

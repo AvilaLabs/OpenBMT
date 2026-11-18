@@ -71,69 +71,6 @@ pub enum Refusal {
         /// Why it was refused.
         why: Box<Refusal>,
     },
-    /// WR-10: the merkle proof is larger than the limit.
-    ProofTooLarge {
-        /// Size of the proof in bytes.
-        len: usize,
-    },
-    /// WR-10: the proof is not a header and a partial merkle tree with
-    /// nothing after them.
-    ProofMalformed,
-    /// WR-10: the coinbase transaction is larger than the limit.
-    CoinbaseTooLarge {
-        /// Size of the transaction in bytes.
-        len: usize,
-    },
-    /// WR-10: the payment transaction is larger than the limit.
-    PaymentTooLarge {
-        /// Size of the transaction in bytes.
-        len: usize,
-    },
-    /// WR-12: the tree states fewer than 2 or more than 16,666
-    /// transactions.
-    TreeTransactionCount {
-        /// The count the proof states.
-        count: u32,
-    },
-    /// WR-12: the tree has more hashes than transactions.
-    TreeTooManyHashes,
-    /// WR-12: the tree runs out of flag bits or hashes, or leaves a flag
-    /// bit or a hash unused.
-    TreeBitsAndHashes,
-    /// WR-12: a node of the tree has two equal children.
-    TreeEqualChildren,
-    /// WR-12: the spare bits after the last flag bit are not all zero.
-    TreePadding,
-    /// WR-12: the root the tree gives is not the header's merkle root.
-    TreeRootMismatch,
-    /// WR-13: the tree does not prove exactly two transactions.
-    ProofCoversWrongCount {
-        /// How many transactions the tree proves.
-        found: usize,
-    },
-    /// WR-13: the first proven transaction is not at position 0.
-    CoinbaseNotFirst {
-        /// The position of the first proven transaction.
-        position: u32,
-    },
-    /// WR-14: the coinbase bytes are not a transaction.
-    CoinbaseMalformed,
-    /// WR-14: the coinbase handed in is not the transaction proven at
-    /// position 0.
-    CoinbaseIdMismatch,
-    /// WR-14: the transaction proven at position 0 is not a coinbase.
-    NotACoinbase,
-    /// WR-15: the payment bytes are not a transaction.
-    PaymentMalformed,
-    /// WR-15: the payment handed in is not the transaction proven at the
-    /// later position.
-    PaymentIdMismatch,
-    /// WR-15: the payment is a coinbase.
-    PaymentIsCoinbase,
-    /// WR-16: the coinbase is 64 bytes long without its witness.
-    CoinbaseSixtyFourBytes,
-    /// WR-16: the payment is 64 bytes long without its witness.
-    PaymentSixtyFourBytes,
     /// WR-20: the block is larger than the limit.
     BlockTooLarge {
         /// Size of the block in bytes.
@@ -198,20 +135,6 @@ impl Refusal {
             | Self::StoreWrongStart
             | Self::StoreNotChained
             | Self::StoreHeaderRefused { .. } => "WR-08",
-            Self::ProofTooLarge { .. }
-            | Self::ProofMalformed
-            | Self::CoinbaseTooLarge { .. }
-            | Self::PaymentTooLarge { .. } => "WR-10",
-            Self::TreeTransactionCount { .. }
-            | Self::TreeTooManyHashes
-            | Self::TreeBitsAndHashes
-            | Self::TreeEqualChildren
-            | Self::TreePadding
-            | Self::TreeRootMismatch => "WR-12",
-            Self::ProofCoversWrongCount { .. } | Self::CoinbaseNotFirst { .. } => "WR-13",
-            Self::CoinbaseMalformed | Self::CoinbaseIdMismatch | Self::NotACoinbase => "WR-14",
-            Self::PaymentMalformed | Self::PaymentIdMismatch | Self::PaymentIsCoinbase => "WR-15",
-            Self::CoinbaseSixtyFourBytes | Self::PaymentSixtyFourBytes => "WR-16",
             Self::BlockTooLarge { .. } | Self::BlockMalformed => "WR-20",
             Self::BlockMerkleRoot
             | Self::BlockNoCoinbase
@@ -275,60 +198,6 @@ impl fmt::Display for Refusal {
             Self::StoreNotChained => write!(f, "a stored header does not extend the tip"),
             Self::StoreHeaderRefused { index, why } => {
                 write!(f, "the stored header {index} was refused: {why}")
-            }
-            Self::ProofTooLarge { len } => write!(f, "the proof is {len} bytes, over the limit"),
-            Self::ProofMalformed => write!(
-                f,
-                "the proof is not a header and a partial merkle tree and nothing else"
-            ),
-            Self::CoinbaseTooLarge { len } => {
-                write!(f, "the coinbase is {len} bytes, over the limit")
-            }
-            Self::PaymentTooLarge { len } => {
-                write!(f, "the payment is {len} bytes, over the limit")
-            }
-            Self::TreeTransactionCount { count } => {
-                write!(
-                    f,
-                    "the tree states {count} transactions, outside the limits"
-                )
-            }
-            Self::TreeTooManyHashes => write!(f, "the tree has more hashes than transactions"),
-            Self::TreeBitsAndHashes => {
-                write!(f, "the tree does not use exactly its flag bits and hashes")
-            }
-            Self::TreeEqualChildren => write!(f, "a node of the tree has two equal children"),
-            Self::TreePadding => write!(f, "the spare flag bits of the tree are not zero"),
-            Self::TreeRootMismatch => {
-                write!(f, "the tree does not give the header's merkle root")
-            }
-            Self::ProofCoversWrongCount { found } => {
-                write!(f, "the tree proves {found} transactions, not exactly 2")
-            }
-            Self::CoinbaseNotFirst { position } => write!(
-                f,
-                "the first proven transaction is at position {position}, not 0"
-            ),
-            Self::CoinbaseMalformed => write!(f, "the coinbase bytes are not a transaction"),
-            Self::CoinbaseIdMismatch => {
-                write!(
-                    f,
-                    "the coinbase is not the transaction proven at position 0"
-                )
-            }
-            Self::NotACoinbase => {
-                write!(f, "the transaction proven at position 0 is not a coinbase")
-            }
-            Self::PaymentMalformed => write!(f, "the payment bytes are not a transaction"),
-            Self::PaymentIdMismatch => {
-                write!(f, "the payment is not the transaction proven in the tree")
-            }
-            Self::PaymentIsCoinbase => write!(f, "the payment is a coinbase"),
-            Self::CoinbaseSixtyFourBytes => {
-                write!(f, "the coinbase is 64 bytes long without its witness")
-            }
-            Self::PaymentSixtyFourBytes => {
-                write!(f, "the payment is 64 bytes long without its witness")
             }
             Self::BlockTooLarge { len } => write!(f, "the block is {len} bytes, over the limit"),
             Self::BlockMalformed => write!(f, "the bytes are not a block and nothing else"),

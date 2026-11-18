@@ -4,7 +4,7 @@
 //! Two things reach a person. A [`Problem`] with the check is what the owner
 //! looks at when a cashier says "the counter cannot check payments". A
 //! watcher [`Refusal`] reaches people only as a line in the counter's notes;
-//! the 50 variants are sorted into [`RefusalGroup`]s, one group for each
+//! the 30 variants are sorted into [`RefusalGroup`]s, one group for each
 //! thing a person would do differently, and each group has one [`Words`].
 
 use openbmt_core::say::{Tone, Who, Words};
@@ -456,7 +456,7 @@ pub const ALL_FEE_ERRORS: [FeeError; 3] = [
     FeeError::CoinbaseOverflow,
 ];
 
-/// The groups the 50 watcher refusals fall into. Two refusals are in one
+/// The groups the 30 watcher refusals fall into. Two refusals are in one
 /// group when a person would do the same about both.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RefusalGroup {
@@ -471,8 +471,6 @@ pub enum RefusalGroup {
     SavedHeadersUnusable,
     /// The header store reached the largest form it can save and read (WR-08).
     HeaderStoreFull,
-    /// A proof of a payment did not check out (WR-10 to WR-16).
-    ProofNotBelieved,
     /// A whole block did not check out (WR-20 to WR-22).
     BlockNotBelieved,
     /// A transaction pays the sale nothing (WR-30).
@@ -485,13 +483,12 @@ pub enum RefusalGroup {
 
 impl RefusalGroup {
     /// Every group.
-    pub const ALL: [RefusalGroup; 10] = [
+    pub const ALL: [RefusalGroup; 9] = [
         Self::LeftTheChain,
         Self::HeaderNotBelieved,
         Self::HeaderFromTheFuture,
         Self::SavedHeadersUnusable,
         Self::HeaderStoreFull,
-        Self::ProofNotBelieved,
         Self::BlockNotBelieved,
         Self::PaysNothing,
         Self::NeedsAPerson,
@@ -506,7 +503,6 @@ impl RefusalGroup {
             Self::HeaderFromTheFuture => "HeaderFromTheFuture",
             Self::SavedHeadersUnusable => "SavedHeadersUnusable",
             Self::HeaderStoreFull => "HeaderStoreFull",
-            Self::ProofNotBelieved => "ProofNotBelieved",
             Self::BlockNotBelieved => "BlockNotBelieved",
             Self::PaysNothing => "PaysNothing",
             Self::NeedsAPerson => "NeedsAPerson",
@@ -557,14 +553,6 @@ impl RefusalGroup {
                 "Take another payment method. Tell the owner to update this device or report the full record to the OpenBMT project.",
             )
             .code("WR-08"),
-            Self::ProofNotBelieved => Words::new(
-                Tone::Ended,
-                "Payment proof not believed",
-                "A proof of a payment did not check out, so nothing was believed and nothing was recorded.",
-                Who::Nobody,
-                "Nothing to do. The sale keeps waiting for a proof that does check out.",
-            )
-            .code("WR-10"),
             Self::BlockNotBelieved => Words::new(
                 Tone::Ended,
                 "Block not believed",
@@ -625,26 +613,6 @@ impl Refusal {
             | Self::StoreWrongStart
             | Self::StoreNotChained
             | Self::StoreHeaderRefused { .. } => RefusalGroup::SavedHeadersUnusable,
-            Self::ProofTooLarge { .. }
-            | Self::ProofMalformed
-            | Self::CoinbaseTooLarge { .. }
-            | Self::PaymentTooLarge { .. }
-            | Self::TreeTransactionCount { .. }
-            | Self::TreeTooManyHashes
-            | Self::TreeBitsAndHashes
-            | Self::TreeEqualChildren
-            | Self::TreePadding
-            | Self::TreeRootMismatch
-            | Self::ProofCoversWrongCount { .. }
-            | Self::CoinbaseNotFirst { .. }
-            | Self::CoinbaseMalformed
-            | Self::CoinbaseIdMismatch
-            | Self::NotACoinbase
-            | Self::PaymentMalformed
-            | Self::PaymentIdMismatch
-            | Self::PaymentIsCoinbase
-            | Self::CoinbaseSixtyFourBytes
-            | Self::PaymentSixtyFourBytes => RefusalGroup::ProofNotBelieved,
             Self::BlockTooLarge { .. }
             | Self::BlockMalformed
             | Self::BlockMerkleRoot

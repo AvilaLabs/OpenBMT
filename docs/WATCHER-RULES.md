@@ -90,48 +90,10 @@ The rest of the library sees the chain through three questions:
   (WR-33).
 - **WR-02.** The confirmations of a payment in a block at height `h` are
   the tip height minus `h`, plus one.
-- **WR-03.** Whatever header is handed in with a proof or a block is also
+- **WR-03.** Whatever header is handed in with a block is also
   checked on its own: its hash meets the target its own bits field states.
   This does not replace WR-01. It stops a header that was never mined from
   being looked up at all.
-
-## 2. A confirmation the Box reports (merkle proof)
-
-The Box can hold information back. It must not be able to make up a
-confirmation. A confirmation from the Box is believed only with a proof
-made of four parts: the block header, a partial merkle tree (the format of
-BIP37 and of Bitcoin Core's `gettxoutproof`), the block's coinbase
-transaction in full, and the payment transaction in full.
-
-- **WR-10.** The proof is at most 64 KiB **[to tune]**, and each of the two
-  transactions at most 400,000 bytes. The bytes are a header followed by a
-  partial merkle tree and nothing else.
-- **WR-11.** The header passes WR-03 and its block is on the chain (WR-01).
-- **WR-12.** The partial merkle tree is well formed: the transaction count
-  is at least 2 and at most 16,666; there are no more hashes than
-  transactions; every hash and every flag bit is used; and no node has two
-  equal children (CVE-2012-2459). The root it gives equals the header's
-  merkle root.
-- **WR-13.** The tree proves exactly two transactions: one at position 0
-  and one at a later position. A proof that covers more or fewer is
-  refused.
-- **WR-14.** The coinbase transaction handed in has the ID proven at
-  position 0, and it is a coinbase: one input, whose previous output is the
-  null outpoint.
-- **WR-15.** The payment transaction handed in has the ID proven at the
-  later position. It is not a coinbase.
-- **WR-16.** Neither transaction is 64 bytes long without its witness.
-
-Why the coinbase is part of the proof: a merkle tree does not mark which of
-its nodes are transactions. An inner node is the hash of 64 bytes, and so
-is a 64-byte transaction, so a proof can stop one level short or go one
-level too deep. In the BIP37 format every proven transaction sits at the
-same depth, which follows from the transaction count the proof states. The
-coinbase is the one transaction whose form the verifier knows and whose
-place is fixed. When a real coinbase sits at position 0 at that depth, the
-depth is the true one, and the payment beside it at the same depth is a
-transaction of the block and not an inner node. WR-16 closes the remaining
-case, where a transaction is itself read as an inner node.
 
 ## 3. A confirmation the light client finds (full block)
 

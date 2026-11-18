@@ -2,6 +2,7 @@
 //! refusal test checks the exact refusal and the rule it names.
 
 mod block;
+mod chain;
 mod fees;
 mod headers;
 mod health;
@@ -11,6 +12,5 @@ mod netgroup;
 mod node_only;
 mod own_node;
 mod persist;
-mod proof;
 mod sale;
 mod say;

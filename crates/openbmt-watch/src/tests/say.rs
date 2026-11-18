@@ -37,26 +37,6 @@ fn every_refusal() -> Vec<Refusal> {
             index: 3,
             why: inner(),
         },
-        Refusal::ProofTooLarge { len: 1 },
-        Refusal::ProofMalformed,
-        Refusal::CoinbaseTooLarge { len: 1 },
-        Refusal::PaymentTooLarge { len: 1 },
-        Refusal::TreeTransactionCount { count: 1 },
-        Refusal::TreeTooManyHashes,
-        Refusal::TreeBitsAndHashes,
-        Refusal::TreeEqualChildren,
-        Refusal::TreePadding,
-        Refusal::TreeRootMismatch,
-        Refusal::ProofCoversWrongCount { found: 1 },
-        Refusal::CoinbaseNotFirst { position: 1 },
-        Refusal::CoinbaseMalformed,
-        Refusal::CoinbaseIdMismatch,
-        Refusal::NotACoinbase,
-        Refusal::PaymentMalformed,
-        Refusal::PaymentIdMismatch,
-        Refusal::PaymentIsCoinbase,
-        Refusal::CoinbaseSixtyFourBytes,
-        Refusal::PaymentSixtyFourBytes,
         Refusal::BlockTooLarge { len: 1 },
         Refusal::BlockMalformed,
         Refusal::BlockMerkleRoot,
@@ -99,7 +79,7 @@ fn sc_01_no_variant_is_missing() {
     // Every refusal is listed (`Refusal::group` is exhaustive), each one has words that keep the rules,
     // and every group is reached by some refusal.
     let refusals = every_refusal();
-    assert_eq!(refusals.len(), 50);
+    assert_eq!(refusals.len(), 30);
     let mut reached = Vec::new();
     for r in &refusals {
         assert_eq!(check(&r.words()), Ok(()), "{r}");

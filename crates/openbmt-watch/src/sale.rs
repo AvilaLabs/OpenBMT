@@ -268,8 +268,7 @@ impl SaleWatch {
         self.admit(tx, Some((source, at)), None)
     }
 
-    /// A payment proven in a block, from `verify_box_proof` or
-    /// `payments_in_block`. Whether the block is on the chain is worked out
+    /// A payment proven in a block, from `payments_in_block`. Whether the block is on the chain is worked out
     /// again at every status (WR-33).
     ///
     /// A transaction that pays the sale nothing and conflicts with nothing

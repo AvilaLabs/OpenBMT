@@ -12,8 +12,8 @@
 //! 1. [`chain`]: the header chain as the library sees it, confirmations and
 //!    the header check on its own.
 //!    [`headers`]: [`HeaderStore`], which builds and checks that chain.
-//! 2. [`proof`]: a confirmation the Box reports, believed only with a merkle
-//!    proof, the coinbase and the payment in full.
+//! 2. [`proof`]: [`ProvenPayment`], a payment proven to be in a block on the
+//!    best chain.
 //! 3. [`block`]: a confirmation the light client finds in a full block.
 //! 4. [`netgroup`]: how peers are counted.
 //! 5. [`sale`]: [`SaleWatch`], the evidence for one sale, and the
@@ -62,20 +62,13 @@ pub use node_only::{
 pub use own_node::{
     check_own_node, OwnNodeHealth, OwnNodeInput, OwnNodeLink, OwnNodeProblem, OwnNodeTracker,
 };
-pub use proof::{verify_box_proof, ProvenPayment};
+pub use proof::ProvenPayment;
 pub use refusal::Refusal;
 pub use sale::{SaleStatus, SaleWatch, Sighted, Source};
 
-/// WR-10: largest merkle proof in bytes.
-pub const MAX_PROOF_BYTES: usize = 64 * 1024;
-/// WR-10, WR-34: largest transaction kept or accepted in a proof, in bytes.
+/// WR-34: largest transaction kept, in bytes.
 pub const MAX_TX_BYTES: usize = 400_000;
-/// WR-12: most transactions a proof may state. One transaction weighs at
-/// least 240 weight units and a block at most 4,000,000.
-pub const MAX_TREE_TRANSACTIONS: u32 = 16_666;
-/// WR-12: fewest transactions a proof may state (a coinbase and a payment).
-pub const MIN_TREE_TRANSACTIONS: u32 = 2;
-/// WR-16, WR-22: the length without witness that no transaction may have.
+/// WR-22: the length without witness that no transaction may have.
 pub const FORBIDDEN_TX_BASE_SIZE: usize = 64;
 /// WR-20: largest block in bytes.
 pub const MAX_BLOCK_BYTES: usize = 4_000_000;
