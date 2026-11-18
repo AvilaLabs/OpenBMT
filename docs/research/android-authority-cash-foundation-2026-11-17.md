@@ -59,7 +59,7 @@ The coordinator ran:
 - `git diff --check`; and
 - the two-ABI experimental checkout APK build using the already feature-verified native libraries. Kotlin compilation, dexing, alignment, test signing, and package verification passed.
 
-This compilation covers the base experimental checkout APK only. The optional Square Sandbox variant and hosted CI were not yet run for this unpublished batch.
+This compilation covers the base experimental checkout APK only; the optional Square Sandbox variant was not built. After publication, hosted CI run `44203655417` and the full end-to-end run `44203655306` both completed successfully for the implementation commit.
 
 The resulting base test APK was `/tmp/openbmt-authority-apk-final7/openbmt-checkout-test.apk`, 62,682,927 bytes, SHA-256 `74d6b749d9dbd0b8e0a565595a1c3080727552e3475dd90613047cc5f4a390b3`.
 

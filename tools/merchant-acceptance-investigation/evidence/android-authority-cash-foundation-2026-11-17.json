@@ -46,6 +46,18 @@
         "bytes": 62682927,
         "sha256": "74d6b749d9dbd0b8e0a565595a1c3080727552e3475dd90613047cc5f4a390b3"
       }
+    },
+    {
+      "name": "hosted CI",
+      "run_id": 44203655417,
+      "url": "https://github.com/AvilaLabs/OpenBMT/actions/runs/44203655417",
+      "result": "success; all jobs completed, including checkout JVM recovery/authority tests and Android authority wiring checks"
+    },
+    {
+      "name": "hosted end-to-end matrix",
+      "run_id": 44203655306,
+      "url": "https://github.com/AvilaLabs/OpenBMT/actions/runs/44203655306",
+      "result": "success; all jobs completed with no failures"
     }
   ],
   "implemented_boundaries": [
@@ -60,7 +72,7 @@
   ],
   "open_gates": [
     "No emulator, physical-device, merchant-shift, mainnet or production-card workflow was run.",
-    "Only the base checkout APK was compiled; the optional Square Sandbox variant and hosted CI were not run for this batch.",
+    "Only the base checkout APK was compiled locally; the optional Square Sandbox variant was not built.",
     "No Android staff-administration workflow exists beyond first-manager enrollment, sign-in and designated-manager recovery.",
     "No migration/adoption path exists for an upgraded pre-authority installation; it fails closed.",
     "Non-cash business records do not yet persist actor attribution.",
