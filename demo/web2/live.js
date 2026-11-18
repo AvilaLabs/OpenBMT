@@ -575,7 +575,6 @@
     shell.scenario(null);
     shell.start([
       { name: "As a customer", what: "Pay a shop in bitcoin, the way it works at the counter.", go: "Start", onPick: () => shell.pick("Customer") },
-      { name: "OpenBMT checkout", what: "Explore an editable sample cart, simulated Bitcoin, card or cash payments, receipts, and order history.", go: "Explore", onPick: () => shell.pick("OpenBMT checkout") },
       { name: "A café", what: "Take a coffee and a meal at the counter, and see them reach the owner's phone.", go: "Start", onPick: () => shell.pick("Café") },
       { name: "With your register", what: "The counter beside the register a shop already has.", go: "Start", onPick: () => shell.pick("With your register") },
       { name: "When something goes wrong", what: "A short payment or a cancelled one, and what the counter does.", go: "Start", onPick: () => shell.pick("A short payment") },
@@ -590,8 +589,7 @@
     const mine = ++playing;
     shell.onStep = null;
     stopRun();
-    if (name === "OpenBMT checkout") OpenBmtCheckout.open(shell, { U, C, palette, assets });
-    else if (name === "Customer") await play(customer);
+    if (name === "Customer") await play(customer);
     else if (name === "Café") await play(merchant);
     else if (name === "A short payment") await play(wrong);
     else if (name === "A cancelled payment") await play(cancelled);
@@ -605,7 +603,6 @@
   // The register's ways by name: sends, square, clover ("any", the way's first name, is Square), and register for the choice.
   const registerWay = { sends: "Your register sends the amount", square: "Square", any: "Square", clover: "Clover", register: undefined };
   if (want in registerWay) { await ready(); OpenBmtRegister.open(shell, registerRun(), registerWay[want]); }
-  else if (want === "checkout") OpenBmtCheckout.open(shell, { U, C, palette, assets });
   else if (want === "merchant") await play(merchant);
   else if (want === "customer") await play(customer);
   else if (want === "wrong") await play(wrong);

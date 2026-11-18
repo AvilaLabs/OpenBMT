@@ -1,9 +1,0 @@
-# Checkout regtest pairing fixture
-
-Run `cargo run --manifest-path apps/checkout-android/tools/regtest-pairing/Cargo.toml -- [output-path]` from the repository root. The default output is `openbmt-regtest-pairing.obmt` in the current directory.
-
-This deterministic, public fixture is for local regtest proof runs only. It is a valid generic `PairedRecord::KeyApp` containing a Regtest `PairingRecord`, matching the supported 2-of-3 counter-node and counter-FFI test fixture shape. The settings are USD defaults signed by the pinned owner and approver roots, set `customer_wifi=false` and `min_sale_sats=0`, and name the counter identity. The record includes the counter identity private key, as required to start the paired counter, but no wallet spending key or descriptor. Its first batch contains 1,000 real P2WSH receive scripts from a deterministic 2-of-3 BIP48 Regtest test wallet, signed by both roots. The wallet seeds exist only as public, test-only constants in the generator; the record contains the descriptor checksum and public scripts, which are spendable with the seeds plus the required 2-of-3 signatures.
-
-The peer list targets Bitcoin Core forwarded on host port 18444, reachable from an Android emulator at `10.0.2.2:18444`, with loopback for desktop runs. The owner, approver, and counter keys are public deterministic test keys corresponding to that kit; they have no production value. The wallet seeds (`0xa1`, `0xa2`, and `0xa3` repeated to 32 bytes) are also public test material and must never be used for funds outside local regtest.
-
-Never select or load this fixture on Mainnet, Testnet, or Signet. The application must require an explicit regtest environment before exposing this fixture path. The emulator can still exercise real Bitcoin Core regtest payments, but the checkout-regtest native artifact marks a single peer healthy as a test stand-in; it does not validate the three-network-group health rule used for real deployments.

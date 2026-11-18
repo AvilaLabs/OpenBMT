@@ -9,13 +9,11 @@
 #![cfg_attr(not(kani), forbid(unsafe_code))]
 #![cfg_attr(kani, deny(unsafe_code))]
 
-pub mod adoption;
 pub mod approval;
 pub mod batch;
 pub mod bip321;
 pub mod boxpair;
 pub mod bundle;
-pub mod capabilities;
 pub mod command;
 pub mod confirmed;
 pub mod currency;

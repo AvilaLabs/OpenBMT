@@ -18,7 +18,7 @@ mdbook build
 rm -rf dist/site
 mkdir -p dist/site/ui dist/site/fonts dist/site/sounds
 # The page, its scripts and style, with the repository's paths written as the site's.
-for f in shell.js shell.css wallet.js payment-code.js questions.js sound.js customer.js one-chain.js counter-controller.js owner-controller.js register-views.js register.js sale-contract.js checkout.js live.js counter-host.mjs owner-host.mjs; do
+for f in shell.js shell.css wallet.js payment-code.js questions.js sound.js customer.js one-chain.js counter-controller.js owner-controller.js register-views.js register.js live.js counter-host.mjs owner-host.mjs; do
     cp "demo/web2/$f" dist/site/
 done
 sed -e 's#\.\./\.\./dist/kotlin-js/counter/#./#g' -e 's#\.\./\.\./dist/demo-counter/#./#g' \

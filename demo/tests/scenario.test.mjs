@@ -84,10 +84,10 @@ const key = (k) => ({ key: k, preventDefault() {} });
 const labels = (list) => list.map((x) => x.textContent);
 
 test_words: {
-  assert.deepEqual(Shell.BAR.map((t) => t.name), ['Customer', 'Café', 'With your register', 'When something goes wrong', 'OpenBMT checkout']);
+  assert.deepEqual(Shell.BAR.map((t) => t.name), ['Customer', 'Café', 'With your register', 'When something goes wrong']);
   assert.deepEqual(Shell.BAR[2].menu, ['Your register sends the amount', 'Square', 'Clover']);
   assert.deepEqual(Shell.BAR[3].menu, ['A short payment', 'A cancelled payment']);
-  assert.deepEqual(Shell.SCENARIOS, ['Customer', 'Café', 'Your register sends the amount', 'Square', 'Clover', 'A short payment', 'A cancelled payment', 'OpenBMT checkout']);
+  assert.deepEqual(Shell.SCENARIOS, ['Customer', 'Café', 'Your register sends the amount', 'Square', 'Clover', 'A short payment', 'A cancelled payment']);
   assert.equal(Shell.CARDS.Customer.heading, 'You paid a shop in bitcoin.');
   assert.equal(Shell.CARDS['Café'].heading, 'That is a day at the counter.');
   assert.equal(Shell.CARDS.Square.heading, 'An earlier manual Square style illustration.');
@@ -118,12 +118,12 @@ test_bar: {
   const chosen = [];
   shell.onScenario = (name) => chosen.push(name);
   const tabs = [...shell.tabs.values()];
-  assert.deepEqual(tabs.map((t) => t.label.textContent), ['Customer', 'Café', 'With your register', 'When something goes wrong', 'OpenBMT checkout']);
+  assert.deepEqual(tabs.map((t) => t.label.textContent), ['Customer', 'Café', 'With your register', 'When something goes wrong']);
   // The select: a place for each scenario without a menu, and an optgroup of items for each menu.
   const groups = shell.scenSel.children.filter((c) => c.tag === 'optgroup');
   assert.deepEqual(groups.map((g) => g.label), ['With your register', 'When something goes wrong']);
   assert.deepEqual(groups.map((g) => labels(g.children)), [Shell.BAR[2].menu, Shell.BAR[3].menu]);
-  assert.deepEqual(labels(shell.scenSel.children.filter((c) => c.tag === 'option' && c.value)), ['Customer', 'Café', 'OpenBMT checkout']);
+  assert.deepEqual(labels(shell.scenSel.children.filter((c) => c.tag === 'option' && c.value)), ['Customer', 'Café']);
 
   // A tab without a menu names its scenario; it has no menu and no chevron.
   tabs[0].label.click();
@@ -191,8 +191,8 @@ test_bar: {
   shell.scenSel.value = 'A short payment';
   for (const f of shell.scenSel.handlers.change) f();
   assert.equal(chosen.at(-1), 'A short payment');
-  tabs[4].label.click();
-  assert.equal(chosen.at(-1), 'OpenBMT checkout');
+  tabs[1].label.click();
+  assert.equal(chosen.at(-1), 'Café');
 }
 
 test_cards_and_inert_end: {
@@ -203,7 +203,6 @@ test_cards_and_inert_end: {
   const device = [{ id: 'counter', caption: 'The shop\'s counter', sizes: [{ size: { width: 100, height: 100 } }] }];
   const cards = {
     Customer: ['Customer', undefined, 'Customer'], 'Café': ['Café', undefined, 'Café'],
-    'OpenBMT checkout': ['OpenBMT checkout', undefined, 'OpenBMT checkout'],
     'Your register sends the amount': ['With your register', 'Your register sends the amount', 'Register sends'],
     Square: ['With your register', 'Square', 'Square'],
     Clover: ['With your register', 'Clover', 'Clover'],

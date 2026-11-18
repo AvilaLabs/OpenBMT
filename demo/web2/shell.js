@@ -49,7 +49,6 @@
     { name: "Café" },
     { name: "With your register", screen: true, menu: ["Your register sends the amount", "Square", "Clover"] },
     { name: "When something goes wrong", menu: ["A short payment", "A cancelled payment"] },
-    { name: "OpenBMT checkout" },
   ];
   /** The scenarios that play, by their bar names: a tab without a menu, or a menu's item. */
   const SCENARIOS = BAR.flatMap((t) => t.menu || [t.name]);
@@ -64,10 +63,6 @@
 
   /** The ending card of each scenario: a heading and three lines. The register has a card for each of its three ways. */
   const CARDS = {
-    "OpenBMT checkout": {
-      heading: "One checkout, two ways to pay.",
-      lines: ["The merchant keeps one cart and one amount.", "A demo payment can be interrupted and resumed.", "Receipts and history stay with this proposed checkout."],
-    },
     Customer: {
       heading: "You paid a shop in bitcoin.",
       lines: [
@@ -491,9 +486,9 @@
           mid.append(holder);
         }
         mid.append(el("h1", null, "Try OpenBMT"),
-          el("p", "lede", "Explore the app-backed counter demos, or try the proposed OpenBMT checkout."));
+          el("p", "lede", "Explore the app-backed counter demos."));
         mid.append(this.cards(roles));
-        const foot = el("div", "foot", "Counter demos use a pretend blockchain; checkout payments are simulations. No real bitcoin or card charge occurs.");
+        const foot = el("div", "foot", "Counter demos use a pretend blockchain. No real bitcoin or card charge occurs.");
         s.append(top, mid, foot);
         this.root.append(s);
       }
