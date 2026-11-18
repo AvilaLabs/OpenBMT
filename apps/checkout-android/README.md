@@ -101,15 +101,7 @@ prepare/reconcile journal is model-only and does not make separate store files
 atomic. Staff audit intent and authority mutation are likewise separate files,
 so the implementation makes no cross-file atomicity claim.
 
-The coordinator's current implementation and validation record is
-[Android Ledger v10 cash integrity (18 November 2026)](../../docs/research/android-ledger-v10-cash-integrity-2026-11-18.md).
-The earlier [sale attribution and staff reconciliation record](../../docs/research/android-sale-attribution-staff-reconciliation-2026-11-18.md)
-is a pre-v10 historical milestone.
-Earlier [native POS foundations](../../docs/research/native-pos-foundations-2026-11-17.md),
-[Android authority and cash attribution](../../docs/research/android-authority-cash-foundation-2026-11-17.md),
-and [staff, Ledger v8, adoption-core, and emulator](../../docs/research/android-authority-ledger-adoption-2026-11-17.md)
-records remain historical milestones rather than validation of the current
-diff. API 35 emulator authority flows are covered; no physical-device workflow
+API 35 emulator authority flows are covered; no physical-device workflow
 is claimed. The Shop Lightning work in this batch is an owner-app readiness
 report only. **The native checkout still has no integrated Lightning tender
 path.**
@@ -225,8 +217,7 @@ emulator: a $5 cash entry against a $10 sample basket was refused, $20 tender
 showed $10 change, and the saved cash ledger/receipt survived force-stop and
 relaunch. History filters, no-match search, reset and receipt copy were
 exercised. That evidence used synthetic cash acknowledgment and no additional
-card or Bitcoin payment. See the
-[captured November 16 evidence](../../tools/merchant-acceptance-investigation/evidence/standalone-foundations-2026-11-16.json).
+card or Bitcoin payment.
 
 Those historical observations do not validate the current catalog, pricing
 snapshot, inventory, cash-session, reporting or Shop Lightning changes. Current

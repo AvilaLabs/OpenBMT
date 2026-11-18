@@ -7,15 +7,6 @@ regtest (`scripts/restore-drill-core.sh`). Every claim about another system
 cites a source in §17. **[verify]** marks a claim that still needs a primary
 check or a device test before it can be relied on.
 
-The [merchant product plan of 16 November 2026](research/merchant-product-plan-2026-11-16.md)
-records the accepted wallet authority choices and the implementation sequence.
-D9 below adds optional on-chain working-wallet operation while preserving
-direct-to-cold receiving and independent savings keys. This is a planning
-decision; the existing signing rules and release gates remain in force until
-the new modes are implemented and validated. The linked
-[feature benchmark](research/merchant-feature-benchmark-2026-11-16.md) is a
-prioritized recommendation list, not a claim of implemented features.
-
 Draft 3.3 introduced the public-wallet first-run path (D6) and restored
 optional Lightning swaps (D7). D8 subsequently added the explicitly identified
 starter hot key; Shop Lightning and the refund float have their own named
@@ -2062,7 +2053,7 @@ Each gets a written protocol before it runs.
   keys never enter the checkout or an OpenBMT company service. Limits are
   operating targets, not hard guarantees of maximum loss. Unattended signing
   authority, isolation, migration, late receipts, and independent recovery must
-  be validated under the [merchant product plan](research/merchant-product-plan-2026-11-16.md).
+  be tested before this mode is built.
   The default remains app-first/serverless: local payment/event interfaces,
   with optional outbound webhooks to merchant-selected receivers. This does
   not require a public device listener, merchant REST server, or publisher
