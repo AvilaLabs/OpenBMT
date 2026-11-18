@@ -203,7 +203,12 @@ jobs:
         shell: bash
         run: |
           archive="$RUNNER_TEMP/bitcoin-32.1-x86_64-linux-gnu.tar.gz"
-          curl --fail --location --retry 3 \
+          # The matrix starts several isolated Core jobs together. Stagger them
+          # and retry connection failures as well as HTTP failures so a brief
+          # origin/CDN refusal does not fail every job before project code runs.
+          sleep $((RANDOM % 20))
+          curl --fail --location --retry 8 --retry-all-errors \
+            --retry-delay 5 --connect-timeout 30 \
             --output "$archive" \
             https://bitcoincore.org/bin/bitcoin-core-32.1/bitcoin-32.1-x86_64-linux-gnu.tar.gz
           # SHA-256 from the release's SHA256SUMS.
