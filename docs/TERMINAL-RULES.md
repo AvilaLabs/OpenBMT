@@ -57,6 +57,14 @@ rule here names it and adds only what is missing.
   manager at the counter may confirm what the owner sent (CR-260, CR-261,
   SS-41), and may set the counter's own node (CR-100), which changes how
   payments are checked, never where they go.
+- **TM-08. The counter is the shop's meeting point.** The shop's devices reach
+  each other without a server of anyone's: on the shop's own network directly,
+  and from elsewhere through a Tor onion service that the counter runs (it
+  already runs Tor, CR-201), which the owner phone and the other counters
+  reach. The counter is the shop's device that stays on, so it holds the
+  mailboxes of the link (LK-20). A Box or another relay may be used instead;
+  none is needed. **[verify]** an onion service on the counter on Android, and
+  how long the owner phone takes to reach it.
 
 ## 1. Items
 
