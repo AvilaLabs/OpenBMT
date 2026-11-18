@@ -84,8 +84,6 @@ pub enum Kind {
     Records,
     /// A counter's signed "paid" to the Box.
     PaidNotice,
-    /// A notice from the Box (a hint, CR-55).
-    PosNotice,
     /// The owner telling a counter how many of its records it holds (LK-55).
     RecordsReceived,
     /// A signed index range from the owner, for a counter paired with the
@@ -109,7 +107,7 @@ pub enum Kind {
 
 impl Kind {
     /// Every kind.
-    pub const ALL: [Kind; 16] = [
+    pub const ALL: [Kind; 15] = [
         Kind::Heartbeat,
         Kind::Command,
         Kind::Settings,
@@ -118,7 +116,6 @@ impl Kind {
         Kind::CheckIn,
         Kind::Records,
         Kind::PaidNotice,
-        Kind::PosNotice,
         Kind::RecordsReceived,
         Kind::Range,
         Kind::Switch,
@@ -139,7 +136,6 @@ impl Kind {
             Kind::CheckIn => 6,
             Kind::Records => 7,
             Kind::PaidNotice => 8,
-            Kind::PosNotice => 9,
             Kind::RecordsReceived => 10,
             Kind::Range => 11,
             Kind::Switch => 12,
@@ -182,7 +178,6 @@ impl Kind {
             Kind::Settings | Kind::DeviceList => from == Owner && (to == Counter || to == TheBox),
             Kind::CheckIn | Kind::Records => from == Counter && to == Owner,
             Kind::PaidNotice => from == Counter && to == TheBox,
-            Kind::PosNotice => from == TheBox && (to == Counter || to == Owner),
             Kind::Store => from == Counter && to == TheBox,
             Kind::Stored => from == TheBox && to == Counter,
             Kind::LightningReport => from == Counter && to == Owner,

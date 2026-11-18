@@ -530,7 +530,7 @@ fn lk_07_padding_that_is_not_zero_or_not_minimal_is_refused() {
 #[test]
 fn lk_08_the_table_of_kinds() {
     use Role::{Box as B, Counter as C, Owner as O, Watch as W};
-    let table: [(Kind, Role, Role); 20] = [
+    let table: [(Kind, Role, Role); 18] = [
         (Kind::Heartbeat, O, C),
         (Kind::Heartbeat, W, C),
         (Kind::Command, O, C),
@@ -546,8 +546,6 @@ fn lk_08_the_table_of_kinds() {
         (Kind::Records, C, O),
         (Kind::RecordsReceived, O, C),
         (Kind::PaidNotice, C, B),
-        (Kind::PosNotice, B, C),
-        (Kind::PosNotice, B, O),
         (Kind::Store, C, B),
         (Kind::Stored, B, C),
         (Kind::LightningReport, C, O),
@@ -602,6 +600,14 @@ fn lk_08_seal_and_open_refuse_a_kind_the_role_may_not_send() {
     );
     unknown[77] = 17;
     assert_eq!(inspect(&unknown).unwrap_err(), OpenError::UnknownKind(17));
+    // Byte 9 is assigned to no kind: it is refused like any unknown byte.
+    assert_eq!(Kind::from_byte(9), None);
+    unknown[77] = 9;
+    assert_eq!(
+        open_as_counter(&unknown).unwrap_err(),
+        OpenError::UnknownKind(9)
+    );
+    assert_eq!(inspect(&unknown).unwrap_err(), OpenError::UnknownKind(9));
 }
 
 #[test]
@@ -672,9 +678,6 @@ fn lk_09_a_message_from_the_box_is_never_a_heartbeat() {
     let m = hand_signed_by(&the_box(), &counter(), Kind::Heartbeat);
     let r = open_as_counter(&m);
     assert_eq!(r.unwrap_err(), OpenError::KindNotAllowed(Kind::Heartbeat));
-    // What the box may send is a notice.
-    let m = hand_signed_by(&the_box(), &counter(), Kind::PosNotice);
-    assert_eq!(open_as_counter(&m).unwrap().kind, Kind::PosNotice);
 }
 
 #[test]

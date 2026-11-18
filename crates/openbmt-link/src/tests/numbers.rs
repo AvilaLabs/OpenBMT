@@ -133,31 +133,31 @@ fn lk_40_the_outbox_does_not_wrap() {
 #[test]
 fn lk_40_stored_tables_decode_strictly() {
     let mut inbox = Inbox::default();
-    for n in [owner(), the_box()] {
+    // Two senders: the owner, and a watcher (a device of its own).
+    let role_of = |d: &openbmt_core::identity::DeviceId| {
+        if *d == the_box().device_id() {
+            Some(Role::Watch)
+        } else {
+            allowed(d)
+        }
+    };
+    for (n, role) in [(owner(), Role::Owner), (the_box(), Role::Watch)] {
         let m = {
             let mut rng = Counting(0);
             crate::seal::seal(
                 &n,
-                if n.device_id() == owner().device_id() {
-                    Role::Owner
-                } else {
-                    Role::Box
-                },
+                role,
                 &counter().device_id(),
                 Role::Counter,
                 2,
-                if n.device_id() == owner().device_id() {
-                    Kind::Heartbeat
-                } else {
-                    Kind::PosNotice
-                },
+                Kind::Heartbeat,
                 b"x",
                 &mut |b| rng.fill(b),
             )
             .unwrap()
         };
         inbox
-            .open(&counter(), Role::Counter, &m, allowed, |_| Ok::<(), ()>(()))
+            .open(&counter(), Role::Counter, &m, role_of, |_| Ok::<(), ()>(()))
             .unwrap();
     }
     let bytes = inbox.to_bytes();

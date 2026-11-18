@@ -1026,7 +1026,7 @@ fn lk_20_a_copy_of_a_message_already_taken_is_refused_and_pushes_nothing_out() {
         &counter().device_id(),
         Role::Counter,
         1,
-        Kind::PosNotice,
+        Kind::Stored,
         b"x",
         &mut |b| rng.fill(b),
     )

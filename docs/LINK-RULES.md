@@ -67,7 +67,8 @@ what arrives as if it came from an enemy.
   message is in.
 - **LK-08.** The kind is one byte, signed but not encrypted, so that a
   reader can refuse a kind it does not expect from that sender before it
-  decrypts. The kinds and who may send each to whom:
+  decrypts. Byte 9 is assigned to no kind and is refused like any byte that
+  is not a kind. The kinds and who may send each to whom:
 
   | Kind | From | To |
   |---|---|---|
@@ -80,7 +81,6 @@ what arrives as if it came from an enemy.
   | Records | counter | owner |
   | Records received | owner | counter |
   | Paid notice | counter | Box |
-  | POS notice | Box | counter, owner |
   | Range | owner | counter |
   | Switch | owner | counter |
   | Starter | owner | counter |
@@ -518,13 +518,6 @@ merged).
   owner node sends a new line when any of these changes, including a spend
   of the starter wallet it did not make, and at least once every heartbeat
   interval. A line is not kept for sending again: the next one replaces it.
-
-The two kinds that involve the Box are carried the same way. A counter sends
-a Paid notice to each Box on its device list when a sale changes state, and
-the Box sends a POS notice to the owner. The contents, how they are numbered
-and stored, and what the receiver checks are in `docs/BOX-RULES.md` section
-4 and its paragraph "What the code fixes". A counter takes a POS notice, opens
-it and drops it with a note (LK-63).
 
 The intervals in LK-56, LK-57, LK-61, LK-62 and LK-64 are fields of a
 configuration with these defaults. A step that finds the relay unreachable
