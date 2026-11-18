@@ -45,18 +45,6 @@ ordinary accounting exports, and do not upload analytics or crash data.
 > Core and observed on test and live networks. The apps have not been run
 > on a phone.**
 
-### Square Sandbox exception
-
-These statements about the default apps do not cover the optional Square
-Sandbox checkout. That separate debug module contacts Square directly for
-authorization, card-present payment, and read-only payment reconciliation.
-Its Mobile Payments SDK dependency graph includes Datadog log/trace packages;
-we have not established the SDK's complete runtime destinations or telemetry
-behavior. Do not read the default no-publisher-analytics statement as covering
-this experimental variant. See the [scoped dependency, contact, and data
-inventory](https://github.com/AvilaLabs/OpenBMT/blob/main/apps/checkout-android/square-sandbox/DEPENDENCIES.md).
-A device network/privacy audit remains necessary before broader use.
-
 ## Who sees what
 
 | Party | What it sees | What you can do |
