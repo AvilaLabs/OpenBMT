@@ -29,22 +29,34 @@ rule here names it and adds only what is missing.
   passes through OpenBMT.
 - **TM-03. No Box needed.** No rule here requires a Box. A shop that runs one
   may use it where a rule says so; a shop without one loses nothing that a
-  rule here promises.
+  rule here promises. Two existing rules still name a Box: Shop Lightning's
+  second copy, which TM-150 lets the shop keep on another device, and SS-38's
+  option to stop bitcoin sales above the starter limit, which stays a Box
+  option until the starter line can come from the owner phone.
 - **TM-04. One record of the shop.** Every sale, payment, refund, drawer
-  movement, stock change and staff action is a record in the counter's
+  movement, stock change and action of TM-103 is a record in the counter's
   record log (CR-40 order of writing), in the Rust library, so that the owner
-  app and the books read the same facts. There is no second ledger in the
-  app. A record is written before the screen says it happened.
+  app and the books read the same facts. There is no second ledger in the app.
+  A record is written before the screen says it happened. The terminal's
+  records are a record kind of their own, Shop, so that CR-152's limit of
+  20,000 records in a day counts sale records only; the day's report (TM-130)
+  reads Shop records under a limit of its own of 200,000. An owner app or a
+  counter too old to read the Shop kind refuses it with words and is updated,
+  never reads it in part.
 - **TM-05. Exact money.** Amounts are whole numbers of the minor unit of the
   shop's currency (CR-193) or of satoshis. No amount is ever a floating-point
   number. Every rounding is named by a rule.
-- **TM-06. Who did it.** Every record that a person causes names the person
-  (a cashier, a manager, or the owner) and the counter. A name typed into a
-  field is never taken as who someone is; only a signed-in PIN or the owner's
-  signature is.
+- **TM-06. Who did it.** Every record that a person causes names the person (a
+  cashier, a manager, or the owner) and the counter. A name typed into a field
+  is never taken as who someone is; only a signed-in PIN or the owner's
+  signature is. With no cashier listed (CR-146), records name the counter and
+  the name given at its first start, as now.
 - **TM-07. Selling is not spending.** Nothing a cashier or a manager can do at
-  the counter moves the shop's bitcoin, changes where it is paid or changes
-  how it is signed. That stays with the owner's keys (§14).
+  the counter moves the shop's bitcoin or changes how it is signed. Where the
+  shop's bitcoin is paid changes only by the owner's signed settings; a
+  manager at the counter may confirm what the owner sent (CR-260, CR-261,
+  SS-41), and may set the counter's own node (CR-100), which changes how
+  payments are checked, never where they go.
 
 ## 1. Items
 
@@ -55,9 +67,9 @@ rule here names it and adds only what is missing.
 - **TM-11. Categories.** Items sit in categories the shop names, up to two
   levels deep, and an item may be shown in more than one category. The
   counter's sale screen opens on the categories.
-- **TM-12. Variants.** An item may have variants (a size, a colour), up to
-  three choices of up to 20 values each. Each variant has its own price,
-  barcode and stock.
+- **TM-12. Variants.** An item may have variants (a size, a colour): up to
+  three kinds of choice, each with up to 20 values, and at most 200 variants
+  in all. Each variant has its own price, barcode and stock.
 - **TM-13. Modifiers.** An item may have modifier groups (milk, extra shot,
   no onion). A group is required or optional, has a least and a most number
   of choices, and each choice has a price, which may be zero. A group can be
@@ -66,8 +78,8 @@ rule here names it and adds only what is missing.
   EAN-8, UPC-A, UPC-E and Code 128 are read. A scan that matches one item adds
   it; one that matches none says so and offers to make an item with that
   code (manager or owner only).
-- **TM-15. Finding an item.** The cashier finds an item by category, by
-  typing part of its name or code, or by scanning (TM-110, TM-111).
+- **TM-15. Finding an item.** The cashier finds an item by category, by typing
+  part of its name or code, or by scanning (TM-14, TM-162).
 - **TM-16. Editing items.** A manager at the counter or the owner on the
   owner phone makes, edits and archives items. Every change is a record
   (TM-04). An item that has been sold is archived, never deleted, so that old
@@ -76,9 +88,10 @@ rule here names it and adds only what is missing.
   made it.
 - **TM-17. A list from a spreadsheet.** The owner imports items from a CSV
   file and exports them to one, with the columns name, category, variant,
-  price, tax group, barcode, counted and on hand.
-  An import shows every row it would add or change and every row it refuses,
-  with the reason, before anything is written, and writes all or none.
+  price, tax group, barcode, counted and on hand. A price is written with a
+  dot and exactly the currency's minor digits (4.50, not 4.5). An import shows
+  every row it would add or change and every row it refuses, with the reason,
+  before anything is written, and writes all or none.
 
 ## 2. The sale
 
@@ -88,21 +101,28 @@ rule here names it and adds only what is missing.
   the tax, the tip and the total.
 - **TM-21. Same item twice.** By the shop's setting, the same item with the
   same choices is either one line with a count, or a new line each time.
-- **TM-22. A note.** A line or a sale may carry a note of up to 140
-  characters. A sale's note is CR-212's.
+- **TM-22. Notes.** A sale may carry a note, as CR-206 says (1 to 64
+  characters, set once). A line may carry a note of its own of 1 to 64
+  characters before the sale is frozen (TM-26); a line's note is printed on
+  the kitchen ticket (TM-28) and the receipt, unlike a sale's note (CR-212).
 - **TM-23. A price change for one sale.** A cashier with the permission
   (§10) may change a line's price for this sale only, with a reason. The
   receipt and the records keep the item's own price beside it.
 - **TM-24. An amount typed in.** The keypad takes an amount for an open item
   ("price at sale") or a sale with no items at all.
 - **TM-25. Parked sales.** A sale may be parked and picked up again at the
-  same counter, by anyone signed in. A parked sale has no payment on it. Up
-  to 20 are kept; the oldest the shop allows (by default a day) is cleared
-  with a record.
+  same counter, by anyone signed in. Up to 20 are kept. A parked sale with
+  nothing paid is cleared, with a record, after the time the shop allows (by
+  default a day). A parked sale with a part paid (TM-54) is never cleared: it
+  stays until it is paid or its paid parts are refunded, and the end of the
+  day lists it (TM-96).
 - **TM-26. The sale is frozen before payment.** When the first payment of a
-  sale starts, its lines, prices, discounts, tax and total are written as
-  one record and never change. A change after that is a refund or a new
-  sale (§7).
+  sale starts, its lines, prices, discounts, tax and total are written as one
+  record and never change. A change after that is a refund or a new sale (§7).
+  A sale's total is above zero; one at zero or below is refused before it is
+  frozen. What belongs to one part of the payment and not to the sale (a
+  part's tip, TM-36, and the bitcoin discount, TM-56) is written with that
+  part, not in the frozen sale.
 - **TM-27. The customer's screen.** The customer sees the lines, the total
   and the payment code on a second display joined to the counter (a screen
   on HDMI or USB-C, or a cast screen), or on the counter's own screen turned
@@ -137,14 +157,17 @@ rule here names it and adds only what is missing.
   percent) that the cashier adds or removes, and a service charge added
   always or by hand. Each says whether it is taxed.
 - **TM-36. Tips.** Tips are CR-187 to CR-192, with these additions: a tip is
-  chosen before payment, on the customer's screen when there is one; the
-  owner chooses whether the percent is of the amount before or after tax; a
-  cash or card part of the sale may carry its own tip. There is no changing a
-  tip after a bitcoin payment; a card tip is the processor's (§6).
+  chosen before payment, on the customer's screen when there is one, and is
+  worked out on the amount CR-188 names; a cash or card part of the sale may
+  carry its own tip, chosen before that part and written with it (TM-26). A
+  tip is not changed after a part is paid, for any way of paying; card tips
+  adjusted after the card is taken are not offered.
 - **TM-37. The order of the sum.** Line prices with modifiers, then line
   discounts, then sale discounts, then fees and the service charge, then tax
-  (TM-41), then the tip. Each step is rounded to the minor unit half away
-  from zero, once, at that step.
+  (TM-41), then the tip. Each step is rounded to the minor unit half away from
+  zero, once, at that step. A sale discount is shared over the lines in
+  proportion to their amounts, rounded down for each line, the rest to the
+  last line, so that tax and refunds (TM-75) see each line's share.
 
 ## 4. Tax
 
@@ -156,11 +179,11 @@ rule here names it and adds only what is missing.
   discounts, rounded half away from zero to the minor unit. An included tax
   is shown as the part of the price that is tax.
 - **TM-42. Exempt.** A cashier with the permission removes tax from a line or
-  a sale with a reason, or marks the customer exempt (TM-120). The receipt
-  says so.
-- **TM-43. Cash rounding.** Where coins are not small enough, the owner sets
-  a step (for example 0.05) for cash payments; the cash total is rounded to it
-  and the difference is a record of its own.
+  a sale with a reason, or puts a customer marked exempt (TM-120) on the sale,
+  which needs the same permission. The receipt says so.
+- **TM-43. Cash rounding.** Where coins are not small enough, the owner sets a
+  step (for example 0.05) for cash payments; the cash part is rounded to the
+  nearest step, a half step up, and the difference is a record of its own.
 
 ## 5. Taking payment
 
@@ -170,9 +193,12 @@ rule here names it and adds only what is missing.
   unless the owner chooses otherwise.
 - **TM-51. Bitcoin.** A bitcoin payment is a sale of the counter rules, with
   all of them: the code of CR §2 and §12, instant acceptance within the
-  owner's limits (CR §1), late, short and over payments (CR-12, CR §8), and
-  Lightning first when it is on. The terminal hands it the amount; it adds
-  nothing to how a bitcoin payment is judged.
+  owner's limits (CR-12 and `openbmt_core::policy`), late, short and over
+  payments (CR-12, CR §8), and Lightning first when it is on. Each bitcoin
+  part takes an address of its own, within CR-04's hourly limit. A part below
+  the shop's smallest bitcoin sale is offered in cash or card only. The
+  terminal hands it the amount; it adds nothing to how a bitcoin payment is
+  judged.
 - **TM-52. Cash.** The cashier types what the customer handed over, or taps
   one of the notes the counter suggests. The counter shows the change. A cash
   payment is recorded with what was handed over, what was taken and the
@@ -180,30 +206,37 @@ rule here names it and adds only what is missing.
   no drawer is open on that counter.
 - **TM-53. Paying in parts.** A sale may be paid in several parts by several
   ways. Each part keeps its own state and its own refund limit. The sale is
-  paid when the parts reach its total; until then it shows what is still
-  owed. A bitcoin part is a bill part of CR-246; a cash, card or other part is
-  a part of this section.
+  paid when the parts reach its total; until then it shows what is still owed.
+  A bitcoin part is a part of a bill (CR-248), within the limits of CR-252 and
+  CR-253; a cash, card, credit or other part is a part of this section. A sale
+  with parts paid is ended only by being paid, by refunding its paid parts
+  (TM-75), or by being parked (TM-25).
 - **TM-54. Paid later.** A sale with parts still owed may be parked (TM-25)
   with its paid parts kept. It is not paid until the rest is.
-- **TM-55. A part cannot be paid twice.** A part that is being paid blocks
-  other parts of the same amount until it ends. A part whose outcome is not
-  known (a bitcoin payment not yet seen, a card result lost) stays unknown and
-  holds its amount: the counter never invites a second payment of it until it
-  is settled (TM-63, CR §8).
+- **TM-55. A part cannot be paid twice.** The parts paid, the parts being paid
+  and the parts whose outcome is not known together never come to more than
+  the sale's total: a new part is offered only for what is left after all
+  three. A part whose outcome is not known (a bitcoin payment not yet seen, a
+  card result lost) keeps its amount until it is settled (TM-63, CR §8), and
+  the counter never invites a second payment of it.
 - **TM-56. The card fee line.** When the owner turns it on and enters their
   card rate (a percent and a fixed amount), the sale screen shows the card fee
-  the shop would pay on this sale. When the customer pays in bitcoin, the
-  same line is shown struck through. The owner chooses either to show it only,
-  or to take that amount off for bitcoin as a discount (TM-31). It is never
-  added to a card payment: that is a surcharge, which card networks and some
-  places restrict.
+  the shop would pay on what is left to pay. When the customer pays in
+  bitcoin, the same line is shown struck through. The owner chooses either to
+  show it only, or to take that amount off a bitcoin part as a discount of
+  that part (TM-26), in which case the sale counts as paid when its parts and
+  their bitcoin discounts reach its total. It is never added to a card
+  payment: that is a surcharge, which card networks and some places restrict.
 - **TM-57. Offline.** Without internet, the counter takes cash and other
   recorded ways, and card when the shop's processor allows offline card
-  payments (TM-66). It does not take bitcoin, because it cannot see the
-  payment arrive: it says so on the bitcoin button, and the sale stays open
-  for another way to pay. It keeps ringing up, parking, printing and
-  recording. When the internet returns it says so and bitcoin is offered
-  again.
+  payments (TM-66). It does not open a bitcoin part, because it cannot see a
+  payment arrive, and it says so on the bitcoin button. A bitcoin part already
+  shown when the internet went stays a part of the sale and is watched again
+  when the internet returns. The cashier may take another way for its amount
+  only after cancelling that part; a payment to it that arrives later is a
+  late payment of the sale, owed back to the customer (CR §8). The counter
+  keeps ringing up, parking, printing and recording, and offers bitcoin again
+  when the internet returns.
 
 ## 6. Cards
 
@@ -211,18 +244,21 @@ Card payments go through the shop's own card processor. The card network's
 steps (holding an amount, taking it later, voids, adjusting a tip, disputes)
 live inside this section and touch nothing else.
 
-- **TM-60. One way in.** The counter talks to every processor through one
-  card module boundary in the app. Each processor is a separate module built
-  only into the builds that include it; the plain build has no card code at
-  all. The module is told an amount, a currency and a sale part, and answers
-  with one of: paid, declined, cancelled, unknown.
+- **TM-60. One way in.** The counter talks to every processor through one card
+  module boundary in the app. Each processor is a separate module built only
+  into the builds that include it; the plain build has no card code at all.
+  The module is told an amount, a currency and a sale part, and answers with
+  one of: paid, declined, cancelled, unknown. Cancelled means the processor
+  said the payment was cancelled and nothing was taken; any answer that is not
+  one of the four, or no answer, is unknown.
 - **TM-61. Saved before it is asked.** Before a card payment starts, the part
   and a reference of its own are written. The processor is given that
   reference. A crash at any moment leaves a part that the counter can match
   against the processor.
 - **TM-62. Paid means the processor said so.** A card part is paid only when
-  the processor's answer says completed for that reference. A declined part
-  may be tried again on the same part.
+  the processor's answer says completed for that reference. After a decline
+  the part may be tried again, as a new try of the same part with a reference
+  of its own (TM-61).
 - **TM-63. Unknown is never declined.** A lost answer, a timeout, a crash or a
   reader that went away makes the part unknown. The counter asks the processor
   about that reference before anything else; until the answer comes, the
@@ -230,18 +266,22 @@ live inside this section and touch nothing else.
   card again.
 - **TM-64. The shop's key on the counter.** Where a processor needs a secret
   to run, the owner makes a limited key in the processor's own dashboard that
-  can take payments and refund them to the card they came from, and cannot
-  pay out or move money anywhere else, and scans it into the counter. It is
-  sealed with the Android keystore (as the PINs are) and never leaves the
-  counter. The setup screen says what it can do and how to cancel
-  it in the dashboard. A shop with a Box may keep it on the Box instead.
+  can take payments and refund them to the card they came from, and cannot pay
+  out or move money anywhere else, and scans it into the counter. It is sealed
+  with the Android keystore (as the PINs are) and never leaves the counter.
+  The setup screen says what it can do and how to cancel it in the dashboard.
   **[verify]** for each processor that such a limited key exists.
 - **TM-65. Refunds by card.** A card refund is asked of the processor against
-  the original payment, by a manager or the owner, and follows TM-62 and
-  TM-63 in reverse.
+  the original payment, by someone with the refund permission (TM-101). It is
+  saved with a reference of its own before it is asked, is done only when the
+  processor says so, and when its outcome is not known it keeps its amount,
+  counts against what the part can still give back, and is never asked again
+  until the processor has answered about it.
 - **TM-66. Offline cards.** Where the processor offers offline payments and
   the owner turns them on, the counter shows the processor's limit and keeps
-  each offline card part as unknown until the processor confirms it.
+  each offline card part as unknown until the processor confirms it. The end
+  of the day lists offline parts not yet confirmed, and the day's report shows
+  them apart from paid card parts.
 - **TM-67. Processors.** Modules in this order: Square, Stripe Terminal,
   Adyen, Mollie. Others are added as each allows outside apps, each with what
   it needs written beside its module.
@@ -263,40 +303,44 @@ live inside this section and touch nothing else.
 - **TM-72. Gift receipt.** A receipt without prices.
 - **TM-73. Finding a sale.** By its receipt number, by scanning the receipt's
   code, by date, by item, by amount, by who served, by how it was paid and by
-  state. A sale's note and customer may be changed after it is paid, as a
-  record.
+  state. A customer may be put on a paid sale afterwards, once, as a record.
 - **TM-74. Reprint.** Any past sale, refund or exchange may be printed or
   shown again.
 - **TM-75. A refund.** A refund is of whole lines, some of a line's quantity,
-  or an amount, against a paid sale, with the tax of those lines. It is
-  allowed only to someone with the permission and only up to what the sale's
-  parts can still give back. Each part refunds its own way: bitcoin by the
-  refund rules of the counter (CR §7: at the dollar price or the bitcoin
-  amount, the shop's setting, to an address or invoice the customer gives and
-  the counter checks; a Lightning sale back in cash or on-chain, CR-111);
-  cash from the drawer; card through the processor (TM-65).
+  or an amount, against a paid sale, at the counter that took the sale, by
+  someone with the permission. A line gives back its price after its share of
+  sale discounts (TM-37) and its tax; a tip or a fee is given back only when
+  chosen. Each part refunds its own way and never more than it has left,
+  counted over every refund of the sale: bitcoin by the refund rules of the
+  counter (CR §7: at the dollar price or the bitcoin amount, the shop's
+  setting, to an address or invoice the customer gives and the counter checks,
+  CR-67; a Lightning sale back in cash or on-chain, CR-111); cash from the
+  drawer, as a movement of it (TM-91), including a bitcoin sale refunded in
+  cash (CR-71); card through the processor (TM-65); credit back to the credit
+  (TM-81).
 - **TM-76. A return policy.** The owner may set a time limit for returns. Past
   it, a manager may still refund with a reason.
 - **TM-77. An exchange.** Returned lines and new lines in one step: the
   difference is paid or refunded.
 - **TM-78. A return without its sale.** A manager may take back an item with
   no sale found, only as store credit (TM-80), with a reason.
-- **TM-79. What refunds cannot do.** A refund once given is not undone. A
-  card processor's fees are not returned by a refund. The screen says both
-  before the refund is made.
+- **TM-79. What refunds cannot do.** A refund once paid is not undone. A
+  bitcoin refund asked may be withdrawn before it is paid (CR-70); the counter
+  does not learn when the owner paid it (CR-74). A card processor's fees are
+  not returned by a refund. The screen says these before the refund is made.
 
 ## 8. Store credit
 
 - **TM-80. Credit.** The shop may give a customer credit instead of a refund,
   or for a reason a manager names. A credit has an amount in the shop's
-  currency and a code printed or shown as on a receipt. It is the shop's own
-  promise; no bitcoin moves.
+  currency and a code of 128 random bits, printed or shown as on a receipt. It
+  is the shop's own promise; no bitcoin moves.
 - **TM-81. Paying with credit.** Credit is a way to pay (TM-50) up to what is
-  left on it. What is left is shown and printed.
-- **TM-82. Where it is kept.** A credit is kept on the counter that gave it
-  and in the owner's copy. In a shop with several counters, the owner's copy
-  tells the others; until a counter has heard, it accepts only credit it gave
-  itself, and says so.
+  left on it. A credit being used is held as a part is (TM-55), so two sales
+  cannot use the same amount. What is left is shown and printed.
+- **TM-82. Where it is kept.** A credit is kept on the counter that gave it,
+  is used only there, and is in the owner's copy of the records. Use at the
+  shop's other counters is later (§19).
 
 ## 9. The drawer and the day
 
@@ -310,8 +354,9 @@ live inside this section and touch nothing else.
 - **TM-93. Closing.** The person closing counts the cash. The counter shows
   what was expected, what was counted and the difference, and writes them.
   After close nothing can be added to that drawer.
-- **TM-94. One person's drawer.** The shop may give a drawer to one person
-  for their shift; only they take cash into it.
+- **TM-94. One person's drawer.** The shop may give a counter's drawer to one
+  person for their shift; only they take cash into it until they hand it on or
+  close it.
 - **TM-95. The bank.** The owner may record cash taken to the bank, with the
   amount, against closed drawers, and see a difference from what was
   expected.
@@ -328,24 +373,31 @@ live inside this section and touch nothing else.
 ## 10. Staff
 
 - **TM-100. Three roles.** Cashier, manager and owner. Cashiers and managers
-  sign in at the counter by name and PIN (CR-140 to CR-150, CR-84, CR-85);
-  the owner acts through the owner phone.
+  sign in at the counter by name and PIN (CR-140 to CR-150, CR-85). This
+  changes CR-84: a counter may list several managers, each with a name and a
+  PIN kept as CR-141 says; the manager of CR-84 is the first. The owner acts
+  through the owner phone.
 - **TM-101. Permissions.** The owner chooses, for cashiers and for managers,
   each of: price change for one sale, discounts by hand, tax removal, refunds,
   returns without a sale, store credit, opening the drawer without a sale,
   cash in and out, editing items, stock changes, seeing reports, closing the
-  day. A screen shows what each role can do.
+  day. The choices are part of the owner's signed settings; a counter takes a
+  change only when it is signed. The caps of CR-69 still apply to refunds
+  whatever the choice. A screen shows what each role can do.
 - **TM-102. Spending is not a permission.** No role at the counter can be
   given TM-07's actions; there is no switch for them.
 - **TM-103. The log.** Every price change, discount, tax removal, refund,
-  store credit, drawer opening, cash movement, stock change and item change is
-  in a log the owner reads, with who, which counter and when.
+  store credit, drawer opening, cash movement, stock change, item change and
+  change of staff is in a log the owner reads, with who, which counter and
+  when. A PIN itself is never in it (CR-142).
 
 ## 11. Stock
 
-- **TM-110.** An item or variant whose stock is counted has a number on hand.
-  A paid sale takes its quantities off once; a refund puts them back if the
-  person refunding says the goods came back.
+- **TM-110. Stock on hand.** An item or variant whose stock is counted has a
+  number on hand, which may go below zero and is then shown as short. A paid
+  sale takes its quantities off once; a refund puts them back if the person
+  refunding says the goods came back. A sale that was paid and then is not
+  (CR-14) puts its quantities back with a record, and the cashier is told.
 - **TM-111.** Stock is changed by hand with a reason, set to a number, or
   marked out of stock. An item out of stock is shown so at the sale screen.
 - **TM-112.** A count: of everything or of chosen items. A partial count
@@ -355,13 +407,15 @@ live inside this section and touch nothing else.
 
 ## 12. Customers
 
-- **TM-120.** A customer record has a name and any of a phone, an email and a
-  note, and a tax-exempt flag. It is kept on the shop's devices only.
+- **TM-120. A customer.** A customer has a name and any of a phone, an email
+  and a note, and a tax-exempt flag. It is kept on the shop's devices only, in
+  a store of its own outside the record log; a sale names a customer only by a
+  random number.
 - **TM-121.** A customer is added at the counter or found and put on a sale.
   Their past sales and credit are shown.
-- **TM-122.** The owner edits or deletes a customer, and exports the list.
-  Deleting removes the name and contact from the customer record; the sales
-  keep their amounts.
+- **TM-122. Editing and deleting.** The owner edits or deletes a customer, and
+  exports the list. Deleting removes the customer from the store; sales keep
+  the random number, which then names no one.
 - **TM-123.** The shop can ask for consent before keeping contact details,
   with its own words, and keeps the answer with the record.
 
@@ -370,8 +424,10 @@ live inside this section and touch nothing else.
 - **TM-130. The day's report.** Sales, refunds, discounts, tax by rate, tips,
   fees, each way to pay, cash expected and counted, store credit given and
   used, and bitcoin received in sats with its value at the time of each sale.
+  A sale, a tip and a refund count on the day CR-153 and CR-191 say.
 - **TM-131. Other reports.** By staff, by item, by category, by hour, for any
   span of dates, on the counter (with the permission) and on the owner phone.
+  Lines per person at the counter need a manager's PIN, as CR-154 says.
 - **TM-132. Exports.** CSV of sales, lines, payments, refunds and drawers, for
   any span, from the owner phone, and the books export of
   `docs/BOOKS-RULES.md`. Layouts that QuickBooks and Xero import are added
@@ -381,40 +437,52 @@ live inside this section and touch nothing else.
 
 ## 14. The shop's money
 
-- **TM-140. Three levels.** In setup and in the owner app the owner sees:
-  sell today with the starter wallet on the owner phone, with a limit the
-  owner sets (`docs/START-SIMPLE-RULES.md`); savings on a hardware wallet,
-  paired with its public information only and checked on its own screen
-  (`docs/WALLET-RULES.md`); savings on a spare phone kept offline with the
-  Key app, signing by QR. The third is offered only after it passes the
-  purist review; until then it is not shown. An offline laptop is not on the
-  main path.
+- **TM-140. Three levels.** In setup and in the owner app the owner sees the
+  two choices of D8: start with the starter wallet on the owner phone, with a
+  limit the owner sets, which is for a start and not for keeping
+  (`docs/START-SIMPLE-RULES.md`, SS-35, SS-37); or use the shop's own wallet.
+  The shop's own wallet is a hardware wallet, paired with its public
+  information only and checked on its own screen (`docs/WALLET-RULES.md`), or
+  a spare phone kept offline with the Key app, signing by QR. The spare phone
+  is offered only after it passes the purist review; until then it is not
+  shown. An offline laptop is not on the main path.
 - **TM-141. Moving and spending.** The owner moves funds and spends from the
   owner phone, signed by the shop's keys (`docs/SPEND-RULES.md`), with the fee
   and the destination checked on the signing device.
 - **TM-142. Small coins.** The cost of spending small coins later is shown,
-  and combining them follows D9 of `docs/DESIGN.md`.
-- **TM-143. A lost device.** A lost counter is replaced by pairing a new one;
-  no money was on it. A lost owner phone is recovered from the shop's
-  wallet words or hardware wallet, without asking OpenBMT; the records are
-  recovered from the counters and the owner's copy.
+  and they are combined by the spend rules (SP-24, SP-38, SP-39) and OC-17.
+  D9's separate working wallet is added when it is built.
+- **TM-143. A lost device.** A lost counter holds no wallet key and no
+  savings. It may hold Shop Lightning's key and channels (recovered from the
+  second copy, SL-25), the card key (cancelled in the processor's dashboard),
+  the drawer's cash, its store credit and records not yet sent to the owner
+  phone, and setup says so. A new counter is paired in its place. A lost owner
+  phone is recovered from the shop's wallet words or hardware wallet, without
+  asking OpenBMT; the records are recovered from the counters.
 
 ## 15. Lightning without a Box
 
-This section changes SL-73.
+This section changes SL-73, SL-74 and LK-80 to LK-83.
 
 - **TM-150. The second copy.** Shop Lightning's second copy (SL-20) is kept on
-  the owner phone, sealed for it, sent over the shop's link through any relay
-  (which sees only ciphertext). A shop with a Box may keep it on the Box, as
-  SL-73 says now.
-- **TM-151. The copy may lag.** The counter does not wait for the owner phone
-  to take each update. It keeps the age of the last copy taken, and the owner
-  app shows it. The owner sets a limit: when the last copy is older than it,
-  the counter stops taking Lightning and offers on-chain, and says why.
-- **TM-152. Restoring an old copy.** A node restored from a copy that may be
-  old never broadcasts its own channel state; it asks each peer to close the
-  channel, and the funds come back on-chain. **[verify]** that the Lightning
-  library handles a stale restore this way.
+  a device the owner chooses: another counter, the owner phone, or a Box.
+  Another counter may be a spare phone running the counter app, left on and
+  charging at the shop, which need take no sales. This changes SL-73, which
+  allowed only the Box, and SL-74 and LK-80 to LK-83, whose Store and Stored
+  messages now run between the Lightning counter and the device that holds the
+  copy, through any relay; the Stored answer is signed by that device's own
+  identity key, so a relay cannot make it. Nothing else of section 3 of
+  `docs/SHOP-LIGHTNING-RULES.md` changes: a sale is paid only when both copies
+  are written (SL-21), Lightning stops offering invoices while the second
+  device is away (SL-23), and an old copy is never used (SL-25).
+- **TM-151. What the choice means.** Setup says plainly: with the owner phone
+  as the second device, Lightning works while the owner phone is on and
+  reachable, and stops when it is not, with on-chain still offered; with
+  another counter or a spare phone at the shop, Lightning works whenever the
+  shop's devices are on. The status screen (TM-164) names the device and
+  whether it is reachable.
+- **TM-152. Lightning comes after the wallet.** Shop Lightning is offered once
+  the shop has its own wallet (SL-76).
 - **TM-153. Who else is involved.** Setup says plainly that a channel provider
   opens the shop's channels and pays for them as its terms say, never holds
   the shop's money, and that the shop can close a channel without it.
@@ -442,8 +510,9 @@ This section changes SL-73.
   may show its privacy policy as a code at the counter.
 - **TM-171.** A customer may ask for their data; the owner exports it or
   deletes it (TM-122).
-- **TM-172.** The payment code shows the customer only what they need to pay:
-  the amount and where to pay, never other sales or the shop's wallet.
+- **TM-172. The payment code.** The code a customer scans holds only what pays
+  that part: a BIP21 address and amount, or a Lightning invoice. It names no
+  other sale and no other address of the shop.
 
 ## 18. Setup
 

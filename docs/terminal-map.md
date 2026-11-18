@@ -436,6 +436,6 @@ words are joined into one job below. Each job is in one of three places:
 | Job | Rows | Where | Rule or reason |
 |---|---|---|---|
 | Recover on-chain receipt and spending authority after losing the device | CAP-D0F43729B0 CAP-FAF183F487 | First terminal | TM-143 |
-| Preserve and restore Lightning channel state and node recovery material | CAP-D24DC4EC84 CAP-0FD76D8292 CAP-6C20421F22 CAP-CDA102BB59 | First terminal | TM-150, TM-152 |
+| Preserve and restore Lightning channel state and node recovery material | CAP-D24DC4EC84 CAP-0FD76D8292 CAP-6C20421F22 CAP-CDA102BB59 | First terminal | TM-150 |
 | Back up the server's data and restore it on a new host (Docker scripts) | CAP-F122453871 CAP-CCA3A4522A CAP-00151BB04A CAP-2BAFC73FFB CAP-A279BE0869 | Not ours | Docker backup and restore: no server; the need is met by device recovery (C-002, C-003) and the Box's own backup. |
 
