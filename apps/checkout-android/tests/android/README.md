@@ -40,10 +40,13 @@ python3 -m unittest discover -s apps/checkout-android/tests/android -p 'test_*.p
   started; the sales list must show exactly one unpaid sale before and after
   process restart. After restart, the app must resume at `Choose payment` before
   the harness opens Sales; the ledger hash must remain stable across that restart.
-  The runner does not decode or print the actor-bearing ledger contents; exact
-  attribution is checked by the source contract and Kotlin ledger tests. The
-  fixture sale is then settled as cash so its correct resume flow does not hide
-  the normal checkout tools used by the remaining scenarios.
+  It prepares one $1.23 cash handover, force-stops before acknowledging receipt,
+  and verifies the pending recovery screen blocks Bitcoin, Square, and other
+  cash tenders. It then explicitly confirms receipt, verifies one paid cash row
+  and zero change, and checks that the paid sale and post-completion ledger hash
+  remain stable after another restart.
+  The runner does not decode or print actor-bearing ledger contents; exact
+  attribution and replay behavior are checked by source and Kotlin ledger tests.
 - Manager creates a cashier, verifies the policy change requires manager
   reauthentication, changes the manager PIN and verifies another reauthentication,
   then signs in as cashier and checks that Staff, Reports, Catalog management,

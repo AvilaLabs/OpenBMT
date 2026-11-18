@@ -333,6 +333,25 @@ class Suite:
         self.device.wait_text(r"^1\.23 USD · Tender not selected$", timeout=15)
         self.device.wait_text(r"^Manual amount$", timeout=15)
 
+    def assert_single_paid_cash_sale(self) -> None:
+        self.open_sales()
+        self.device.wait_text(r"^1 of 1 sales$", timeout=30)
+        self.device.wait_text(r"^1\.23 USD · Paid in cash$", timeout=15)
+        self.device.tap_text(r"^Open receipt$")
+        self.device.wait_text(r"^Sale receipt$", timeout=30)
+        for line in (
+            r"^Cash applied · 1\.23 USD$",
+            r"^Cash received · 1\.23 USD$",
+            r"^Change · 0\.00 USD$",
+        ):
+            self.device.wait_text(line, timeout=15)
+        cash_rows = sum(
+            1 for node in self.device.dump_nodes()
+            if re.fullmatch(r"Cash applied · 1\.23 USD", self.device.node_text(node))
+        )
+        if cash_rows != 1:
+            raise AcceptanceFailure(f"expected exactly one durable cash payment row, found {cash_rows}")
+
     def attributed_sale_persistence(self) -> None:
         self.open_sales()
         if not self.device.has_text(r"^0 of 0 sales$"):
@@ -365,8 +384,7 @@ class Suite:
             raise AcceptanceFailure("durable ledger changed while reopening the unpaid sale")
         say("PASS one attributed-path manual sale remains unpaid and durable after restart")
 
-        # Resolve the fixture sale before unrelated staff/report scenarios. The normal
-        # checkout preserves the sale and requires reopening its receipt explicitly.
+        # Prepare the handover, then kill the process before acknowledging receipt.
         self.device.tap_text(r"^Back to checkout$")
         self.wait_checkout_ready()
         self.open_sales()
@@ -375,10 +393,43 @@ class Suite:
         self.device.tap_text(r"^Choose payment$")
         self.device.wait_text(r"^Choose payment$", timeout=30)
         self.device.tap_text(r"^Cash$")
-        self.device.wait_text(r"^Cash received · USD$", timeout=20)
+        self.device.wait_text(r"^Prepare cash handover · USD$", timeout=20)
         self.device.type_into_field("1.23")
-        self.device.tap_text(r"^Record cash received$")
-        self.device.wait_text(r"^Sale receipt$", timeout=30)
+        self.device.tap_text(r"^Prepare handover$")
+        self.device.wait_text(r"^Cash handover recovery$", timeout=30)
+        self.device.wait_text(r"^I received cash · confirm payment$")
+        cash_ledger_after_prepare = hashlib.sha256(self.device.app_file(LEDGER_FILE)).hexdigest()
+        self.device.stop_app()
+        self.device.launch()
+        self.device.wait_text(r"^Sign in$", timeout=40)
+        self.sign_in(self.pin, expect_checkout=None)
+        self.device.wait_text(r"^Sale receipt$", timeout=45)
+        self.device.wait_text(r"^CASH HANDOVER NEEDS RECOVERY$")
+        if self.device.has_text(r"^(?:Choose payment|Pay with Bitcoin|Pay with Square Sandbox|Pay remaining by Cash)$"):
+            raise AcceptanceFailure("a prepared cash intent allowed another tender after process death")
+        self.device.tap_text(r"^Recover prepared cash handover$")
+        self.device.wait_text(r"^Cash handover recovery$", timeout=20)
+        self.device.wait_text(r"^No cash received · cancel intent$")
+        if hashlib.sha256(self.device.app_file(LEDGER_FILE)).hexdigest() != cash_ledger_after_prepare:
+            raise AcceptanceFailure("ledger changed while reopening the prepared cash intent")
+        say("PASS prepared cash intent survives process death and blocks other tenders")
+
+        # Explicitly acknowledge receipt only after the prepared intent is recovered.
+        self.device.tap_text(r"^I received cash · confirm payment$")
+        self.device.wait_text(r"^Paid in cash · 1\.23 USD$", timeout=30)
+        self.device.wait_text(r"^Paid in cash · 1\.23 USD$", timeout=15)
+        self.device.wait_text(r"^Cash received · 1\.23 USD$", timeout=15)
+        self.device.wait_text(r"^Change · 0\.00 USD$", timeout=15)
+        cash_ledger_after_record = hashlib.sha256(self.device.app_file(LEDGER_FILE)).hexdigest()
+        if cash_ledger_after_record == cash_ledger_after_prepare:
+            raise AcceptanceFailure("cash completion did not change the prepared-intent ledger")
+        self.force_restart_to_signin()
+        self.sign_in(self.pin)
+        self.assert_single_paid_cash_sale()
+        cash_ledger_after_restart = hashlib.sha256(self.device.app_file(LEDGER_FILE)).hexdigest()
+        if cash_ledger_after_restart != cash_ledger_after_record:
+            raise AcceptanceFailure("durable cash payment ledger changed while reopening the paid sale")
+        say("PASS one prepared cash intent completes once and remains paid after restart")
         self.device.tap_text(r"^New sale$")
         self.wait_checkout_ready()
 

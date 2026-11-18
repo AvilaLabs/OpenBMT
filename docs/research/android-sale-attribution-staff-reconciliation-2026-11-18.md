@@ -1,5 +1,11 @@
 # Android sale attribution and staff reconciliation
 
+> Historical pre-v10 milestone. The APK, emulator results, Ledger v9 claims,
+> sale-only attribution, and no-CAS limitation below apply to commit
+> `36782bbf74c47861b2326bde3166690134da507a`, not the current checkout. See
+> [Android Ledger v10 cash integrity](android-ledger-v10-cash-integrity-2026-11-18.md)
+> for the superseding implementation and validation record.
+
 **Date:** 18 November 2026
 
 **Base commit:** `36782bbf74c47861b2326bde3166690134da507a`

@@ -2,6 +2,7 @@ package org.openbmt.checkout
 
 import java.io.ByteArrayOutputStream
 import java.io.DataOutputStream
+import java.nio.file.Files
 import java.security.MessageDigest
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
@@ -20,8 +21,14 @@ object CheckoutLedgerTest {
         immutableBasketAndLegacyMigration()
         pricedSaleRoundTripAndV6Upgrade()
         authenticatedSaleCommandIsAtomicAndIdempotent()
+        replaySurvivesAuthorizedPolicyChanges()
+        ledgerCompareAndSwapRejectsStaleInstances()
         strictSaleCommandDecodeRejectsCorruption()
         migratesV8SaleCommandDigestsWithoutChangingOnRead()
+        migratesV9CoverageReadOnlyAndTracksTypedCash()
+        authenticatedCashCommandIsReplaySafeAndVersionBound()
+        cashIntentSurvivesRestartAndFinalizesOnce()
+        cashIntentReconcilesLateTenderEvidence()
         stableSaleSerializesLocalCommit()
         cashAcknowledgmentAndMigration()
         duplicateAndCorruptStorage()
@@ -366,6 +373,85 @@ object CheckoutLedgerTest {
         check(ledger.eventSnapshot().legacyHistoryUnattributed)
     }
 
+    private fun replaySurvivesAuthorizedPolicyChanges() {
+        val scope = CheckoutAuthorityScope("merchant-replay", "store-replay", "location-replay", "register-replay", "device-replay")
+        val authority = CheckoutAuthority(LedgerAuthorityStorage(), LedgerAuthorityClock(), defaultIterations = 1_000)
+        val setup = authority.bootstrapManager(authority.prepareBootstrap(), scope, "Primary Manager", "123456".toCharArray())
+        var primary = authority.authenticate(setup.managerActorId, "123456".toCharArray(), scope)
+        val cashier = authority.createStaff(primary, scope, "Cashier", CheckoutAuthorityRole.CASHIER, "234567".toCharArray())
+        primary = authority.authenticate(setup.managerActorId, "123456".toCharArray(), scope)
+        val storage = MemoryStorage()
+        val ledger = CheckoutLedger(storage, authority, scope)
+        ledger.createSale(primary, "generation-replay", "generation-sale", 100, "USD", 20)
+        val original = ledger.commandEvents().single().attribution!!
+
+        authority.renameStaff(primary, scope, cashier.actorId, "Renamed Cashier") // unrelated policy generation change
+        val refreshedPrimary = authority.authenticate(setup.managerActorId, "123456".toCharArray(), scope)
+        ledger.createSale(refreshedPrimary, "generation-replay", "generation-sale", 100, "USD", 20)
+        check(ledger.commandEvents().single().attribution == original)
+
+        val secondary = authority.createStaff(refreshedPrimary, scope, "Secondary Manager", CheckoutAuthorityRole.MANAGER, "345678".toCharArray())
+        val currentPrimary = authority.authenticate(setup.managerActorId, "123456".toCharArray(), scope)
+        val secondaryManager = authority.authenticate(secondary.actorId, "345678".toCharArray(), scope)
+        val secondStorage = MemoryStorage()
+        val secondLedger = CheckoutLedger(secondStorage, authority, scope)
+        secondLedger.createSale(secondaryManager, "role-replay", "role-sale", 200, "USD", 21)
+        val committedAttribution = secondLedger.commandEvents().single().attribution!!
+        authority.changeRole(currentPrimary, scope, secondary.actorId, CheckoutAuthorityRole.CASHIER)
+        val secondaryCashier = authority.authenticate(secondary.actorId, "345678".toCharArray(), scope)
+        secondLedger.createSale(secondaryCashier, "role-replay", "role-sale", 200, "USD", 21)
+        check(secondLedger.commandEvents().single().attribution == committedAttribution)
+        check(committedAttribution.role == CheckoutAuthorityRole.MANAGER)
+        val refreshedPrimaryAfterRoleChange = authority.authenticate(setup.managerActorId, "123456".toCharArray(), scope)
+        check(runCatching {
+            secondLedger.createSale(refreshedPrimaryAfterRoleChange, "role-replay", "role-sale", 200, "USD", 21)
+        }.isFailure) // same request and operation, wrong currently authorized actor
+        check(runCatching {
+            secondLedger.createSale(secondaryManager, "role-replay", "role-sale", 200, "USD", 21)
+        }.isFailure) // role change invalidated the old session
+    }
+
+    private fun ledgerCompareAndSwapRejectsStaleInstances() {
+        val directory = Files.createTempDirectory("checkout-ledger-cas-")
+        try {
+            val path = directory.resolve("ledger.obcl")
+            val first = CheckoutLedger(NioLedgerStorage(path))
+            val staleAbsent = CheckoutLedger(NioLedgerStorage(path))
+            first.createSale("first-writer", 100, "USD", 1)
+            val absentConflict = runCatching { staleAbsent.createSale("absent-racer", 200, "USD", 2) }.exceptionOrNull()
+            check(absentConflict is CheckoutLedgerConcurrentWriteException)
+            check(runCatching { staleAbsent.listSales() }.isFailure)
+            check(CheckoutLedger(NioLedgerStorage(path)).listSales().map { it.saleId } == listOf("first-writer"))
+
+            val current = CheckoutLedger(NioLedgerStorage(path))
+            val stale = CheckoutLedger(NioLedgerStorage(path))
+            current.createSale("second-writer", 300, "USD", 3)
+            val staleConflict = runCatching { stale.createSale("stale-writer", 400, "USD", 4) }.exceptionOrNull()
+            check(staleConflict is CheckoutLedgerConcurrentWriteException)
+            val reopened = CheckoutLedger(NioLedgerStorage(path))
+            check(reopened.listSales().map { it.saleId } == listOf("first-writer", "second-writer"))
+
+            val initPath = directory.resolve("init-race.obcl")
+            val initFirst = CheckoutLedger(NioLedgerStorage(initPath))
+            val initStale = CheckoutLedger(NioLedgerStorage(initPath))
+            check(initFirst.initializeEvents().initialized)
+            check(runCatching { initStale.initializeEvents() }.exceptionOrNull() is CheckoutLedgerConcurrentWriteException)
+
+            val migrationPath = directory.resolve("legacy.obcl")
+            val legacyBytes = legacyV7WithCash()
+            Files.write(migrationPath, legacyBytes)
+            val migrating = CheckoutLedger(NioLedgerStorage(migrationPath))
+            migrating.createSale("post-migration", 50, "USD", 5)
+            check(readInt(Files.readAllBytes(migrationPath), 4) == 10)
+            check(CheckoutLedger(NioLedgerStorage(migrationPath)).listSales().map { it.saleId } ==
+                listOf("legacy-v7", "post-migration"))
+        } finally {
+            Files.walk(directory).use { paths ->
+                paths.sorted(java.util.Comparator.reverseOrder<java.nio.file.Path>()).forEach { Files.deleteIfExists(it) }
+            }
+        }
+    }
+
     private fun authenticatedSaleCommandIsAtomicAndIdempotent() {
         val scope = CheckoutAuthorityScope("merchant-ledger", "store-ledger", "location-ledger", "register-ledger", "device-ledger")
         val authorityClock = LedgerAuthorityClock()
@@ -386,7 +472,7 @@ object CheckoutLedgerTest {
         check(command.attribution!!.actorId == manager.managerActorId)
         check(command.attribution.capabilityId == CheckoutAuthorityCapability.SALE_CREATE.id)
         check(command.attribution.scope == scope && command.attribution.policyGeneration > 0)
-        check(command.payloadDigest.size == 32 && command.commitIdentity == "sale-authenticated@0")
+        check(command.payloadDigest.size == 32 && command.commitIdentity == "sale-authenticated@1")
         check(!ledger.eventSnapshot().legacyHistoryUnattributed)
         val mismatchedScopeLedger = CheckoutLedger(storage)
         check(runCatching {
@@ -431,6 +517,14 @@ object CheckoutLedgerTest {
         check(runCatching {
             recovered.createSale(recoveredSession, "sale-op-uncertain", "sale-uncertain", 101, "USD", 51)
         }.isFailure)
+
+        val maximumSaleId = "s".repeat(160)
+        val maximumIdStorage = MemoryStorage()
+        val maximumIdLedger = CheckoutLedger(maximumIdStorage, authority, scope)
+        maximumIdLedger.createSale(recoveredSession, "sale-op-max-id", maximumSaleId, 100, "USD", 51)
+        val maximumIdReopened = CheckoutLedger(maximumIdStorage, authority, scope)
+        check(maximumIdReopened.getSale(maximumSaleId).saleId == maximumSaleId)
+        check(maximumIdReopened.commandEvents().single().commitIdentity == "$maximumSaleId@1")
 
         val beforeWrite = object : DurableLedgerStorage {
             private var bytes: ByteArray? = null
@@ -485,6 +579,36 @@ object CheckoutLedgerTest {
         badDigest[commandOffsets(badDigest, "sale-op-1").digest] = (badDigest[commandOffsets(badDigest, "sale-op-1").digest].toInt() xor 1).toByte()
         rejected(badDigest)
 
+        val forgedCompleteBaseline = valid.copyOf()
+        // Two rows: count, then sale-one's encoded ID, version, and legacy flag.
+        writeLong(forgedCompleteBaseline, forgedCompleteBaseline.size - 50 + 4 + encodeString("sale-one").size, 1L)
+        rejected(forgedCompleteBaseline)
+
+        val nonCanonicalCashCommit = run {
+            val scope = CheckoutAuthorityScope("merchant-corrupt", "store-corrupt", "location-corrupt", "register-corrupt", "device-corrupt")
+            val authority = CheckoutAuthority(LedgerAuthorityStorage(), LedgerAuthorityClock(), defaultIterations = 1_000)
+            val manager = authority.bootstrapManager(authority.prepareBootstrap(), scope, "Corruption Manager", "123456".toCharArray())
+            val session = authority.authenticate(manager.managerActorId, "123456".toCharArray(), scope)
+            val storage = MemoryStorage()
+            val ledger = CheckoutLedger(storage, authority, scope)
+            ledger.createSale(session, "corrupt-sale-create", "commit-sale", 100, "USD", 50)
+            recordCashWithIntent(ledger, session, "corrupt-cash-prepare", "commit-sale", "commit-cash", 100, 51, 52, 1, 100)
+            val committed = checkNotNull(storage.bytes).copyOf()
+            val commitOffset = commandOffsets(committed, checkNotNull(ledger.getCashPaymentIntent("commit-cash")).completeOperationId).commit
+            replaceEncodedStringResizing(committed, commitOffset, "commit-sale@junk@3")
+        }
+        rejected(nonCanonicalCashCommit)
+
+        val uninitializedBaseline = run {
+            val storage = MemoryStorage()
+            CheckoutLedger(storage).createSale("baseline-uninitialized", 100, "USD", 50)
+            checkNotNull(storage.bytes).copyOf()
+        }
+        writeLong(uninitializedBaseline,
+            uninitializedBaseline.size - (4 + encodeString("baseline-uninitialized").size + 8 + 1 + 4) + 4 + encodeString("baseline-uninitialized").size,
+            1L)
+        rejected(uninitializedBaseline)
+
         val duplicateOperation = valid.copyOf()
         replaceEncodedStringAt(duplicateOperation, findEncodedString(duplicateOperation, "sale-op-2"), "sale-op-1")
         rejected(duplicateOperation)
@@ -500,7 +624,8 @@ object CheckoutLedgerTest {
     }
 
     private fun migratesV8SaleCommandDigestsWithoutChangingOnRead() {
-        val v8Bytes = twoSaleCommandLedgerBytes()
+        val encodedV10 = twoSaleCommandLedgerBytes()
+        val v8Bytes = encodedV10.copyOfRange(0, encodedV10.size - 50)
         writeInt(v8Bytes, 4, 8)
         listOf(
             Triple("sale-op-1", "sale-one", 100L),
@@ -522,10 +647,362 @@ object CheckoutLedgerTest {
         val session = authority.authenticate(manager.managerActorId, "123456".toCharArray(), scope)
         reopened.bindCommandAuthority(authority, scope)
         reopened.createSale(session, "sale-op-3", "sale-three", 300, "USD", 52)
-        check(readInt(checkNotNull(storage.bytes), 4) == 9)
+        check(readInt(checkNotNull(storage.bytes), 4) == 10)
         val migrated = CheckoutLedger(storage)
         check(migrated.commandEvents().map { it.operationId } == listOf("sale-op-1", "sale-op-2", "sale-op-3"))
         check(migrated.listSales().map { it.saleId } == listOf("sale-one", "sale-two", "sale-three"))
+    }
+
+    private fun migratesV9CoverageReadOnlyAndTracksTypedCash() {
+        val encodedV10 = twoSaleCommandLedgerBytes()
+        val v9 = encodedV10.copyOfRange(0, encodedV10.size - 50)
+        writeInt(v9, 4, 9)
+        val storage = MemoryStorage().also { it.bytes = v9 }
+        val original = v9.copyOf()
+        val ledger = CheckoutLedger(storage)
+        check(ledger.listSales().map { it.saleId } == listOf("sale-one", "sale-two"))
+        check(storage.bytes!!.contentEquals(original)) // v9 baseline migration is read-only
+
+        val scope = CheckoutAuthorityScope("merchant-ledger", "store-ledger", "location-ledger", "register-ledger", "device-ledger")
+        val authority = CheckoutAuthority(LedgerAuthorityStorage(), LedgerAuthorityClock(), defaultIterations = 1_000)
+        val manager = authority.bootstrapManager(authority.prepareBootstrap(), scope, "Ledger Manager", "123456".toCharArray())
+        val session = authority.authenticate(manager.managerActorId, "123456".toCharArray(), scope)
+        ledger.bindCommandAuthority(authority, scope)
+        val result = recordCashWithIntent(ledger, session, "cash-op-1", "sale-one", "cash-payment-1",
+            120, 59, 60, expectedSaleVersion = 1, expectedRemainingMinor = 100)
+        check(result.disposition == CheckoutLedgerCommandDisposition.NEW_COMMIT)
+        check(readInt(checkNotNull(storage.bytes), 4) == 10)
+
+        val reopened = CheckoutLedger(storage)
+        check(reopened.commandEvents().size == 4)
+        val replayLedger = CheckoutLedger(storage, authority, scope)
+        val replay = recordCashWithIntent(replayLedger, session, "cash-op-1", "sale-one", "cash-payment-1",
+            120, 59, 60, expectedSaleVersion = 1, expectedRemainingMinor = 100)
+        check(replay.disposition == CheckoutLedgerCommandDisposition.REPLAY)
+        check(replay.value == result.value)
+        check(replayLedger.commandEvents().size == 4)
+    }
+
+    private fun authenticatedCashCommandIsReplaySafeAndVersionBound() {
+        val scope = CheckoutAuthorityScope("merchant-cash", "store-cash", "location-cash", "register-cash", "device-cash")
+        val authority = CheckoutAuthority(LedgerAuthorityStorage(), LedgerAuthorityClock(), defaultIterations = 1_000)
+        val manager = authority.bootstrapManager(authority.prepareBootstrap(), scope, "Cash Manager", "123456".toCharArray())
+        val session = authority.authenticate(manager.managerActorId, "123456".toCharArray(), scope)
+        val storage = MemoryStorage()
+        var ledger = CheckoutLedger(storage, authority, scope)
+        ledger.createSale(session, "cash-sale-create", "cash-sale", 100, "USD", 50)
+        check(ledger.eventSnapshot().saleVersions["cash-sale"] == 1L)
+
+        val prepared = ledger.prepareCashPayment(session, "cash-op-1", "cash-sale", "cash-payment-1",
+            120, 59, expectedSaleVersion = 1, expectedRemainingMinor = 100)
+        check(prepared.disposition == CheckoutLedgerCommandDisposition.NEW_COMMIT)
+        check(ledger.getSale("cash-sale").pendingCashPayment == prepared.value)
+        val result = ledger.completePreparedCashPayment(session, prepared.value.completeOperationId, "cash-sale", "cash-payment-1",
+            60, expectedSaleVersion = 2, expectedRemainingMinor = 100)
+        check(result.disposition == CheckoutLedgerCommandDisposition.NEW_COMMIT)
+        check(result.value.amountMinor == 100L && result.value.tenderedMinor == 120L && result.value.changeMinor == 20L)
+        val command = ledger.commandEvents().last()
+        check(command.operationId == prepared.value.completeOperationId && command.eventType == "tender.cash.complete")
+        check(command.attribution?.capabilityId == CheckoutAuthorityCapability.TENDER_BEGIN.id)
+        check(command.attribution?.scope == scope && command.commitIdentity == "cash-sale@3")
+        check(!ledger.eventSnapshot().legacyHistoryUnattributed)
+
+        val committed = checkNotNull(storage.bytes).copyOf()
+        ledger = CheckoutLedger(storage, authority, scope)
+        val replay = ledger.completePreparedCashPayment(session, prepared.value.completeOperationId, "cash-sale", "cash-payment-1",
+            60, expectedSaleVersion = 2, expectedRemainingMinor = 100)
+        check(replay.disposition == CheckoutLedgerCommandDisposition.REPLAY && replay.value == result.value)
+        check(storage.bytes!!.contentEquals(committed) && ledger.commandEvents().size == 3)
+        check(runCatching {
+            ledger.completePreparedCashPayment(session, prepared.value.completeOperationId, "cash-sale", "cash-payment-1",
+                61, expectedSaleVersion = 2, expectedRemainingMinor = 100)
+        }.isFailure)
+        check(storage.bytes!!.contentEquals(committed))
+        check(runCatching { CheckoutLedger(storage, authority, scope.copy(storeId = "other-store")) }.isFailure)
+        check(storage.bytes!!.contentEquals(committed))
+
+        val staleStorage = MemoryStorage()
+        val staleLedger = CheckoutLedger(staleStorage, authority, scope)
+        staleLedger.createSale(session, "stale-sale-create", "stale-cash-sale", 50, "USD", 70)
+        val beforeStale = checkNotNull(staleStorage.bytes).copyOf()
+        authority.lock()
+        check(runCatching {
+            staleLedger.prepareCashPayment(session, "stale-cash-op", "stale-cash-sale", "stale-cash-payment",
+                50, 71, expectedSaleVersion = 1, expectedRemainingMinor = 50)
+        }.isFailure)
+        check(staleStorage.bytes!!.contentEquals(beforeStale))
+        val freshSession = authority.authenticate(manager.managerActorId, "123456".toCharArray(), scope)
+
+        val prewriteStorage = MemoryStorage()
+        val prewriteLedger = CheckoutLedger(prewriteStorage, authority, scope)
+        prewriteLedger.createSale(freshSession, "prewrite-sale-create", "prewrite-sale", 40, "USD", 80)
+        val beforePrewrite = checkNotNull(prewriteStorage.bytes).copyOf()
+        prewriteStorage.failBeforeWrite = true
+        check(runCatching {
+            prewriteLedger.prepareCashPayment(freshSession, "prewrite-cash-op", "prewrite-sale", "prewrite-cash",
+                50, 81, expectedSaleVersion = 1, expectedRemainingMinor = 40)
+        }.exceptionOrNull() is CheckoutLedgerWriteUncertainException)
+        check(prewriteStorage.bytes!!.contentEquals(beforePrewrite))
+        check(CheckoutLedger(prewriteStorage).getSale("prewrite-sale").cashPayments.isEmpty())
+
+        val uncertainStorage = MemoryStorage()
+        val uncertainLedger = CheckoutLedger(uncertainStorage, authority, scope)
+        uncertainLedger.createSale(freshSession, "uncertain-sale-create", "uncertain-sale", 30, "USD", 90)
+        uncertainStorage.failNextWrite = true
+        check(runCatching {
+            uncertainLedger.prepareCashPayment(freshSession, "uncertain-cash-op", "uncertain-sale", "uncertain-cash",
+                35, 91, expectedSaleVersion = 1, expectedRemainingMinor = 30)
+        }.exceptionOrNull() is CheckoutLedgerWriteUncertainException)
+        val recovered = CheckoutLedger(uncertainStorage, authority, scope)
+        check(recovered.getSale("uncertain-sale").cashPayments.isEmpty())
+        check(recovered.getSale("uncertain-sale").pendingCashPayment?.paymentId == "uncertain-cash")
+        check(recovered.commandEvents().last().operationId == "uncertain-cash-op")
+
+        val damaged = checkNotNull(uncertainStorage.bytes).copyOf()
+        damaged[commandOffsets(damaged, "uncertain-cash-op").digest] =
+            (damaged[commandOffsets(damaged, "uncertain-cash-op").digest].toInt() xor 1).toByte()
+        check(runCatching { CheckoutLedger(MemoryStorage().also { it.bytes = damaged }) }.isFailure)
+    }
+
+    private fun cashIntentSurvivesRestartAndFinalizesOnce() {
+        val scope = CheckoutAuthorityScope("merchant-intent", "store-intent", "location-intent", "register-intent", "device-intent")
+        val authority = CheckoutAuthority(LedgerAuthorityStorage(), LedgerAuthorityClock(), defaultIterations = 1_000)
+        val manager = authority.bootstrapManager(authority.prepareBootstrap(), scope, "Intent Manager", "123456".toCharArray())
+        val session = authority.authenticate(manager.managerActorId, "123456".toCharArray(), scope)
+        val storage = MemoryStorage()
+        var ledger = CheckoutLedger(storage, authority, scope)
+        ledger.createSale(session, "intent-sale-create", "intent-sale", 100, "USD", 10)
+        val initialVersion = ledger.eventSnapshot().saleVersions.getValue("intent-sale")
+        val prepared = ledger.prepareCashPayment(session, "cash-prepare-1", "intent-sale", "cash-intent-1",
+            125, 20, initialVersion, 100)
+        check(prepared.disposition == CheckoutLedgerCommandDisposition.NEW_COMMIT)
+        check(prepared.value.status == CashPaymentIntentStatus.PREPARED)
+        check(prepared.value.completeOperationId.startsWith("cash-complete-"))
+        check(prepared.value.cancelOperationId.startsWith("cash-cancel-"))
+        check(ledger.getSale("intent-sale").pendingCashPayment == prepared.value)
+        check(!ledger.canRecordCashPayment("intent-sale"))
+        check(runCatching { ledger.beginCardAttempt("intent-sale", "blocked-card", "square", "blocked-stable", 100) }.isFailure)
+        check(runCatching { ledger.recordCashPayment("intent-sale", "blocked-cash", 100, 21) }.isFailure)
+        check(runCatching {
+            ledger.prepareCashPayment(session, "cash-prepare-2", "intent-sale", "cash-intent-2", 100, 21,
+                initialVersion + 1, 100)
+        }.isFailure)
+
+        ledger = CheckoutLedger(storage, authority, scope)
+        val reopenedIntent = checkNotNull(ledger.getCashPaymentIntent("cash-intent-1"))
+        check(reopenedIntent == prepared.value && ledger.getSale("intent-sale").pendingCashPayment == reopenedIntent)
+        val prepareReplay = ledger.prepareCashPayment(session, "cash-prepare-1", "intent-sale", "cash-intent-1",
+            125, 20, initialVersion, 100)
+        check(prepareReplay.disposition == CheckoutLedgerCommandDisposition.REPLAY && prepareReplay.value == reopenedIntent)
+        check(runCatching {
+            ledger.prepareCashPayment(session, "cash-prepare-1", "intent-sale", "cash-intent-1", 126, 20,
+                initialVersion, 100)
+        }.isFailure)
+
+        val afterPrepareVersion = ledger.eventSnapshot().saleVersions.getValue("intent-sale")
+        val completeOp = reopenedIntent.completeOperationId
+        val completed = ledger.completePreparedCashPayment(session, completeOp, "intent-sale", "cash-intent-1",
+            30, afterPrepareVersion, 100)
+        check(completed.disposition == CheckoutLedgerCommandDisposition.NEW_COMMIT)
+        check(completed.value == CashPayment("cash-intent-1", 100, 125, 25, 30))
+        check(ledger.getSale("intent-sale").let { it.cashPayments.single() == completed.value && it.pendingCashPayment == null })
+        check(ledger.getCashPaymentIntent("cash-intent-1")?.status == CashPaymentIntentStatus.COMPLETED)
+        ledger = CheckoutLedger(storage, authority, scope)
+        val completedReplay = ledger.completePreparedCashPayment(session, completeOp, "intent-sale", "cash-intent-1",
+            30, afterPrepareVersion, 100)
+        check(completedReplay.disposition == CheckoutLedgerCommandDisposition.REPLAY && completedReplay.value == completed.value)
+        check(ledger.getSale("intent-sale").cashPayments.size == 1)
+        check(runCatching {
+            ledger.completePreparedCashPayment(session, completeOp, "intent-sale", "cash-intent-1", 31, afterPrepareVersion, 100)
+        }.isFailure)
+
+        ledger.createSale(session, "cancel-sale-create", "cancel-sale", 100, "USD", 40)
+        val cancelInitialVersion = ledger.eventSnapshot().saleVersions.getValue("cancel-sale")
+        val cancelPrepared = ledger.prepareCashPayment(session, "cash-prepare-cancel", "cancel-sale", "cash-intent-cancel",
+            100, 41, cancelInitialVersion, 100).value
+        ledger = CheckoutLedger(storage, authority, scope)
+        val cancelPreparedVersion = ledger.eventSnapshot().saleVersions.getValue("cancel-sale")
+        val cancelOp = cancelPrepared.cancelOperationId
+        val canceled = ledger.cancelPreparedCashPayment(session, cancelOp, "cancel-sale", "cash-intent-cancel",
+            42, cancelPreparedVersion)
+        check(canceled.disposition == CheckoutLedgerCommandDisposition.NEW_COMMIT)
+        check(canceled.value.status == CashPaymentIntentStatus.CANCELED && canceled.value.canceledAt == 42L)
+        check(ledger.getSale("cancel-sale").let { it.pendingCashPayment == null && it.cashPayments.isEmpty() })
+        val cancelReplay = ledger.cancelPreparedCashPayment(session, cancelOp, "cancel-sale", "cash-intent-cancel",
+            42, cancelPreparedVersion)
+        check(cancelReplay.disposition == CheckoutLedgerCommandDisposition.REPLAY && cancelReplay.value == canceled.value)
+        check(runCatching {
+            ledger.cancelPreparedCashPayment(session, cancelOp, "cancel-sale", "cash-intent-cancel", 43, cancelPreparedVersion)
+        }.isFailure)
+
+        val afterCancelVersion = ledger.eventSnapshot().saleVersions.getValue("cancel-sale")
+        val retry = ledger.prepareCashPayment(session, "cash-prepare-after-cancel", "cancel-sale", "cash-intent-retry",
+            100, 44, afterCancelVersion, 100)
+        check(retry.disposition == CheckoutLedgerCommandDisposition.NEW_COMMIT)
+        check(ledger.getSale("cancel-sale").pendingCashPayment?.paymentId == "cash-intent-retry")
+        val retryVersion = ledger.eventSnapshot().saleVersions.getValue("cancel-sale")
+        val retryPaid = ledger.completePreparedCashPayment(session, retry.value.completeOperationId,
+            "cancel-sale", "cash-intent-retry", 45, retryVersion, 100)
+        check(retryPaid.value.amountMinor == 100L && ledger.getSale("cancel-sale").cashPayments.single() == retryPaid.value)
+        val reopened = CheckoutLedger(storage)
+        check(reopened.getCashPaymentIntent("cash-intent-cancel")?.status == CashPaymentIntentStatus.CANCELED)
+        check(reopened.getCashPaymentIntent("cash-intent-retry")?.status == CashPaymentIntentStatus.COMPLETED)
+
+        val uncertainStorage = MemoryStorage()
+        val uncertainLedger = CheckoutLedger(uncertainStorage, authority, scope)
+        uncertainLedger.createSale(session, "uncertain-intent-sale", "uncertain-intent-sale", 60, "USD", 50)
+        val uncertainStartVersion = uncertainLedger.eventSnapshot().saleVersions.getValue("uncertain-intent-sale")
+        val uncertainPrepared = uncertainLedger.prepareCashPayment(session, "uncertain-intent-prepare", "uncertain-intent-sale",
+            "uncertain-intent-payment", 60, 51, uncertainStartVersion, 60).value
+        val uncertainPrepareVersion = uncertainLedger.eventSnapshot().saleVersions.getValue("uncertain-intent-sale")
+        uncertainStorage.failNextWrite = true
+        check(runCatching {
+            uncertainLedger.completePreparedCashPayment(session, uncertainPrepared.completeOperationId, "uncertain-intent-sale",
+                "uncertain-intent-payment", 52, uncertainPrepareVersion, 60)
+        }.exceptionOrNull() is CheckoutLedgerWriteUncertainException)
+        val uncertainReopened = CheckoutLedger(uncertainStorage, authority, scope)
+        check(uncertainReopened.getSale("uncertain-intent-sale").cashPayments.single().paymentId == "uncertain-intent-payment")
+        val uncertainReplay = uncertainReopened.completePreparedCashPayment(session, uncertainPrepared.completeOperationId,
+            "uncertain-intent-sale", "uncertain-intent-payment", 52, uncertainPrepareVersion, 60)
+        check(uncertainReplay.disposition == CheckoutLedgerCommandDisposition.REPLAY)
+        check(uncertainReopened.getSale("uncertain-intent-sale").cashPayments.size == 1)
+    }
+
+    private fun cashIntentReconcilesLateTenderEvidence() {
+        val scope = CheckoutAuthorityScope("merchant-late-cash", "store-late-cash", "location-late-cash", "register-late-cash", "device-late-cash")
+        val authority = CheckoutAuthority(LedgerAuthorityStorage(), LedgerAuthorityClock(), defaultIterations = 1_000)
+        val manager = authority.bootstrapManager(authority.prepareBootstrap(), scope, "Late Cash Manager", "123456".toCharArray())
+        val session = authority.authenticate(manager.managerActorId, "123456".toCharArray(), scope)
+
+        val partialStorage = MemoryStorage()
+        var partialLedger = CheckoutLedger(partialStorage, authority, scope)
+        partialLedger.createSale(session, "late-partial-sale", "late-partial-sale", 100, "USD", 10)
+        partialLedger.beginBitcoinAttempt("late-partial-sale", "late-partial-btc", 7001, 100, 1000, "late-partial-quote", 11)
+        partialLedger.requestCancellation("late-partial-sale", "late-partial-btc")
+        partialLedger.acknowledgeBitcoinCancellation("late-partial-sale", "late-partial-btc")
+        val beforePrepareVersion = partialLedger.eventSnapshot().saleVersions.getValue("late-partial-sale")
+        val prepared = partialLedger.prepareCashPayment(session, "late-partial-prepare", "late-partial-sale", "late-partial-cash",
+            100, 20, beforePrepareVersion, 100)
+        val staleVersion = partialLedger.eventSnapshot().saleVersions.getValue("late-partial-sale")
+        partialLedger.recordBitcoinEvidence("late-partial-sale", "late-partial-btc", "late-partial-output", "late-partial-tx:0",
+            400, 1, 1, 21)
+        check(partialLedger.getSale("late-partial-sale").remainingMinor == 60L)
+        check(runCatching {
+            partialLedger.completePreparedCashPayment(session, prepared.value.completeOperationId, "late-partial-sale",
+                "late-partial-cash", 22, staleVersion, 100)
+        }.isFailure) // stale version and balance are rejected before commit
+        val freshVersion = partialLedger.eventSnapshot().saleVersions.getValue("late-partial-sale")
+        val partialComplete = partialLedger.completePreparedCashPayment(session, prepared.value.completeOperationId,
+            "late-partial-sale", "late-partial-cash", 23, freshVersion, 60)
+        check(partialComplete.disposition == CheckoutLedgerCommandDisposition.NEW_COMMIT)
+        check(partialComplete.value == CashPayment("late-partial-cash", 60, 100, 40, 23))
+        partialLedger = CheckoutLedger(partialStorage, authority, scope)
+        check(partialLedger.getSale("late-partial-sale").let {
+            it.cashPayments.single() == partialComplete.value && it.receivedMinor == 100L && it.remainingMinor == 0L
+        })
+        check(partialLedger.getCashPaymentIntent("late-partial-cash")?.completedExpectedRemainingMinor == 60L)
+
+        val fullStorage = MemoryStorage()
+        var fullLedger = CheckoutLedger(fullStorage, authority, scope)
+        fullLedger.createSale(session, "late-full-sale", "late-full-sale", 100, "USD", 30)
+        fullLedger.beginBitcoinAttempt("late-full-sale", "late-full-btc", 7002, 100, 1000, "late-full-quote", 31)
+        fullLedger.requestCancellation("late-full-sale", "late-full-btc")
+        fullLedger.acknowledgeBitcoinCancellation("late-full-sale", "late-full-btc")
+        val fullPrepareVersion = fullLedger.eventSnapshot().saleVersions.getValue("late-full-sale")
+        val fullPrepared = fullLedger.prepareCashPayment(session, "late-full-prepare", "late-full-sale", "late-full-cash",
+            100, 40, fullPrepareVersion, 100)
+        fullLedger.recordBitcoinEvidence("late-full-sale", "late-full-btc", "late-full-output", "late-full-tx:0",
+            1000, 1, 1, 41)
+        val fullCompletionVersion = fullLedger.eventSnapshot().saleVersions.getValue("late-full-sale")
+        val fullyReturned = fullLedger.completePreparedCashPayment(session, fullPrepared.value.completeOperationId,
+            "late-full-sale", "late-full-cash", 42, fullCompletionVersion, 0)
+        check(fullyReturned.value == CashPayment("late-full-cash", 0, 100, 100, 42))
+        fullLedger = CheckoutLedger(fullStorage, authority, scope)
+        check(fullLedger.getSale("late-full-sale").cashPayments.single() == fullyReturned.value)
+        check(fullLedger.getCashPaymentIntent("late-full-cash")?.completedExpectedRemainingMinor == 0L)
+
+        val risingStorage = MemoryStorage()
+        var risingLedger = CheckoutLedger(risingStorage, authority, scope)
+        risingLedger.createSale(session, "late-rising-sale", "late-rising-sale", 100, "USD", 50)
+        risingLedger.beginCardAttempt("late-rising-sale", "late-rising-card", "square-sandbox", "late-rising-stable", 100)
+        risingLedger.recordCardEvidence("late-rising-sale", "late-rising-card", "late-rising-card-event",
+            "late-rising-stable", CardResult.COMPLETED, 40, 51)
+        val risingPrepareVersion = risingLedger.eventSnapshot().saleVersions.getValue("late-rising-sale")
+        val risingPrepared = risingLedger.prepareCashPayment(session, "late-rising-prepare", "late-rising-sale",
+            "late-rising-cash", 60, 52, risingPrepareVersion, 60)
+        val staleRisingVersion = risingLedger.eventSnapshot().saleVersions.getValue("late-rising-sale")
+        risingLedger.recordCardEvidence("late-rising-sale", "late-rising-card", "late-rising-card-event",
+            "late-rising-stable", CardResult.FAILED, 0, 53)
+        check(risingLedger.getSale("late-rising-sale").remainingMinor == 100L)
+        check(runCatching {
+            risingLedger.completePreparedCashPayment(session, risingPrepared.value.completeOperationId,
+                "late-rising-sale", "late-rising-cash", 54, staleRisingVersion, 60)
+        }.isFailure) // stale prepared-balance snapshot cannot finalize
+        val freshRisingVersion = risingLedger.eventSnapshot().saleVersions.getValue("late-rising-sale")
+        val risingComplete = risingLedger.completePreparedCashPayment(session, risingPrepared.value.completeOperationId,
+            "late-rising-sale", "late-rising-cash", 55, freshRisingVersion, 100)
+        check(risingComplete.value == CashPayment("late-rising-cash", 60, 60, 0, 55))
+        risingLedger.recordCardEvidence("late-rising-sale", "late-rising-card", "late-rising-card-event",
+            "late-rising-stable", CardResult.COMPLETED, 20, 56)
+        check(risingLedger.getSale("late-rising-sale").let { it.receivedMinor == 80L && it.remainingMinor == 20L })
+        val completedBytes = checkNotNull(risingStorage.bytes).copyOf()
+        val badTerminalRemaining = completedBytes.copyOf().also { bytes ->
+            var cursor = findLastEncodedString(bytes, "late-rising-cash")
+            cursor = skipEncodedString(bytes, cursor) // payment id
+            cursor = skipEncodedString(bytes, cursor) // sale id
+            cursor += 8 + 8 + 8 + 8 // tender, prepare time, prepare version, prepare balance
+            cursor = skipEncodedString(bytes, cursor) // prepare operation
+            cursor += 4 // status
+            cursor += 9 // completion expected version
+            cursor += 9 // completion time
+            check(bytes[cursor].toInt() == 1)
+            writeLong(bytes, cursor + 1, 30L)
+        }
+        check(runCatching { CheckoutLedger(MemoryStorage().also { it.bytes = badTerminalRemaining }) }.isFailure)
+        val badTerminalPayment = completedBytes.copyOf().also { bytes ->
+            val amountOffset = findEncodedString(bytes, "late-rising-cash") + encodeString("late-rising-cash").size
+            writeLong(bytes, amountOffset, 59L)
+            writeLong(bytes, amountOffset + 16, 1L)
+        }
+        check(runCatching { CheckoutLedger(MemoryStorage().also { it.bytes = badTerminalPayment }) }.isFailure)
+        val badCompletionDigest = completedBytes.copyOf().also { bytes ->
+            val digestOffset = commandOffsets(bytes, risingPrepared.value.completeOperationId).digest
+            bytes[digestOffset] = (bytes[digestOffset].toInt() xor 1).toByte()
+        }
+        check(runCatching { CheckoutLedger(MemoryStorage().also { it.bytes = badCompletionDigest }) }.isFailure)
+        risingLedger = CheckoutLedger(risingStorage, authority, scope)
+        check(risingLedger.getSale("late-rising-sale").let {
+            it.cashPayments.single() == risingComplete.value && it.receivedMinor == 80L && it.remainingMinor == 20L
+        })
+        check(risingLedger.getCashPaymentIntent("late-rising-cash")?.completedExpectedRemainingMinor == 100L)
+
+        val forgedStorage = MemoryStorage()
+        val forgedLedger = CheckoutLedger(forgedStorage)
+        forgedLedger.createSale("forged-zero-sale", 100, "USD", 50)
+        forgedLedger.recordCashPayment("forged-zero-sale", "forged-zero-cash", 100, 51)
+        val forged = checkNotNull(forgedStorage.bytes).copyOf()
+        val amountOffset = findEncodedString(forged, "forged-zero-cash") + encodeString("forged-zero-cash").size
+        writeLong(forged, amountOffset, 0L)
+        writeLong(forged, amountOffset + 16, 100L)
+        check(runCatching { CheckoutLedger(MemoryStorage().also { it.bytes = forged }) }.isFailure)
+    }
+
+    private fun recordCashWithIntent(
+        ledger: CheckoutLedger,
+        session: CheckoutAuthoritySession,
+        prepareOperationId: String,
+        saleId: String,
+        paymentId: String,
+        tenderedMinor: Long,
+        preparedAt: Long,
+        completedAt: Long,
+        expectedSaleVersion: Long,
+        expectedRemainingMinor: Long,
+    ): CheckoutLedgerCommandResult<CashPayment> {
+        val prepared = ledger.prepareCashPayment(session, prepareOperationId, saleId, paymentId,
+            tenderedMinor, preparedAt, expectedSaleVersion, expectedRemainingMinor)
+        return ledger.completePreparedCashPayment(session, prepared.value.completeOperationId, saleId,
+            paymentId, completedAt, Math.addExact(expectedSaleVersion, 1L), expectedRemainingMinor)
     }
 
     private fun twoSaleCommandLedgerBytes(): ByteArray {
@@ -550,7 +1027,7 @@ object CheckoutLedgerTest {
         return MessageDigest.getInstance("SHA-256").digest(bytes)
     }
 
-    private data class CommandOffsets(val origin: Int, val target: Int, val digest: Int)
+    private data class CommandOffsets(val origin: Int, val target: Int, val digest: Int, val commit: Int)
 
     private fun commandOffsets(bytes: ByteArray, operationId: String): CommandOffsets {
         var cursor = findEncodedString(bytes, operationId) + encodeString(operationId).size
@@ -569,12 +1046,29 @@ object CheckoutLedgerTest {
         val targetOffset = cursor
         cursor = skipEncodedString(bytes, cursor)
         check(readInt(bytes, cursor) == 32)
-        return CommandOffsets(originOffset, targetOffset, cursor + 4)
+        val digestOffset = cursor + 4
+        cursor = skipNullableString(bytes, digestOffset + 32)
+        cursor = skipNullableString(bytes, cursor)
+        cursor = if (bytes[cursor].toInt() == 0) cursor + 1 else cursor + 9 // source observed time
+        cursor += 8 // recordedAtMillis
+        return CommandOffsets(originOffset, targetOffset, digestOffset, cursor)
     }
+
+    private fun skipNullableString(bytes: ByteArray, offset: Int): Int =
+        if (bytes[offset].toInt() == 0) offset + 1 else skipEncodedString(bytes, offset + 1)
 
     private fun skipEncodedString(bytes: ByteArray, offset: Int): Int = offset + 4 + readInt(bytes, offset)
 
     private fun findEncodedString(bytes: ByteArray, value: String): Int = findBytes(bytes, encodeString(value), 0)
+
+    private fun findLastEncodedString(bytes: ByteArray, value: String): Int {
+        val encoded = encodeString(value)
+        var found = -1
+        for (start in 0..bytes.size - encoded.size) {
+            if (encoded.indices.all { bytes[start + it] == encoded[it] }) found = start
+        }
+        return checkNotNull(found.takeIf { it >= 0 }) { "encoded test value was not found" }
+    }
 
     private fun replaceEncodedString(bytes: ByteArray, old: String, replacement: String) {
         require(old.toByteArray(Charsets.UTF_8).size == replacement.toByteArray(Charsets.UTF_8).size)
@@ -585,6 +1079,16 @@ object CheckoutLedgerTest {
         val encoded = encodeString(replacement)
         require(readInt(bytes, offset) == encoded.size - 4)
         encoded.copyInto(bytes, offset)
+    }
+
+    private fun replaceEncodedStringResizing(bytes: ByteArray, offset: Int, replacement: String): ByteArray {
+        val oldSize = 4 + readInt(bytes, offset)
+        val encoded = encodeString(replacement)
+        return ByteArray(bytes.size - oldSize + encoded.size).also { result ->
+            bytes.copyInto(result, 0, 0, offset)
+            encoded.copyInto(result, offset)
+            bytes.copyInto(result, offset + encoded.size, offset + oldSize, bytes.size)
+        }
     }
 
     private fun encodeString(value: String): ByteArray {
@@ -600,6 +1104,10 @@ object CheckoutLedgerTest {
     private fun writeInt(bytes: ByteArray, offset: Int, value: Int) {
         bytes[offset] = (value ushr 24).toByte(); bytes[offset + 1] = (value ushr 16).toByte()
         bytes[offset + 2] = (value ushr 8).toByte(); bytes[offset + 3] = value.toByte()
+    }
+
+    private fun writeLong(bytes: ByteArray, offset: Int, value: Long) {
+        repeat(8) { index -> bytes[offset + index] = (value ushr ((7 - index) * 8)).toByte() }
     }
 
     private fun findBytes(bytes: ByteArray, needle: ByteArray, fromIndex: Int): Int {
@@ -721,8 +1229,10 @@ object CheckoutLedgerTest {
     private class MemoryStorage : DurableLedgerStorage {
         var bytes: ByteArray? = null
         var failNextWrite = false
+        var failBeforeWrite = false
         override fun read(): ByteArray? = bytes?.copyOf()
         override fun writeAtomically(bytes: ByteArray) {
+            if (failBeforeWrite) { failBeforeWrite = false; error("simulated pre-write failure") }
             if (failNextWrite) { failNextWrite = false; this.bytes = bytes.copyOf(); error("simulated post-commit write failure") }
             this.bytes = bytes.copyOf()
         }

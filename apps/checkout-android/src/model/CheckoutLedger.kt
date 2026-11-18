@@ -14,6 +14,7 @@ import java.nio.file.StandardOpenOption
 import java.security.MessageDigest
 import java.util.Collections
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 
 private const val MAX_LEDGER_FILE_BYTES = 4 * 1024 * 1024
 
@@ -23,13 +24,54 @@ private class LegacyRefundUnverifiableException(message: String) : IllegalStateE
 interface DurableLedgerStorage {
     fun read(): ByteArray?
     fun writeAtomically(bytes: ByteArray)
+
+    /** Production adapters must override this with process and OS file locking. */
+    fun compareAndSwap(expectedBytes: ByteArray?, nextBytes: ByteArray): Boolean = synchronized(DurableLedgerStorage::class.java) {
+        val current = read()
+        val matches = if (current == null || expectedBytes == null) current == null && expectedBytes == null
+        else MessageDigest.isEqual(current, expectedBytes)
+        if (!matches) return@synchronized false
+        writeAtomically(nextBytes)
+        true
+    }
 }
 
 /** JVM/desktop implementation. Android should provide an adapter using its app-private files dir. */
 class NioLedgerStorage(private val file: Path) : DurableLedgerStorage {
     override fun read(): ByteArray? {
-        if (!Files.exists(file)) return null
-        Files.newInputStream(file).use { input ->
+        return readBounded(canonicalFile())
+    }
+
+    override fun writeAtomically(bytes: ByteArray) {
+        atomicWrite(canonicalFile(), bytes)
+    }
+
+    override fun compareAndSwap(expectedBytes: ByteArray?, nextBytes: ByteArray): Boolean {
+        require(nextBytes.size <= MAX_LEDGER_FILE_BYTES) { "ledger exceeds storage limit" }
+        val target = canonicalFile()
+        val parent = target.parent
+        Files.createDirectories(parent)
+        val mutex = processLocks.computeIfAbsent(target.toString()) { Any() }
+        return synchronized(mutex) {
+            val lockPath = parent.resolve(".${target.fileName}.lock")
+            FileChannel.open(lockPath, StandardOpenOption.CREATE, StandardOpenOption.WRITE).use { channel ->
+                channel.lock().use {
+                    val current = readBounded(target)
+                    val matches = if (current == null || expectedBytes == null) current == null && expectedBytes == null
+                    else MessageDigest.isEqual(current, expectedBytes)
+                    if (!matches) return@synchronized false
+                    atomicWrite(target, nextBytes)
+                    true
+                }
+            }
+        }
+    }
+
+    private fun canonicalFile(): Path = file.toFile().canonicalFile.toPath()
+
+    private fun readBounded(path: Path): ByteArray? {
+        if (!Files.exists(path)) return null
+        Files.newInputStream(path).use { input ->
             val out = ByteArrayOutputStream()
             val chunk = ByteArray(8192)
             while (true) {
@@ -42,9 +84,9 @@ class NioLedgerStorage(private val file: Path) : DurableLedgerStorage {
         }
     }
 
-    override fun writeAtomically(bytes: ByteArray) {
+    private fun atomicWrite(target: Path, bytes: ByteArray) {
         require(bytes.size <= MAX_LEDGER_FILE_BYTES) { "ledger exceeds storage limit" }
-        val parent = file.toAbsolutePath().parent
+        val parent = target.parent
         Files.createDirectories(parent)
         val temp = Files.createTempFile(parent, ".checkout-ledger-", ".tmp")
         try {
@@ -53,10 +95,14 @@ class NioLedgerStorage(private val file: Path) : DurableLedgerStorage {
                 while (buffer.hasRemaining()) ch.write(buffer)
                 ch.force(true)
             }
-            Files.move(temp, file, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
+            Files.move(temp, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
             // Persist the directory entry; report failure as an uncertain write outcome.
             FileChannel.open(parent, StandardOpenOption.READ).use { it.force(true) }
         } finally { Files.deleteIfExists(temp) }
+    }
+
+    private companion object {
+        val processLocks = ConcurrentHashMap<String, Any>()
     }
 
 }
@@ -135,6 +181,26 @@ data class CashPayment(
     val recordedAt: Long,
 )
 
+enum class CashPaymentIntentStatus { PREPARED, COMPLETED, CANCELED }
+
+/** Durable cash handover identity; completion/cancel operation IDs remain stable across process death. */
+data class CashPaymentIntent(
+    val saleId: String,
+    val paymentId: String,
+    val tenderedMinor: Long,
+    val preparedAt: Long,
+    val expectedSaleVersion: Long,
+    val expectedRemainingMinor: Long,
+    val status: CashPaymentIntentStatus,
+    val prepareOperationId: String,
+    val completeOperationId: String,
+    val cancelOperationId: String,
+    val completedAt: Long? = null,
+    val completedExpectedSaleVersion: Long? = null,
+    val completedExpectedRemainingMinor: Long? = null,
+    val canceledAt: Long? = null,
+)
+
 /** Immutable line snapshot used to reproduce the exact basket after restart. */
 data class SaleItem(
     val productId: String,
@@ -160,6 +226,7 @@ data class Sale(
     val items: List<SaleItem> = emptyList(),
     val cashPayments: List<CashPayment> = emptyList(),
     val pricing: CheckoutPricingSnapshot? = null,
+    val pendingCashPayment: CashPaymentIntent? = null,
 )
 
 enum class CheckoutEventType { SALE_CREATED, PAYMENT_CHANGED, REFUND_CHANGED }
@@ -173,8 +240,10 @@ data class EventPage(val events: List<CheckoutEvent>, val highWater: Long, val f
 
 /** Stable attempt identifiers and sale state. Every successful mutation is durable on return. */
 enum class CheckoutLedgerEventOrigin { HUMAN, SYSTEM }
+enum class CheckoutLedgerCommandDisposition { NEW_COMMIT, REPLAY }
+data class CheckoutLedgerCommandResult<T>(val value: T, val disposition: CheckoutLedgerCommandDisposition)
 
-/** A v8 durable command envelope. SYSTEM is reserved for a future typed observation writer. */
+/** A versioned durable command envelope. SYSTEM remains reserved for a future typed observation writer. */
 internal data class CheckoutLedgerCommandEvent(
     val sequence: Long,
     val operationId: String,
@@ -213,13 +282,18 @@ private data class PendingLedgerCommand(
 class CheckoutLedgerWriteUncertainException(cause: Throwable) :
     IllegalStateException("ledger write outcome is uncertain; reopen before continuing", cause)
 
+class CheckoutLedgerConcurrentWriteException :
+    IllegalStateException("ledger changed in another instance; reopen before continuing")
+
 class CheckoutLedger(
     private val storage: DurableLedgerStorage,
     initialCommandAuthority: CheckoutAuthority? = null,
     initialCommandScope: CheckoutAuthorityScope? = null,
 ) {
     private val lock = Any()
-    private var state: State = decode(storage.read())
+    /** Exact bytes read at open, retained separately from normalized in-memory v2-v9 state. */
+    private var rawBytes: ByteArray? = storage.read()?.copyOf()
+    private var state: State = decode(rawBytes)
     private var poisoned = false
     private var stableSaleCallbackActive = false
     private var activeCommand: PendingLedgerCommand? = null
@@ -265,13 +339,9 @@ class CheckoutLedger(
             state.eventEpoch = UUID.randomUUID().toString()
             state.events.clear(); state.eventHighWater = 0; state.eventFloor = 0
             state.saleVersions.clear()
-            state.sales.keys.forEach { state.saleVersions[it] = 0L }
+            state.sales.keys.forEach { id -> state.saleVersions[id] = state.coverageBaselines[id]?.version ?: 0L }
             val next = try { encode(state) } catch (e: Throwable) { state = decode(before); throw e }
-            try { storage.writeAtomically(next) } catch (e: Throwable) {
-                poisoned = true
-                try { state = decode(storage.read()) } catch (_: Throwable) { }
-                throw CheckoutLedgerWriteUncertainException(e)
-            }
+            commit(next)
         }
         eventSnapshotLocked()
     }
@@ -321,7 +391,7 @@ class CheckoutLedger(
         replay = { getSale(saleId) },
     ) { createSale(saleId, amountMinor, currency, createdAt, items) }
 
-    /** Compatibility API; resulting rows are v8 legacy/unattributed history. */
+    /** Compatibility API; resulting writes are explicitly legacy/unattributed. */
     fun createSale(saleId: String, amountMinor: Long, currency: String, createdAt: Long,
                    items: List<SaleItem> = emptyList()): Sale = createSaleInternal(saleId, amountMinor, currency, createdAt, items, null)
 
@@ -366,7 +436,7 @@ class CheckoutLedger(
     }
 
     /** Must complete before invoking the external receiver/payment SDK. counterIndex is the existing payment request index. */
-    /** Compatibility API; resulting rows are v8 legacy/unattributed history. */
+    /** Compatibility API; resulting writes are explicitly legacy/unattributed. */
     fun beginBitcoinAttempt(saleId: String, attemptId: String, counterIndex: Long, expectedMinor: Long,
                             expectedSats: Long, quoteId: String, quotedAt: Long): PaymentAttempt = mutate {
         val sale = sale(saleId); validId(attemptId, "attempt id"); positive(expectedMinor, "attempt amount")
@@ -381,8 +451,9 @@ class CheckoutLedger(
         sale.attempts.add(a); attemptView(a)
     }
 
+
     /** Persist the stable provider id before calling the card SDK. */
-    /** Compatibility API; resulting rows are v8 legacy/unattributed history. */
+    /** Compatibility API; resulting writes are explicitly legacy/unattributed. */
     fun beginCardAttempt(saleId: String, attemptId: String, provider: String, stableId: String, amountMinor: Long): PaymentAttempt = mutate {
         val sale = sale(saleId); validId(attemptId, "attempt id"); validId(stableId, "provider idempotency id")
         validText(provider, "provider"); positive(amountMinor, "attempt amount")
@@ -396,9 +467,23 @@ class CheckoutLedger(
         sale.attempts.add(a); attemptView(a)
     }
 
+
     /** Records a manual cash acknowledgment. This records operator input, not processor or cash verification. */
-    /** Compatibility API; resulting rows are v8 legacy/unattributed history. */
+    /** Compatibility API; resulting writes are explicitly legacy/unattributed. */
     fun recordCashPayment(saleId: String, paymentId: String, tenderedMinor: Long, recordedAt: Long): CashPayment = mutate {
+        recordCashPaymentInState(saleId, paymentId, tenderedMinor, recordedAt)
+    }
+
+    private fun recordCashPaymentInState(
+        saleId: String,
+        paymentId: String,
+        tenderedMinor: Long,
+        recordedAt: Long,
+        allowPreparedPaymentId: String? = null,
+        expectedRemainingMinor: Long? = null,
+        allowZeroApplied: Boolean = false,
+        allowPreparedCompletion: Boolean = false,
+    ): CashPayment {
         val sale = sale(saleId)
         validId(paymentId, "cash payment id"); positive(tenderedMinor, "cash tendered amount")
         require(recordedAt >= 0) { "invalid cash payment time" }
@@ -407,19 +492,142 @@ class CheckoutLedger(
             require(prior.first == saleId && prior.second.tenderedMinor == tenderedMinor && prior.second.recordedAt == recordedAt) {
                 "cash payment id was already used with different details"
             }
-            return@mutate prior.second
+            return prior.second
         }
+        val priorIntent = state.cashIntents[paymentId]
+        require(priorIntent == null || (paymentId == allowPreparedPaymentId &&
+            priorIntent.status == CashPaymentIntentStatus.PREPARED)) { "cash payment ID belongs to a finalized intent" }
         require(sale.cashPayments.size < MAX_CASH_PAYMENTS) { "cash payment limit reached" }
         require(sale.currency == "USD") { "cash payments are supported only for USD sales" }
         val current = view(sale)
-        require(!current.requiresReview) { "sale requires review before cash payment" }
-        require(canStartTender(sale)) { "another payment attempt must be resolved first" }
-        require(current.remainingMinor > 0) { "sale has no remaining balance" }
-        require(tenderedMinor >= current.remainingMinor) { "cash tendered is less than remaining balance" }
-        val change = Math.subtractExact(tenderedMinor, current.remainingMinor)
-        val payment = CashPayment(paymentId, current.remainingMinor, tenderedMinor, change, recordedAt)
+        require(!current.requiresReview || allowPreparedCompletion) { "sale requires review before cash payment" }
+        require(canStartTender(sale, allowPreparedPaymentId, ignoreExistingAttempts = allowPreparedCompletion)) {
+            "another payment attempt or cash handover must be resolved first"
+        }
+        val remainingMinor = current.remainingMinor
+        require(expectedRemainingMinor == null || remainingMinor == expectedRemainingMinor) { "cash balance changed before recording" }
+        val appliedMinor = if (allowPreparedCompletion) minOf(tenderedMinor, remainingMinor) else remainingMinor
+        require(appliedMinor > 0 || allowZeroApplied) { "sale has no remaining balance" }
+        require(allowPreparedCompletion || tenderedMinor >= appliedMinor) { "cash tendered is less than remaining balance" }
+        val change = Math.subtractExact(tenderedMinor, appliedMinor)
+        val payment = CashPayment(paymentId, appliedMinor, tenderedMinor, change, recordedAt)
         sale.cashPayments.add(payment)
-        payment
+        return payment
+    }
+
+    fun prepareCashPayment(
+        session: CheckoutAuthoritySession,
+        operationId: String,
+        saleId: String,
+        paymentId: String,
+        tenderedMinor: Long,
+        preparedAt: Long,
+        expectedSaleVersion: Long,
+        expectedRemainingMinor: Long,
+    ): CheckoutLedgerCommandResult<CashPaymentIntent> {
+        val digest = cashPrepareDigest(saleId, paymentId, tenderedMinor, preparedAt,
+            expectedSaleVersion, expectedRemainingMinor)
+        return humanCommandWithDisposition(session, operationId, CheckoutAuthorityCapability.TENDER_BEGIN,
+            "tender.cash.prepare", paymentId, digest,
+            replay = { cashIntentView(state.cashIntents[paymentId] ?: error("cash payment intent not found")) }) {
+            mutate {
+                validId(paymentId, "cash payment id")
+                require(paymentId.length <= MAX_CASH_INTENT_PAYMENT_ID_CHARS) { "cash payment id is too long for stable completion IDs" }
+                val sale = sale(saleId)
+                positive(tenderedMinor, "cash tendered amount"); nonnegative(preparedAt, "cash preparation time")
+                nonnegative(expectedSaleVersion, "expected sale version"); positive(expectedRemainingMinor, "expected remaining balance")
+                require(sale.currency == "USD") { "cash payments are supported only for USD sales" }
+                require(sale.cashPayments.size < MAX_CASH_PAYMENTS) { "cash payment limit reached" }
+                require(currentSaleVersion(saleId) == expectedSaleVersion) { "sale changed before cash was prepared" }
+                require(view(sale).remainingMinor == expectedRemainingMinor) { "cash balance changed before preparation" }
+                require(tenderedMinor >= expectedRemainingMinor) { "cash tendered is less than remaining balance" }
+                require(!view(sale).requiresReview && canStartTender(sale)) { "sale cannot accept a cash handover" }
+                require(state.cashIntents.size < MAX_CASH_INTENTS) { "cash payment intent limit reached" }
+                require(state.cashIntents[paymentId] == null && state.sales.values.none { other ->
+                    other.cashPayments.any { it.paymentId == paymentId }
+                }) { "cash payment id was already used" }
+                val intent = CashIntentData(saleId, paymentId, tenderedMinor, preparedAt,
+                    expectedSaleVersion, expectedRemainingMinor, operationId)
+                state.cashIntents[paymentId] = intent
+                cashIntentView(intent)
+            }
+        }
+    }
+
+    fun completePreparedCashPayment(
+        session: CheckoutAuthoritySession,
+        operationId: String,
+        saleId: String,
+        paymentId: String,
+        completedAt: Long,
+        expectedSaleVersion: Long,
+        expectedRemainingMinor: Long,
+    ): CheckoutLedgerCommandResult<CashPayment> = synchronized(lock) {
+        ensureHealthy()
+        val intent = state.cashIntents[paymentId] ?: error("cash payment intent not found")
+        require(intent.saleId == saleId) { "cash intent does not match sale" }
+        val digest = cashCompleteDigest(intent, completedAt, expectedSaleVersion, expectedRemainingMinor)
+        humanCommandWithDisposition(session, operationId, CheckoutAuthorityCapability.TENDER_BEGIN,
+            "tender.cash.complete", paymentId, digest,
+            replay = { sale(saleId).cashPayments.firstOrNull { it.paymentId == paymentId } ?: error("cash payment not found") }) {
+            mutate {
+                require(operationId == cashIntentOperationId("complete", paymentId)) { "cash completion operation ID is not stable" }
+                require(intent.saleId == saleId && intent.paymentId == paymentId) { "cash intent does not match sale" }
+                require(intent.status == CashPaymentIntentStatus.PREPARED) { "cash intent is not pending" }
+                nonnegative(completedAt, "cash completion time")
+                nonnegative(expectedSaleVersion, "expected sale version")
+                nonnegative(expectedRemainingMinor, "expected remaining balance")
+                require(completedAt >= intent.preparedAt) { "cash completion time precedes preparation" }
+                require(currentSaleVersion(saleId) == expectedSaleVersion) { "sale changed before cash was completed" }
+                require(expectedSaleVersion > intent.expectedSaleVersion) { "cash intent version is stale" }
+                require(view(sale(saleId)).remainingMinor == expectedRemainingMinor) { "cash balance changed before completion" }
+                val payment = recordCashPaymentInState(saleId, paymentId, intent.tenderedMinor,
+                    completedAt, allowPreparedPaymentId = paymentId,
+                    expectedRemainingMinor = expectedRemainingMinor, allowZeroApplied = true,
+                    allowPreparedCompletion = true)
+                intent.status = CashPaymentIntentStatus.COMPLETED
+                intent.completeExpectedSaleVersion = expectedSaleVersion
+                intent.completedAt = completedAt
+                intent.completeExpectedRemainingMinor = expectedRemainingMinor
+                payment
+            }
+        }
+    }
+
+    fun cancelPreparedCashPayment(
+        session: CheckoutAuthoritySession,
+        operationId: String,
+        saleId: String,
+        paymentId: String,
+        canceledAt: Long,
+        expectedSaleVersion: Long,
+    ): CheckoutLedgerCommandResult<CashPaymentIntent> = synchronized(lock) {
+        ensureHealthy()
+        val intent = state.cashIntents[paymentId] ?: error("cash payment intent not found")
+        require(intent.saleId == saleId) { "cash intent does not match sale" }
+        val digest = cashCancelDigest(intent, canceledAt, expectedSaleVersion)
+        humanCommandWithDisposition(session, operationId, CheckoutAuthorityCapability.TENDER_BEGIN,
+            "tender.cash.cancel", paymentId, digest,
+            replay = { cashIntentView(state.cashIntents[paymentId] ?: error("cash payment intent not found")) }) {
+            mutate {
+                require(operationId == cashIntentOperationId("cancel", paymentId)) { "cash cancellation operation ID is not stable" }
+                require(intent.saleId == saleId && intent.paymentId == paymentId) { "cash intent does not match sale" }
+                require(intent.status == CashPaymentIntentStatus.PREPARED) { "cash intent is not pending" }
+                nonnegative(canceledAt, "cash cancellation time")
+                require(canceledAt >= intent.preparedAt) { "cash cancellation time precedes preparation" }
+                require(currentSaleVersion(saleId) == expectedSaleVersion) { "sale changed before cash was canceled" }
+                require(expectedSaleVersion > intent.expectedSaleVersion) { "cash intent version is stale" }
+                intent.status = CashPaymentIntentStatus.CANCELED
+                intent.cancelExpectedSaleVersion = expectedSaleVersion
+                intent.canceledAt = canceledAt
+                cashIntentView(intent)
+            }
+        }
+    }
+
+    fun getCashPaymentIntent(paymentId: String): CashPaymentIntent? = synchronized(lock) {
+        ensureHealthy()
+        state.cashIntents[paymentId]?.let(::cashIntentView)
     }
 
     /** Eligibility hint for the cash UI. recordCashPayment rechecks every guard when recording. */
@@ -430,14 +638,16 @@ class CheckoutLedger(
             view(sale).let { it.remainingMinor > 0 && !it.requiresReview } && canStartTender(sale)
     }
 
-    /** Compatibility API; resulting rows are v8 legacy/unattributed history. */
+    /** Compatibility API; resulting writes are explicitly legacy/unattributed. */
     fun requestCancellation(saleId: String, attemptId: String): PaymentAttempt = mutate {
         val a = attempt(saleId, attemptId); a.cancellationRequested = true; a.cancellationAcknowledged = false; a.cancellationUnknown = false; attemptView(a)
     }
 
+
     /** Call only after the native CounterNode.cancel operation returns success. Late evidence can reopen the derived state. */
     fun acknowledgeBitcoinCancellation(saleId: String, attemptId: String): PaymentAttempt =
         acknowledgeBitcoinCancellationInternal(saleId, attemptId)
+
 
     private fun acknowledgeBitcoinCancellationInternal(saleId: String, attemptId: String): PaymentAttempt = mutate {
         val a = attempt(saleId, attemptId); require(a.tender == Tender.BITCOIN) { "not a Bitcoin attempt" }
@@ -450,6 +660,7 @@ class CheckoutLedger(
     fun markCancellationUnknown(saleId: String, attemptId: String): PaymentAttempt =
         markCancellationUnknownInternal(saleId, attemptId)
 
+
     private fun markCancellationUnknownInternal(saleId: String, attemptId: String): PaymentAttempt = mutate {
         val a = attempt(saleId, attemptId); require(a.tender == Tender.CARD) { "cancellation reconciliation applies to card attempts" }
         a.cancellationRequested = true; a.cancellationUnknown = true; attemptView(a)
@@ -461,6 +672,7 @@ class CheckoutLedger(
                               chainState: BitcoinChainState = BitcoinChainState.ACTIVE): PaymentAttempt =
         recordBitcoinEvidenceInternal(saleId, attemptId, evidenceId, sourceId, receivedSats, confirmations,
             requiredConfirmations, observedAt, chainState)
+
 
     private fun recordBitcoinEvidenceInternal(saleId: String, attemptId: String, evidenceId: String, sourceId: String, receivedSats: Long,
                               confirmations: Int, requiredConfirmations: Int, observedAt: Long,
@@ -481,6 +693,7 @@ class CheckoutLedger(
                            result: CardResult, amountMinor: Long, observedAt: Long): PaymentAttempt =
         recordCardEvidenceInternal(saleId, attemptId, evidenceId, stableId, result, amountMinor, observedAt)
 
+
     private fun recordCardEvidenceInternal(saleId: String, attemptId: String, evidenceId: String, stableId: String,
                            result: CardResult, amountMinor: Long, observedAt: Long): PaymentAttempt = mutate {
         val a = attempt(saleId, attemptId); require(a.tender == Tender.CARD) { "not a card attempt" }
@@ -495,7 +708,7 @@ class CheckoutLedger(
         attemptView(a)
     }
 
-    /** Compatibility API; resulting rows are v8 legacy/unattributed history. */
+    /** Compatibility API; resulting writes are explicitly legacy/unattributed. */
     fun requestRefund(saleId: String, refundId: String, paymentAttemptId: String, amountMinor: Long, amountSats: Long, requestedAt: Long): Refund = mutate {
         val sale = sale(saleId); validId(refundId, "refund id"); nonnegative(amountMinor, "refund amount"); nonnegative(amountSats, "refund sats")
         require(requestedAt >= 0) { "invalid request time" }
@@ -515,10 +728,12 @@ class CheckoutLedger(
         sale.refunds.add(r); refundView(r)
     }
 
+
     /** pending evidence means no funds are claimed returned; paid evidence accumulates to the requested amount. */
     fun recordRefundEvidence(saleId: String, refundId: String, evidenceId: String, actualPaidMinor: Long, actualPaidSats: Long,
                              pending: Boolean, observedAt: Long): Refund =
         recordRefundEvidenceInternal(saleId, refundId, evidenceId, actualPaidMinor, actualPaidSats, pending, observedAt)
+
 
     private fun recordRefundEvidenceInternal(saleId: String, refundId: String, evidenceId: String, actualPaidMinor: Long, actualPaidSats: Long,
                              pending: Boolean, observedAt: Long): Refund = mutate {
@@ -544,7 +759,19 @@ class CheckoutLedger(
         digest: ByteArray,
         replay: () -> T,
         operation: () -> T,
-    ): T = synchronized(lock) {
+    ): T = humanCommandWithDisposition(session, operationId, capability, eventType, targetIdentity,
+        digest, replay, operation).value
+
+    private fun <T> humanCommandWithDisposition(
+        session: CheckoutAuthoritySession,
+        operationId: String,
+        capability: CheckoutAuthorityCapability,
+        eventType: String,
+        targetIdentity: String,
+        digest: ByteArray,
+        replay: () -> T,
+        operation: () -> T,
+    ): CheckoutLedgerCommandResult<T> = synchronized(lock) {
         ensureHealthy()
         check(activeCommand == null) { "nested ledger commands are not allowed" }
         val authority = commandAuthority ?: throw CheckoutAuthorityUnavailableException()
@@ -558,18 +785,21 @@ class CheckoutLedger(
         val prior = state.commandEvents.firstOrNull { it.operationId == operationId }
         if (prior != null) {
             if (!sameCommand(prior, pending)) throw IllegalStateException("ledger operation ID conflicts with prior command")
-            return@synchronized replay()
+            return@synchronized CheckoutLedgerCommandResult(replay(), CheckoutLedgerCommandDisposition.REPLAY)
         }
         activeCommand = pending
-        try { operation() } finally { activeCommand = null }
+        try {
+            CheckoutLedgerCommandResult(operation(), CheckoutLedgerCommandDisposition.NEW_COMMIT)
+        } finally {
+            activeCommand = null
+        }
     }
 
     private fun sameCommand(event: CheckoutLedgerCommandEvent, pending: PendingLedgerCommand): Boolean {
         val old = event.attribution
         val next = pending.attribution
         val actorMatches = if (old == null || next == null) old == null && next == null else
-            old.actorId == next.actorId && old.role == next.role && old.capabilityId == next.capabilityId &&
-                old.policyGeneration == next.policyGeneration && old.scope == next.scope
+            old.actorId == next.actorId && old.capabilityId == next.capabilityId && old.scope == next.scope
         return event.operationId == pending.operationId && event.eventType == pending.eventType &&
             event.origin == pending.origin && actorMatches && event.targetIdentity == pending.targetIdentity &&
             MessageDigest.isEqual(event.payloadDigest, pending.payloadDigest) &&
@@ -584,12 +814,41 @@ class CheckoutLedger(
         createdAt: Long,
         items: List<SaleItem>,
         pricing: CheckoutPricingSnapshot?,
-    ): ByteArray = commandDigest { out ->
-        out.str("openbmt.checkout.ledger-command"); out.writeInt(1); out.str("sale.create")
+    ): ByteArray = typedCommandDigest("sale.create") { out ->
         out.str(saleId); out.writeLong(amountMinor); out.str(currency); out.writeLong(createdAt)
         out.writeInt(items.size)
         items.forEach { out.str(it.productId); out.str(it.name); out.writeLong(it.unitMinor); out.writeInt(it.quantity) }
         writePricing(out, pricing)
+    }
+
+    private fun typedCommandDigest(eventType: String, write: (DataOutputStream) -> Unit): ByteArray = commandDigest { out ->
+        out.str("openbmt.checkout.ledger-command"); out.writeInt(COMMAND_DIGEST_FORMAT_VERSION); out.str(eventType)
+        write(out)
+    }
+
+    private fun cashPrepareDigest(saleId: String, paymentId: String, tenderedMinor: Long, preparedAt: Long,
+                                  expectedSaleVersion: Long, expectedRemainingMinor: Long): ByteArray =
+        typedCommandDigest("tender.cash.prepare") { out ->
+            out.str(saleId); out.str(paymentId); out.writeLong(tenderedMinor); out.writeLong(preparedAt)
+            out.writeLong(expectedSaleVersion); out.writeLong(expectedRemainingMinor)
+        }
+
+    private fun cashCompleteDigest(intent: CashIntentData, completedAt: Long, expectedSaleVersion: Long,
+                                  expectedRemainingMinor: Long): ByteArray =
+        typedCommandDigest("tender.cash.complete") { out ->
+            writeCashIntentDigestFields(out, intent); out.writeLong(expectedSaleVersion); out.writeLong(completedAt)
+            out.writeLong(expectedRemainingMinor); out.writeLong(intent.tenderedMinor)
+        }
+
+    private fun cashCancelDigest(intent: CashIntentData, canceledAt: Long, expectedSaleVersion: Long): ByteArray =
+        typedCommandDigest("tender.cash.cancel") { out ->
+            writeCashIntentDigestFields(out, intent); out.writeLong(expectedSaleVersion); out.writeLong(canceledAt)
+        }
+
+    private fun writeCashIntentDigestFields(out: DataOutputStream, intent: CashIntentData) {
+        out.str(intent.saleId); out.str(intent.paymentId); out.str(intent.prepareOperationId)
+        out.writeLong(intent.tenderedMinor); out.writeLong(intent.preparedAt)
+        out.writeLong(intent.expectedSaleVersion); out.writeLong(intent.expectedRemainingMinor)
     }
 
     /** Digest used by the first v8 command writer; retained only for strict v8 migration. */
@@ -622,18 +881,27 @@ class CheckoutLedger(
         if (activeCommand != null) require(state.commandEvents.size < MAX_COMMAND_EVENTS) { "ledger command history limit reached" }
         val beforeSales = state.sales.keys.associateWith { view(state.sales.getValue(it)) }
         val before = encode(state)
+        if (activeCommand != null && !state.eventsInitialized) initializeEventsForCommand()
         val result = try { state.block() } catch (e: Throwable) { state = decode(before); throw e }
+        val changed = LinkedHashSet<String>()
+        (beforeSales.keys + state.sales.keys).forEach { id ->
+            val old = beforeSales[id]
+            val now = state.sales[id]?.let(::view)
+            if (old != now) changed.add(id)
+        }
+        val command = activeCommand
+        if (command != null && changed.size != 1) {
+            state = decode(before)
+            error("typed ledger command must make exactly one sale change")
+        }
         if (state.eventsInitialized) {
-            val changed = LinkedHashSet<String>()
-            (beforeSales.keys + state.sales.keys).forEach { id ->
-                val old = beforeSales[id]
-                val now = state.sales[id]?.let(::view)
-                if (old != now) changed.add(id)
-            }
             try {
                 for (id in changed) {
                     check(state.eventHighWater < Long.MAX_VALUE) { "event cursor exhausted" }
-                    val version = Math.addExact(state.saleVersions[id] ?: 0L, 1L)
+                    if (command != null && !state.coverageBaselines.containsKey(id)) {
+                        state.coverageBaselines[id] = SaleCoverageBaseline(state.saleVersions[id] ?: 0L, false)
+                    }
+                    val version = Math.addExact(currentSaleVersion(id), 1L)
                     state.saleVersions[id] = version
                     state.eventHighWater++
                     val type = when {
@@ -648,21 +916,27 @@ class CheckoutLedger(
             } catch (e: Throwable) { state = decode(before); throw e }
         }
         try {
-            val command = activeCommand
             if (command == null) {
                 // Compatibility writes remain available while existing Android call sites migrate.
                 // Their history is never backfilled with whichever actor happens to be signed in later.
                 state.legacyHistoryUnattributed = true
+                for (id in changed) {
+                    val version = currentSaleVersion(id)
+                    state.coverageBaselines[id] = SaleCoverageBaseline(version, true)
+                }
             } else {
                 val sequence = Math.addExact(state.commandEvents.lastOrNull()?.sequence ?: 0L, 1L)
                 val matchedSale = state.sales.values.firstOrNull { candidate ->
                     candidate.id == command.targetIdentity || candidate.attempts.any { it.attemptId == command.targetIdentity } ||
                         candidate.refunds.any { it.refundId == command.targetIdentity } ||
-                        candidate.cashPayments.any { it.paymentId == command.targetIdentity }
+                        candidate.cashPayments.any { it.paymentId == command.targetIdentity } ||
+                        state.cashIntents.values.any { it.saleId == candidate.id && it.paymentId == command.targetIdentity }
                 }
-                val commitIdentity = matchedSale?.let { "${it.id}@${state.saleVersions[it.id] ?: 0L}" } ?: command.targetIdentity
+                val targetSale = matchedSale ?: error("typed command target is missing")
+                require(changed.single() == targetSale.id) { "typed command changed a different sale" }
+                val commitIdentity = "${targetSale.id}@${currentSaleVersion(targetSale.id)}"
                 val recordedAt = command.attribution?.eventTimeMillis
-                    ?: error("system command writer is unavailable")
+                    ?: error("human command attribution is unavailable")
                 require(recordedAt >= 0) { "invalid ledger event time" }
                 state.commandEvents.add(CheckoutLedgerCommandEvent(
                     sequence, command.operationId, command.eventType, command.origin, command.attribution,
@@ -672,23 +946,56 @@ class CheckoutLedger(
             }
         } catch (e: Throwable) { state = decode(before); throw e }
         val next = try { encode(state) } catch (e: Throwable) { state = decode(before); throw e }
-        try { storage.writeAtomically(next) } catch (e: Throwable) {
-            poisoned = true
-            try { state = decode(storage.read()) } catch (_: Throwable) { }
-            throw CheckoutLedgerWriteUncertainException(e)
-        }
+        commit(next)
         result
     }
 
-    private fun ensureHealthy() { check(!poisoned) { "ledger write outcome is uncertain; reopen before continuing" } }
+    private fun commit(next: ByteArray) {
+        val expected = rawBytes?.copyOf()
+        val wrote = try { storage.compareAndSwap(expected, next) } catch (e: Throwable) {
+            poisoned = true
+            try {
+                val current = storage.read()
+                state = decode(current)
+                rawBytes = current?.copyOf()
+            } catch (_: Throwable) { }
+            throw CheckoutLedgerWriteUncertainException(e)
+        }
+        if (!wrote) {
+            poisoned = true
+            throw CheckoutLedgerConcurrentWriteException()
+        }
+        rawBytes = next.copyOf()
+    }
+
+    private fun initializeEventsForCommand() {
+        state.eventsInitialized = true
+        state.eventEpoch = UUID.randomUUID().toString()
+        state.eventHighWater = 0
+        state.eventFloor = 0
+        state.events.clear()
+        state.saleVersions.clear()
+        state.sales.keys.forEach { id -> state.saleVersions[id] = state.coverageBaselines[id]?.version ?: 0L }
+    }
+
+    private fun ensureHealthy() { check(!poisoned) { "ledger unavailable; reopen before continuing" } }
 
     private fun sale(id: String) = state.sales[id] ?: error("sale not found")
+    private fun currentSaleVersion(saleId: String): Long =
+        state.saleVersions[saleId] ?: state.coverageBaselines[saleId]?.version ?: 0L
     private fun attempt(saleId: String, attemptId: String) = sale(saleId).attempts.firstOrNull { it.attemptId == attemptId } ?: error("attempt not found")
     private fun refund(saleId: String, refundId: String) = sale(saleId).refunds.firstOrNull { it.refundId == refundId } ?: error("refund not found")
     private fun ensureNoUncertainCard(s: SaleData) { require(s.attempts.none { it.tender == Tender.CARD && cardBlocksRetry(it) }) { "card attempt must be reconciled first" } }
-    private fun canStartTender(s: SaleData) = s.attempts.none { a ->
-        a.tender == Tender.CARD && cardBlocksRetry(a) || a.tender == Tender.BITCOIN && paymentState(a) != PaymentState.CANCELED
-    }
+    private fun canStartTender(
+        s: SaleData,
+        allowPreparedPaymentId: String? = null,
+        cashIntents: Collection<CashIntentData> = state.cashIntents.values,
+        ignoreExistingAttempts: Boolean = false,
+    ) =
+        cashIntents.none { it.saleId == s.id && it.status == CashPaymentIntentStatus.PREPARED && it.paymentId != allowPreparedPaymentId } &&
+            (ignoreExistingAttempts || s.attempts.none { a ->
+                a.tender == Tender.CARD && cardBlocksRetry(a) || a.tender == Tender.BITCOIN && paymentState(a) != PaymentState.CANCELED
+            })
     private fun cardBlocksRetry(a: AttemptData) = a.cancellationUnknown || when (a.cardEvidence.maxByOrNull { it.observedAt }?.result) {
         null, CardResult.PENDING, CardResult.APPROVED -> true
         else -> false
@@ -755,7 +1062,28 @@ class CheckoutLedger(
         }.map { it.receivedMinor } + s.cashPayments.map { it.amountMinor })
         return Sale(s.id, s.amountMinor, s.currency, s.createdAt, attempts, refunds, total,
             (s.amountMinor - total).coerceAtLeast(0), settled >= s.amountMinor && settled > 0 && !requiresReview,
-            requiresReview, lateBitcoinReceipt, overpaidMinor, overpaidSats, s.items.map { it.copy() }, s.cashPayments.map { it.copy() }, s.pricing?.let(::freezePricing))
+            requiresReview, lateBitcoinReceipt, overpaidMinor, overpaidSats, s.items.map { it.copy() }, s.cashPayments.map { it.copy() },
+            s.pricing?.let(::freezePricing), state.cashIntents.values.firstOrNull { it.saleId == s.id && it.status == CashPaymentIntentStatus.PREPARED }
+                ?.let(::cashIntentView))
+    }
+
+    private fun cashIntentView(intent: CashIntentData) = CashPaymentIntent(
+        intent.saleId, intent.paymentId, intent.tenderedMinor, intent.preparedAt,
+        intent.expectedSaleVersion, intent.expectedRemainingMinor, intent.status,
+        intent.prepareOperationId, cashIntentOperationId("complete", intent.paymentId),
+        cashIntentOperationId("cancel", intent.paymentId), intent.completedAt,
+        intent.completeExpectedSaleVersion, intent.completeExpectedRemainingMinor, intent.canceledAt,
+    )
+
+    private fun cashIntentOperationId(action: String, paymentId: String): String {
+        val digest = MessageDigest.getInstance("SHA-256").digest(paymentId.toByteArray(Charsets.UTF_8))
+        val suffix = buildString(digest.size * 2) {
+            digest.forEach { byte ->
+                append("0123456789abcdef"[(byte.toInt() ushr 4) and 0x0f])
+                append("0123456789abcdef"[byte.toInt() and 0x0f])
+            }
+        }
+        return "cash-$action-$suffix"
     }
 
     private fun saleOverpaidSats(s: SaleData): List<Long> = s.attempts.filter { it.tender == Tender.BITCOIN }.map { a ->
@@ -768,7 +1096,25 @@ class CheckoutLedger(
                         val saleVersions: LinkedHashMap<String, Long> = LinkedHashMap(),
                         val events: MutableList<CheckoutEvent> = ArrayList(),
                         var legacyHistoryUnattributed: Boolean = false,
-                        val commandEvents: MutableList<CheckoutLedgerCommandEvent> = ArrayList())
+                        val commandEvents: MutableList<CheckoutLedgerCommandEvent> = ArrayList(),
+                        val coverageBaselines: LinkedHashMap<String, SaleCoverageBaseline> = LinkedHashMap(),
+                        val cashIntents: LinkedHashMap<String, CashIntentData> = LinkedHashMap())
+    private data class SaleCoverageBaseline(val version: Long, val legacyBeforeBaseline: Boolean)
+    private data class CashIntentData(
+        val saleId: String,
+        val paymentId: String,
+        val tenderedMinor: Long,
+        val preparedAt: Long,
+        val expectedSaleVersion: Long,
+        val expectedRemainingMinor: Long,
+        val prepareOperationId: String,
+        var status: CashPaymentIntentStatus = CashPaymentIntentStatus.PREPARED,
+        var completeExpectedSaleVersion: Long? = null,
+        var completedAt: Long? = null,
+        var completeExpectedRemainingMinor: Long? = null,
+        var cancelExpectedSaleVersion: Long? = null,
+        var canceledAt: Long? = null,
+    )
     private data class SaleData(val id: String, val amountMinor: Long, val currency: String, val createdAt: Long, val items: List<SaleItem> = emptyList(),
                                 val cashPayments: MutableList<CashPayment> = ArrayList(),
                                 val attempts: MutableList<AttemptData> = ArrayList(), val refunds: MutableList<RefundData> = ArrayList(),
@@ -802,6 +1148,11 @@ class CheckoutLedger(
     }
 
     private fun validId(v: String, label: String) { require(v.isNotBlank() && v.length <= 160 && v.all { it.code in 0x21..0x7e }) { "invalid $label" } }
+    private fun validCommitIdentity(v: String) {
+        require(v.isNotBlank() && v.length <= MAX_COMMIT_ID_CHARS && v.all { it.code in 0x21..0x7e }) {
+            "invalid command commit identity"
+        }
+    }
     private fun validText(v: String, label: String) { require(v.isNotBlank() && v.length <= 100 && v.none { it.isISOControl() }) { "invalid $label" } }
     private fun validCurrency(v: String) { require(v.length == 3 && v.all { it in 'A'..'Z' }) { "invalid currency" } }
     private fun positive(v: Long, label: String) { require(v > 0) { "invalid $label" } }
@@ -912,6 +1263,7 @@ class CheckoutLedger(
         val indexes = HashSet<Long>()
         val cardIds = HashSet<Pair<String, String>>()
         val cashIds = HashSet<String>()
+        val pendingCashSales = HashSet<String>()
         for (sale in s.sales.values) {
             require(sale.attempts.size <= MAX_ATTEMPTS && sale.refunds.size <= MAX_REFUNDS)
             require(sale.items.size <= MAX_ITEMS_PER_SALE)
@@ -920,11 +1272,20 @@ class CheckoutLedger(
             require(sale.cashPayments.size <= MAX_CASH_PAYMENTS)
             require(safeSum(sale.cashPayments.map { it.amountMinor }) <= sale.amountMinor) { "stored cash payments exceed sale amount" }
             for (cash in sale.cashPayments) {
-                validId(cash.paymentId, "cash payment id"); positive(cash.amountMinor, "cash payment amount")
+                validId(cash.paymentId, "cash payment id"); nonnegative(cash.amountMinor, "cash payment amount")
                 positive(cash.tenderedMinor, "cash tendered amount"); nonnegative(cash.changeMinor, "cash change"); nonnegative(cash.recordedAt, "cash payment time")
                 require(cashIds.add(cash.paymentId)) { "cash payment id is duplicated" }
                 require(sale.currency == "USD") { "cash payment on unsupported currency" }
                 require(Math.addExact(cash.amountMinor, cash.changeMinor) == cash.tenderedMinor) { "cash amount and change do not match tendered amount" }
+                if (cash.amountMinor == 0L) {
+                    val intent = s.cashIntents[cash.paymentId]
+                    require(intent != null && intent.saleId == sale.id &&
+                        intent.status == CashPaymentIntentStatus.COMPLETED &&
+                        intent.completeExpectedRemainingMinor == 0L && intent.tenderedMinor == cash.tenderedMinor &&
+                        intent.completedAt == cash.recordedAt) {
+                        "zero-applied cash requires a matching completed cash intent"
+                    }
+                }
             }
             sale.pricing?.let { pricing ->
                 require(sale.currency == "USD" && freezePricing(pricing).totalMinor == sale.amountMinor) { "stored pricing total differs from sale amount" }
@@ -958,21 +1319,88 @@ class CheckoutLedger(
             safeSum(sale.attempts.map { if (it.tender == Tender.BITCOIN) fiatForSats(it) else received(it) })
             safeSum(sale.cashPayments.map { it.amountMinor })
         }
+        require(s.cashIntents.size <= MAX_CASH_INTENTS) { "cash payment intent limit exceeded" }
+        for ((paymentId, intent) in s.cashIntents) {
+            validId(paymentId, "cash payment id"); require(paymentId.length <= MAX_CASH_INTENT_PAYMENT_ID_CHARS)
+            require(paymentId == intent.paymentId) { "cash intent key does not match payment id" }
+            validId(intent.saleId, "cash intent sale id"); validId(intent.prepareOperationId, "cash prepare operation id")
+            positive(intent.tenderedMinor, "cash tendered amount"); nonnegative(intent.preparedAt, "cash preparation time")
+            nonnegative(intent.expectedSaleVersion, "cash expected sale version")
+            positive(intent.expectedRemainingMinor, "cash expected balance")
+            require(intent.tenderedMinor >= intent.expectedRemainingMinor) { "cash intent tender is below expected balance" }
+            val sale = s.sales[intent.saleId] ?: error("cash intent sale is missing")
+            require(sale.currency == "USD") { "cash intent on unsupported currency" }
+            val payment = sale.cashPayments.singleOrNull { it.paymentId == paymentId }
+            when (intent.status) {
+                CashPaymentIntentStatus.PREPARED -> {
+                    require(pendingCashSales.add(intent.saleId)) { "sale has multiple pending cash intents" }
+                    require(payment == null && intent.completeExpectedSaleVersion == null && intent.completedAt == null &&
+                        intent.completeExpectedRemainingMinor == null &&
+                        intent.cancelExpectedSaleVersion == null && intent.canceledAt == null) {
+                        "prepared cash intent contains terminal state"
+                    }
+                    // Later provider evidence may change the current tender state; the intent's prepare
+                    // command proves no competing tender existed at the handover boundary.
+                }
+                CashPaymentIntentStatus.COMPLETED -> {
+                    val expectedVersion = intent.completeExpectedSaleVersion ?: error("completed cash intent lacks sale version")
+                    val completedAt = intent.completedAt ?: error("completed cash intent lacks time")
+                    val expectedRemaining = intent.completeExpectedRemainingMinor
+                        ?: error("completed cash intent lacks final balance")
+                    require(expectedVersion > intent.expectedSaleVersion && completedAt >= intent.preparedAt &&
+                        expectedRemaining in 0..sale.amountMinor) { "completed cash intent balance is invalid" }
+                    require(intent.cancelExpectedSaleVersion == null && intent.canceledAt == null && payment != null)
+                    val applied = minOf(intent.tenderedMinor, expectedRemaining)
+                    require(payment.amountMinor == applied && payment.tenderedMinor == intent.tenderedMinor &&
+                        payment.changeMinor == Math.subtractExact(intent.tenderedMinor, applied) &&
+                        payment.recordedAt == completedAt) { "completed cash payment differs from intent" }
+                }
+                CashPaymentIntentStatus.CANCELED -> {
+                    val expectedVersion = intent.cancelExpectedSaleVersion ?: error("canceled cash intent lacks sale version")
+                    val canceledAt = intent.canceledAt ?: error("canceled cash intent lacks time")
+                    require(expectedVersion > intent.expectedSaleVersion && canceledAt >= intent.preparedAt)
+                    require(intent.completeExpectedSaleVersion == null && intent.completedAt == null &&
+                        intent.completeExpectedRemainingMinor == null && payment == null)
+                }
+            }
+            if (intent.status != CashPaymentIntentStatus.COMPLETED) {
+                require(s.sales.values.none { other -> other.id != intent.saleId && other.cashPayments.any { it.paymentId == paymentId } }) {
+                    "cash intent payment ID was reused"
+                }
+            }
+        }
     }
 
     private fun validateCommandEvents(s: State, ledgerVersion: Int) {
         require(s.commandEvents.size <= MAX_COMMAND_EVENTS)
+        require(s.coverageBaselines.keys == s.sales.keys) { "sale coverage baseline is incomplete" }
         require(s.commandEvents.asSequence()
             .filter { it.origin == CheckoutLedgerEventOrigin.HUMAN }
             .mapNotNull { it.attribution?.scope }
             .distinct()
             .take(2)
             .count() <= 1) { "ledger command events cross installation scopes" }
+        if (!s.eventsInitialized) {
+            require(s.coverageBaselines.values.all { it.version == 0L }) {
+                "uninitialized event history cannot have nonzero sale baselines"
+            }
+        } else {
+            require(s.saleVersions.keys == s.sales.keys && s.saleVersions.values.all { it <= s.eventHighWater }) {
+                "sale version exceeds initialized event history"
+            }
+            require(s.coverageBaselines.values.all { it.version <= s.eventHighWater }) {
+                "sale baseline exceeds initialized event history"
+            }
+        }
         val byOperation = HashMap<String, CheckoutLedgerCommandEvent>()
         val saleCreationTargets = HashSet<String>()
+        val cashPrepareTargets = HashSet<String>()
+        val cashFinalTargets = HashSet<String>()
+        val cashPrepareSequences = HashMap<String, Long>()
+        val commandVersions = HashMap<String, MutableSet<Long>>()
         s.commandEvents.forEachIndexed { index, event ->
             validId(event.operationId, "command operation id"); validText(event.eventType, "command event type")
-            validId(event.targetIdentity, "command target"); validId(event.commitIdentity, "command commit identity")
+            validId(event.targetIdentity, "command target"); validCommitIdentity(event.commitIdentity)
             require(event.sequence == index + 1L && event.payloadDigest.size == COMMAND_DIGEST_BYTES && event.recordedAtMillis >= 0)
             require(byOperation.put(event.operationId, event) == null) { "duplicate ledger operation id" }
             when (event.origin) {
@@ -982,36 +1410,143 @@ class CheckoutLedger(
                     require(actor.actorId.isNotBlank() && actor.displayNameAtEvent.isNotBlank() && actor.policyGeneration > 0 && actor.eventTimeMillis >= 0)
                     require(CheckoutAuthorityCapability.fromId(actor.capabilityId) != null)
                     require(actor.eventTimeMillis == event.recordedAtMillis)
-                    require(event.eventType == "sale.create") { "unsupported human ledger event type" }
-                    require(actor.capabilityId == CheckoutAuthorityCapability.SALE_CREATE.id) {
-                        "command capability does not match event type"
+                    val expectedCapability = when (event.eventType) {
+                        "sale.create" -> CheckoutAuthorityCapability.SALE_CREATE
+                        "tender.cash.prepare", "tender.cash.complete", "tender.cash.cancel" ->
+                            CheckoutAuthorityCapability.TENDER_BEGIN
+                        else -> error("unsupported human ledger event type")
                     }
-                    val sale = s.sales[event.targetIdentity] ?: error("sale command target is missing")
-                    require(saleCreationTargets.add(event.targetIdentity)) { "sale has duplicate create commands" }
-                    require(event.commitIdentity == "${event.targetIdentity}@0" || event.commitIdentity == "${event.targetIdentity}@1") {
-                        "sale command commit identity is invalid"
+                    if (ledgerVersion < COVERAGE_VERSION) require(event.eventType == "sale.create") {
+                        "legacy ledger contains an unsupported human command"
                     }
-                    val expectedDigest = if (ledgerVersion == LEGACY_COMMAND_DIGEST_VERSION) {
-                        saleCommandDigestV8(sale.id, sale.amountMinor, sale.currency, sale.createdAt, sale.items, sale.pricing)
-                    } else {
-                        saleCommandDigest(sale.id, sale.amountMinor, sale.currency, sale.createdAt, sale.items, sale.pricing)
+                    require(actor.capabilityId == expectedCapability.id) { "command capability does not match event type" }
+
+                    val targetSale: SaleData
+                    val expectedDigest: ByteArray
+                    val commitVersion: Long
+                    when (event.eventType) {
+                        "sale.create" -> {
+                            targetSale = s.sales[event.targetIdentity] ?: error("sale command target is missing")
+                            require(saleCreationTargets.add(event.targetIdentity)) { "sale has duplicate create commands" }
+                            commitVersion = event.commitIdentity.takeIf { it.startsWith("${targetSale.id}@") }
+                                ?.substringAfterLast('@')?.toLongOrNull() ?: error("sale command commit identity is invalid")
+                            require(commitVersion in 0L..1L) { "sale create commit version is invalid" }
+                            expectedDigest = if (ledgerVersion == LEGACY_COMMAND_DIGEST_VERSION) {
+                                saleCommandDigestV8(targetSale.id, targetSale.amountMinor, targetSale.currency,
+                                    targetSale.createdAt, targetSale.items, targetSale.pricing)
+                            } else saleCommandDigest(targetSale.id, targetSale.amountMinor, targetSale.currency,
+                                targetSale.createdAt, targetSale.items, targetSale.pricing)
+                        }
+                        "tender.cash.prepare" -> {
+                            val intent = s.cashIntents[event.targetIdentity] ?: error("cash prepare target is missing")
+                            targetSale = s.sales[intent.saleId] ?: error("cash prepare sale is missing")
+                            require(event.operationId == intent.prepareOperationId && cashPrepareTargets.add(intent.paymentId)) {
+                                "cash prepare event does not match intent"
+                            }
+                            cashPrepareSequences[intent.paymentId] = event.sequence
+                            commitVersion = event.commitIdentity.takeIf { it.startsWith("${targetSale.id}@") }
+                                ?.substringAfterLast('@')?.toLongOrNull() ?: error("cash prepare commit identity is invalid")
+                            require(commitVersion == Math.addExact(intent.expectedSaleVersion, 1L)) {
+                                "cash prepare commit version does not match intent"
+                            }
+                            expectedDigest = cashPrepareDigest(intent.saleId, intent.paymentId, intent.tenderedMinor,
+                                intent.preparedAt, intent.expectedSaleVersion, intent.expectedRemainingMinor)
+                        }
+                        "tender.cash.complete" -> {
+                            val intent = s.cashIntents[event.targetIdentity] ?: error("cash completion target is missing")
+                            targetSale = s.sales[intent.saleId] ?: error("cash completion sale is missing")
+                            require(intent.status == CashPaymentIntentStatus.COMPLETED &&
+                                event.operationId == cashIntentOperationId("complete", intent.paymentId) &&
+                                cashFinalTargets.add(intent.paymentId) &&
+                                (cashPrepareSequences[intent.paymentId] ?: Long.MAX_VALUE) < event.sequence) {
+                                "cash completion event does not match intent or precede its prepare"
+                            }
+                            val expectedVersion = intent.completeExpectedSaleVersion ?: error("cash completion version is missing")
+                            val completedAt = intent.completedAt ?: error("cash completion time is missing")
+                            commitVersion = event.commitIdentity.takeIf { it.startsWith("${targetSale.id}@") }
+                                ?.substringAfterLast('@')?.toLongOrNull() ?: error("cash completion commit identity is invalid")
+                            val expectedRemaining = intent.completeExpectedRemainingMinor
+                                ?: error("cash completion balance is missing")
+                            require(expectedVersion > intent.expectedSaleVersion &&
+                                expectedRemaining in 0..targetSale.amountMinor &&
+                                commitVersion == Math.addExact(expectedVersion, 1L)) {
+                                "cash completion commit version does not match intent"
+                            }
+                            val payment = targetSale.cashPayments.firstOrNull { it.paymentId == intent.paymentId }
+                                ?: error("completed cash payment is missing")
+                            val applied = minOf(intent.tenderedMinor, expectedRemaining)
+                            require(payment.recordedAt == completedAt && payment.tenderedMinor == intent.tenderedMinor &&
+                                payment.amountMinor == applied &&
+                                payment.changeMinor == Math.subtractExact(intent.tenderedMinor, applied)) {
+                                "completed cash differs from intent"
+                            }
+                            expectedDigest = cashCompleteDigest(intent, completedAt, expectedVersion, expectedRemaining)
+                        }
+                        "tender.cash.cancel" -> {
+                            val intent = s.cashIntents[event.targetIdentity] ?: error("cash cancellation target is missing")
+                            targetSale = s.sales[intent.saleId] ?: error("cash cancellation sale is missing")
+                            require(intent.status == CashPaymentIntentStatus.CANCELED &&
+                                event.operationId == cashIntentOperationId("cancel", intent.paymentId) &&
+                                cashFinalTargets.add(intent.paymentId) &&
+                                (cashPrepareSequences[intent.paymentId] ?: Long.MAX_VALUE) < event.sequence) {
+                                "cash cancellation event does not match intent or precede its prepare"
+                            }
+                            val expectedVersion = intent.cancelExpectedSaleVersion ?: error("cash cancellation version is missing")
+                            val canceledAt = intent.canceledAt ?: error("cash cancellation time is missing")
+                            commitVersion = event.commitIdentity.takeIf { it.startsWith("${targetSale.id}@") }
+                                ?.substringAfterLast('@')?.toLongOrNull() ?: error("cash cancellation commit identity is invalid")
+                            require(commitVersion == Math.addExact(expectedVersion, 1L)) {
+                                "cash cancellation commit version does not match intent"
+                            }
+                            expectedDigest = cashCancelDigest(intent, canceledAt, expectedVersion)
+                        }
+                        else -> error("unsupported human ledger event type")
+                    }
+                    require(event.commitIdentity == "${targetSale.id}@$commitVersion") {
+                        "ledger command commit identity is not canonical"
                     }
                     val digestMatches = MessageDigest.isEqual(event.payloadDigest, expectedDigest)
                     expectedDigest.fill(0)
-                    require(digestMatches) { "sale command digest does not match persisted sale" }
+                    require(digestMatches) { "ledger command digest does not match persisted data" }
                     if (ledgerVersion == LEGACY_COMMAND_DIGEST_VERSION) {
-                        val migratedDigest = saleCommandDigest(sale.id, sale.amountMinor, sale.currency, sale.createdAt,
-                            sale.items, sale.pricing)
+                        val migratedDigest = saleCommandDigest(targetSale.id, targetSale.amountMinor,
+                            targetSale.currency, targetSale.createdAt, targetSale.items, targetSale.pricing)
                         s.commandEvents[index] = event.copy(payloadDigest = migratedDigest)
+                    }
+                    val baseline = s.coverageBaselines.getValue(targetSale.id)
+                    if (commitVersion > baseline.version) {
+                        require(commandVersions.getOrPut(targetSale.id) { HashSet() }.add(commitVersion)) {
+                            "multiple typed commands share a sale version"
+                        }
                     }
                 }
                 CheckoutLedgerEventOrigin.SYSTEM -> {
-                    error("system ledger command type is not implemented")
+                    error("system ledger commands are not implemented in v10")
                 }
             }
         }
         if (!s.legacyHistoryUnattributed) {
             require(saleCreationTargets == s.sales.keys) { "ledger has a sale without exactly one create command" }
+        }
+        require(cashPrepareTargets == s.cashIntents.keys) { "cash intent lacks exactly one prepare command" }
+        for ((paymentId, intent) in s.cashIntents) {
+            when (intent.status) {
+                CashPaymentIntentStatus.PREPARED -> require(paymentId !in cashFinalTargets)
+                CashPaymentIntentStatus.COMPLETED, CashPaymentIntentStatus.CANCELED ->
+                    require(paymentId in cashFinalTargets) { "terminal cash intent lacks exactly one final command" }
+            }
+        }
+        for ((saleId, baseline) in s.coverageBaselines) {
+            require(baseline.legacyBeforeBaseline || baseline.version == 0L) {
+                "complete sale coverage baseline must begin at version zero"
+            }
+            val current = s.saleVersions[saleId] ?: baseline.version
+            require(current >= baseline.version) { "sale version precedes its coverage baseline" }
+            val required = if (current == baseline.version) emptySet() else (baseline.version + 1..current).toSet()
+            require(commandVersions[saleId].orEmpty() == required) { "post-baseline sale mutations lack exact typed commands" }
+            if (!baseline.legacyBeforeBaseline) require(saleCreationTargets.contains(saleId)) {
+                "complete sale coverage baseline has no create command"
+            }
         }
     }
 
@@ -1067,6 +1602,20 @@ class CheckoutLedger(
                 out.str(event.targetIdentity); out.writeInt(event.payloadDigest.size); out.write(event.payloadDigest)
                 out.nullStr(event.linkedOperationId); out.nullStr(event.sourceIdentity); out.nullLong(event.sourceObservedAt)
                 out.writeLong(event.recordedAtMillis); out.str(event.commitIdentity)
+            }
+            require(s.coverageBaselines.keys == s.sales.keys) { "sale coverage baseline is incomplete" }
+            out.writeInt(s.coverageBaselines.size)
+            s.coverageBaselines.forEach { (saleId, baseline) ->
+                out.str(saleId); out.writeLong(baseline.version); out.writeBoolean(baseline.legacyBeforeBaseline)
+            }
+            require(s.cashIntents.size <= MAX_CASH_INTENTS) { "cash payment intent limit reached" }
+            out.writeInt(s.cashIntents.size)
+            s.cashIntents.forEach { (paymentId, intent) ->
+                out.str(paymentId); out.str(intent.saleId); out.writeLong(intent.tenderedMinor); out.writeLong(intent.preparedAt)
+                out.writeLong(intent.expectedSaleVersion); out.writeLong(intent.expectedRemainingMinor); out.str(intent.prepareOperationId)
+                out.writeInt(intent.status.ordinal); out.nullLong(intent.completeExpectedSaleVersion); out.nullLong(intent.completedAt)
+                out.nullLong(intent.completeExpectedRemainingMinor)
+                out.nullLong(intent.cancelExpectedSaleVersion); out.nullLong(intent.canceledAt)
             }
         }
         return bytes.toByteArray().also { require(it.size <= MAX_LEDGER_FILE_BYTES) { "ledger exceeds storage limit" } }
@@ -1143,7 +1692,7 @@ class CheckoutLedger(
                     }
                     if (version >= CASH_PAYMENT_VERSION) repeat(input.count(MAX_CASH_PAYMENTS)) {
                         val cash = CashPayment(input.str(), input.readLong(), input.readLong(), input.readLong(), input.readLong())
-                        validId(cash.paymentId, "cash payment id"); positive(cash.amountMinor, "cash payment amount")
+                        validId(cash.paymentId, "cash payment id"); nonnegative(cash.amountMinor, "cash payment amount")
                         positive(cash.tenderedMinor, "cash tendered amount"); nonnegative(cash.changeMinor, "cash change"); nonnegative(cash.recordedAt, "cash payment time")
                         require(cash.tenderedMinor == Math.addExact(cash.amountMinor, cash.changeMinor)) { "cash amount and change do not match tendered amount" }
                         require(s.cashPayments.none { it.paymentId == cash.paymentId }) { "duplicate cash payment id" }
@@ -1205,10 +1754,41 @@ class CheckoutLedger(
                         state.commandEvents.add(CheckoutLedgerCommandEvent(sequence, operationId, eventType, origin,
                             attribution, target, digest, linked, source, sourceAt, recordedAt, commit))
                     }
-                    validateCommandEvents(state, version)
                 } else {
                     state.legacyHistoryUnattributed = state.sales.isNotEmpty()
                 }
+                if (version >= COVERAGE_VERSION) {
+                    repeat(input.count(MAX_SALES)) {
+                        val saleId = input.str(); val baselineVersion = input.readLong(); val legacy = input.readBool()
+                        validId(saleId, "coverage baseline sale id"); nonnegative(baselineVersion, "coverage baseline version")
+                        require(state.sales.containsKey(saleId) && !state.coverageBaselines.containsKey(saleId)) {
+                            "coverage baseline sale is missing or duplicated"
+                        }
+                        state.coverageBaselines[saleId] = SaleCoverageBaseline(baselineVersion, legacy)
+                    }
+                } else {
+                    state.sales.keys.forEach { saleId ->
+                        state.coverageBaselines[saleId] = SaleCoverageBaseline(
+                            state.saleVersions[saleId] ?: 0L,
+                            true,
+                        )
+                    }
+                }
+                if (version >= COVERAGE_VERSION) {
+                    repeat(input.count(MAX_CASH_INTENTS)) {
+                        val paymentId = input.str(); val saleId = input.str(); val tenderedMinor = input.readLong()
+                        val preparedAt = input.readLong(); val expectedSaleVersion = input.readLong()
+                        val expectedRemainingMinor = input.readLong(); val prepareOperationId = input.str()
+                        val status = CashPaymentIntentStatus.entries.getOrNull(input.readInt())
+                            ?: error("invalid cash payment intent status")
+                        val intent = CashIntentData(saleId, paymentId, tenderedMinor, preparedAt,
+                            expectedSaleVersion, expectedRemainingMinor, prepareOperationId, status,
+                            input.nullLong(), input.nullLong(), input.nullLong(), input.nullLong(), input.nullLong())
+                        require(!state.cashIntents.containsKey(paymentId)) { "duplicate cash payment intent" }
+                        state.cashIntents[paymentId] = intent
+                    }
+                }
+                validateCommandEvents(state, version)
                 validateDecoded(state, version)
                 require(input.available() == 0) { "trailing ledger data" }
                 return state
@@ -1249,10 +1829,15 @@ class CheckoutLedger(
         const val EVENT_VERSION = 6
         const val PRICING_SNAPSHOT_VERSION = 7
         const val COMMAND_EVENT_VERSION = 8
+        const val COVERAGE_VERSION = 10
         const val LEGACY_COMMAND_DIGEST_VERSION = 8
-        const val VERSION = 9
+        const val VERSION = 10
+        const val COMMAND_DIGEST_FORMAT_VERSION = 1
         const val COMMAND_DIGEST_BYTES = 32
+        const val MAX_COMMIT_ID_CHARS = 180
         const val MAX_COMMAND_EVENTS = 5_000
+        const val MAX_CASH_INTENTS = 1_000
+        const val MAX_CASH_INTENT_PAYMENT_ID_CHARS = 120
         const val MAX_TEXT_BYTES = 1024
         const val MAX_ITEM_NAME_CHARS = 120
         const val MAX_ITEM_NAME_BYTES = 320

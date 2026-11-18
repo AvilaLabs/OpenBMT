@@ -10,7 +10,7 @@ class CheckoutAuthorityActivitySourceTest(unittest.TestCase):
     @staticmethod
     def _function_section(source, name):
         """Return one Kotlin member and its body, independent of formatting."""
-        member_pattern = r"(?m)^ {4}(?:(?:private|internal|public)\s+)?fun\s+"
+        member_pattern = r"(?m)^ {4}(?:(?:private|internal|public)\s+)?fun(?:\s+<[^>\n]+>)?\s+"
         match = re.search(rf"{member_pattern}{re.escape(name)}\s*\(", source)
         if match is None:
             raise AssertionError(f"Kotlin function {name} was not found")
@@ -131,7 +131,6 @@ class CheckoutAuthorityActivitySourceTest(unittest.TestCase):
             (inventory, "configureProductWithMode", "INVENTORY_MANAGE", "executeCapability"),
             (inventory, "adjustProduct", "INVENTORY_MANAGE", "executeCapability"),
             (inventory, "changeMode", "INVENTORY_MANAGE", "executeCapability"),
-            (activity, "showCashEntry", "TENDER_BEGIN", "executeCapability"),
             (activity, "beginSquareAttempt", "TENDER_BEGIN", "executeCapability"),
             (activity, "openBitcoinSale", "TENDER_BEGIN", "executeCapability"),
             (activity, "cancelBitcoin", "TENDER_BEGIN", "executeCapability"),
@@ -170,24 +169,32 @@ class CheckoutAuthorityActivitySourceTest(unittest.TestCase):
         self.assertIn("state.commandEvents.add(CheckoutLedgerCommandEvent(", ledger)
         self.assertIn("state.legacyHistoryUnattributed = true", ledger)
         digest = ledger.split("private fun saleCommandDigest", 1)[1].split("private fun commandDigest", 1)[0]
-        self.assertIn('out.str("openbmt.checkout.ledger-command")', digest)
-        self.assertIn("out.writeInt(1)", digest)
-        self.assertIn('require(event.eventType == "sale.create")', ledger)
-        self.assertIn('error("system ledger command type is not implemented")', ledger)
+        self.assertIn('typedCommandDigest("sale.create")', digest)
+        typed_digest = ledger.split("private fun typedCommandDigest", 1)[1].split("/** Digest used", 1)[0]
+        self.assertIn('out.str("openbmt.checkout.ledger-command")', typed_digest)
+        self.assertIn("COMMAND_DIGEST_FORMAT_VERSION", typed_digest)
+        self.assertIn('"tender.cash.prepare", "tender.cash.complete", "tender.cash.cancel" ->', ledger)
+        self.assertIn('else -> error("unsupported human ledger event type")', ledger)
+        self.assertIn('error("system ledger commands are not implemented in v10")', ledger)
         self.assertIn("const val LEGACY_COMMAND_DIGEST_VERSION = 8", ledger)
-        self.assertIn("const val VERSION = 9", ledger)
+        self.assertIn("const val VERSION = 10", ledger)
         self.assertIn("migratesV8SaleCommandDigestsWithoutChangingOnRead", (ROOT / "tests/CheckoutLedgerTest.kt").read_text())
 
-    def test_uncertain_sale_commit_blocks_checkout_until_reopen(self):
+    def test_uncertain_ledger_commit_blocks_checkout_until_reopen(self):
         activity = (ROOT / "src/android/CheckoutActivity.kt").read_text()
         create = self._function_section(activity, "confirmSaleCreation")
-        blocked = self._function_section(activity, "lockAfterUncertainSaleWrite")
-        self.assertIn("is CheckoutLedgerWriteUncertainException -> lockAfterUncertainSaleWrite()", create)
+        blocked = self._function_section(activity, "lockAfterLedgerReload")
+        flow = (ROOT / "src/android/AndroidCheckoutAuthorityFlow.kt").read_text()
+        self.assertIn("is CheckoutLedgerWriteUncertainException, is CheckoutLedgerConcurrentWriteException -> lockAfterLedgerReload()", create)
         self.assertIn("stopCounterForAuthorityLock()", blocked)
         self.assertIn("authorityFlow.lock()", blocked)
-        self.assertIn("The sale may have been saved", blocked)
+        self.assertIn("Another checkout instance updated the ledger first", blocked)
+        self.assertIn("The storage write may have committed", blocked)
         self.assertIn("reopen the app to reload the ledger", blocked)
         self.assertNotIn("showHomeWithError", blocked)
+        self.assertIn("CheckoutLedgerFailureKind.DEFINITIVE_CONFLICT", flow)
+        self.assertIn("CheckoutLedgerFailureKind.UNCERTAIN_COMMIT", flow)
+        self.assertIn("fun latchLedgerWriteFailure(error: Exception)", flow)
         ledger = (ROOT / "src/model/CheckoutLedger.kt").read_text()
         self.assertIn("class CheckoutLedgerWriteUncertainException", ledger)
 
@@ -198,7 +205,9 @@ class CheckoutAuthorityActivitySourceTest(unittest.TestCase):
         self.assertLess(create.index("saleCreationInFlight = true"), create.index("val saleId = UUID.randomUUID()"))
         self.assertIn("if (commandStarted) return@create", create)
         self.assertIn("saleCreationInFlight = false", create)
-        uncertain = create.split("is CheckoutLedgerWriteUncertainException ->", 1)[1].split("else ->", 1)[0]
+        uncertain = create.split(
+            "is CheckoutLedgerWriteUncertainException, is CheckoutLedgerConcurrentWriteException ->", 1
+        )[1].split("else ->", 1)[0]
         self.assertNotIn("saleCreationInFlight = false", uncertain)
         self.assertIn("setOnCancelListener { if (!commandStarted) saleCreationInFlight = false }", create)
         self.assertIn("saleCreationInFlight = false\n                if (followup.attempts.isEmpty())", create)
@@ -211,18 +220,101 @@ class CheckoutAuthorityActivitySourceTest(unittest.TestCase):
         self.assertIn("worker has not touched the ledger", pre_access)
         self.assertIn("completion(CheckoutAuthorityUnavailableException())", pre_access)
         post_access = worker.split("val error = try", 1)[1].split("catch (_: java.util.concurrent.RejectedExecutionException)", 1)[0]
-        self.assertIn("saleOutcomeNeedsReopen = true", post_access)
+        self.assertIn("error?.let(::latchLedgerWriteFailure)", post_access)
+        self.assertIn("is CheckoutLedgerConcurrentWriteException", self._function_section(flow, "latchLedgerWriteFailure"))
+        self.assertIn("is CheckoutLedgerWriteUncertainException", self._function_section(flow, "latchLedgerWriteFailure"))
         self.assertIn("completion(error)", post_access)
         self.assertNotIn("generation.get() != ticket) return@post", post_access)
         self.assertIn("if (authorityFlow.isSignedIn()) showTenderChoice(saleId)",
                       self._function_section(activity, "confirmSaleCreation"))
         self.assertIn("if (authorityFlow.isSignedIn()) {\n                            showHomeWithError(",
                       self._function_section(activity, "confirmSaleCreation"))
-        self.assertIn("if (saleOutcomeNeedsReopen) CheckoutAccessState.Unavailable()", flow)
-        self.assertIn("fun requiresSaleReopen(): Boolean = saleOutcomeNeedsReopen", flow)
+        self.assertIn("if (ledgerOutcomeNeedsReopen) CheckoutAccessState.Unavailable()", flow)
+        self.assertIn("fun requiresLedgerReopen(): Boolean = ledgerOutcomeNeedsReopen", flow)
         on_state = self._function_section(activity, "onAuthorityState")
-        self.assertIn("authorityFlow.requiresSaleReopen()", on_state)
-        self.assertIn("lockAfterUncertainSaleWrite()", on_state)
+        self.assertIn("authorityFlow.requiresLedgerReopen()", on_state)
+        self.assertIn("lockAfterLedgerReload()", on_state)
+
+    def test_cash_handover_is_prepared_before_collection_and_recovers_after_restart(self):
+        activity = (ROOT / "src/android/CheckoutActivity.kt").read_text()
+        flow = (ROOT / "src/android/AndroidCheckoutAuthorityFlow.kt").read_text()
+        ledger = (ROOT / "src/model/CheckoutLedger.kt").read_text()
+        entry = self._function_section(activity, "showCashEntry")
+        recovery = self._function_section(activity, "showCashIntentRecovery")
+        complete = self._function_section(flow, "executeCashIntentMutation")
+        complete_entry = self._function_section(flow, "executeCashComplete")
+        prepare = self._function_section(flow, "executeCashPrepare")
+        self.assertIn("snapshot.saleVersions[saleId]", entry)
+        self.assertIn('val operationId = "cash-prepare-$paymentId"', entry)
+        self.assertIn("cashRecordInFlight", entry)
+        self.assertIn("authorityFlow.executeCashPrepare(", entry)
+        self.assertIn("Do not accept cash yet", entry)
+        self.assertIn('setPositiveButton("Prepare handover"', entry)
+        self.assertNotIn("executeCapability", entry)
+        self.assertIn("!authorityFlow.isSignedIn() || !visible", entry)
+        self.assertIn("cashRecordInFlight = false", entry)
+        self.assertIn("CashPaymentIntentStatus.PREPARED", entry)
+        self.assertIn("ledger.prepareCashPayment(", prepare)
+        self.assertIn("expectedSaleVersion", prepare)
+        self.assertIn("expectedRemainingMinor", prepare)
+        self.assertIn("intent.completeOperationId", complete)
+        self.assertIn("intent.cancelOperationId", complete)
+        self.assertIn("expectedSaleVersion: Long", complete_entry)
+        self.assertIn("expectedRemainingMinor: Long", complete_entry)
+        self.assertIn("expectedRemainingMinor", complete)
+        self.assertIn("I received cash · confirm payment", recovery)
+        self.assertIn("No cash received · cancel intent", recovery)
+        self.assertIn("blocks all other tenders", recovery)
+        self.assertIn("Current remaining", recovery)
+        self.assertIn('ui.primary("I received cash · confirm payment")', recovery)
+        self.assertNotIn("isEnabled = canComplete", recovery)
+        self.assertIn("minOf(freshIntent.tenderedMinor, remaining)", recovery)
+        self.assertIn("remainingAfterPayment", recovery)
+        self.assertIn("This will record a partial cash payment", recovery)
+        self.assertIn("The current balance determines the amount applied", recovery)
+        self.assertIn("sale.pendingCashPayment", self._function_section(activity, "showReceipt"))
+        self.assertIn("if (sale.pendingCashPayment != null) return showReceipt(saleId)", self._function_section(activity, "showTenderChoice"))
+        confirm = self._function_section(activity, "confirmPreparedCash")
+        self.assertIn("ledger.eventSnapshot()", confirm)
+        self.assertIn("snapshot.saleVersions[saleId]", confirm)
+        self.assertIn("sale.remainingMinor", confirm)
+        self.assertIn("currentVersion != reviewedVersion", confirm)
+        self.assertIn("showCashIntentRecovery(saleId, currentIntent)", confirm)
+        self.assertIn("authorityFlow.executeCashComplete(ledger, saleId, currentIntent", confirm)
+        self.assertIn("ledger.eventSnapshot().saleVersions[saleId]", self._function_section(activity, "cancelPreparedCash"))
+        self.assertIn("authorityFlow.executeCashCancel(ledger, saleId, intent", self._function_section(activity, "cancelPreparedCash"))
+        self.assertIn("fun prepareCashPayment(", ledger)
+        self.assertIn("fun completePreparedCashPayment(", ledger)
+        completed = ledger.split("fun completePreparedCashPayment(", 1)[1].split("fun cancelPreparedCashPayment(", 1)[0]
+        self.assertIn("expectedRemainingMinor: Long", completed)
+        self.assertIn("appliedMinor = if (allowPreparedCompletion) minOf(tenderedMinor, remainingMinor)", ledger)
+        self.assertIn("intent.completeExpectedRemainingMinor = expectedRemainingMinor", completed)
+        self.assertIn("completedExpectedRemainingMinor: Long?", ledger)
+        self.assertIn("fun cancelPreparedCashPayment(", ledger)
+        self.assertIn("fun getCashPaymentIntent(paymentId: String)", ledger)
+
+    def test_emulator_cash_path_proves_prepare_recovery_then_single_completion(self):
+        harness = (ROOT / "tests/android/authority_acceptance.py").read_text()
+        flow = harness.split("def attributed_sale_persistence", 1)[1].split("def sign_in", 1)[0]
+        for marker in (
+            r"Prepare handover",
+            r"Cash handover recovery",
+            "self.device.stop_app()",
+            r"CASH HANDOVER NEEDS RECOVERY",
+            r"prepared cash intent allowed another tender",
+            r"I received cash · confirm payment",
+            r"Cash received · 1\.23 USD",
+            r"durable cash payment ledger changed while reopening the paid sale",
+        ):
+            self.assertIn(marker, flow)
+
+    def test_all_ledger_write_failures_latch_reopen(self):
+        activity = (ROOT / "src/android/CheckoutActivity.kt").read_text()
+        flow = (ROOT / "src/android/AndroidCheckoutAuthorityFlow.kt").read_text()
+        self.assertIn("error?.let(::latchLedgerWriteFailure)", self._function_section(flow, "executeCapability"))
+        for function_name in ("reconcileBitcoinAttempts", "cancelBitcoin", "beginSquareAttempt", "reconcileCard"):
+            section = self._function_section(activity, function_name)
+            self.assertIn("latchDirectLedgerFailure", section)
 
     def test_report_reads_are_authorized_and_never_render_stale_data(self):
         controller = (ROOT / "src/android/CheckoutReportController.kt").read_text()

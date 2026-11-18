@@ -1,0 +1,42 @@
+{
+  "title": "Android Ledger v10 cash integrity validation",
+  "as_of": "2026-11-18",
+  "base_commit": "dc01307356fe21e720b92e2026d7113d7ce4b029",
+  "scope": "Experimental Regtest Android checkout: Ledger v10 authenticated manual sale and two-stage cash commands, exact replay, cross-instance CAS, strict legacy migration, source/model validation, two-ABI package build, and disposable API 35 acceptance.",
+  "checks": [
+    {
+      "name": "Android source and harness contracts",
+      "command": "python3 -m unittest discover -s apps/checkout-android/tests -p 'test_*.py'",
+      "result": "passed; 21 tests"
+    },
+    {
+      "name": "complete checkout JVM model suite",
+      "command": "JAVA_HOME=<jdk21> KOTLIN_HOME=<kotlinc-2.2.20> apps/checkout-android/tests/run-jvm.sh /tmp/openbmt-checkout-payment-v10",
+      "result": "passed with -Werror and jvm-target 1.8; includes two-stage cash restart/replay/conflict, fresh-balance partial/full/zero application, later-evidence reopen, strict v10 codec and coverage, exact raw-byte CAS, stale writers, maximum IDs, and v2-v9 migration"
+    },
+    {
+      "name": "experimental checkout Android package",
+      "command": "OPENBMT_GUARD=<coordinator runner> CHECKOUTAPK_CARGO_TARGET=/tmp/openbmt-checkout-cargo CHECKOUTAPK_OUT=/tmp/openbmt-checkout-payment-v10 CHECKOUTAPK_SKIP_RUST=1 apps/checkout-android/build.sh",
+      "result": "passed; feature-verified native libraries packaged for arm64-v8a and x86_64, Kotlin compiled, APK dexed, aligned, test-signed, and signature-verified",
+      "artifact": {
+        "path": "/tmp/openbmt-checkout-payment-v10/openbmt-checkout-test.apk",
+        "bytes": 62773039,
+        "sha256": "7e3125eb4ca3ac6b40efecf769c1dd2f8e2a97e28d8d7e190e1b18c9187b39bb"
+      }
+    },
+    {
+      "name": "disposable API 35 Android acceptance",
+      "command": "python3 apps/checkout-android/tests/android/authority_acceptance.py --apk /tmp/openbmt-checkout-payment-v10/openbmt-checkout-test.apk --fixture /tmp/checkout-regtest-pairing-next.obmt --serial emulator-5554",
+      "result": "passed full non-expiry suite, including prepared cash intent force-stop recovery, tender blocking, single completion and restart persistence, plus existing authority, staff, lifecycle, export, recovery and fail-closed scenarios"
+    }
+  ],
+  "open_gates": [
+    "Cash remains a human acknowledgment without physical note, drawer, or returned-change verification.",
+    "Bitcoin/card, refund, provider-observation, catalog, inventory, fulfillment, and cash-session linking remain unattributed compatibility or separate-module paths.",
+    "CAS protects cooperating writers but does not provide tamper evidence, rollback/ABA detection, or an external monotonic freshness anchor.",
+    "The retained-intent and command history needs authenticated checkpoint/archive design before the 1,000-intent, 4 MiB, or 5,000-command bound.",
+    "CAS/uncertain failures and late/rising provider evidence are JVM-tested, not Android fault-injected; no physical-device workflow was run.",
+    "Production card hardware/approval, mainnet, integrated Lightning, real funds, merchant shifts, and typed SYSTEM observations remain open."
+  ],
+  "claim_boundary": "The evidence supports the exact test-only APK's normal API 35 two-stage manual-cash recovery workflow and the model integrity cases listed above. The 502-capability register remains unchanged."
+}

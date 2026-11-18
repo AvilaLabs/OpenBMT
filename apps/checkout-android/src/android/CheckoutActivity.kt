@@ -86,6 +86,7 @@ open class CheckoutActivity : Activity() {
     private var pendingPairingFixture: File? = null
     private var pairingImportInFlight = false
     private var saleCreationInFlight = false
+    private var cashRecordInFlight = false
     private var node: CounterNode? = null
     private var torLease: TorLease? = null
     private var pumpThread: Thread? = null
@@ -129,7 +130,7 @@ open class CheckoutActivity : Activity() {
     private var businessStartupFault: String? = null
     private var pendingSavedUiState: Bundle? = null
     private var staffAdministrationVisible = false
-    private var saleOutcomePromptShown = false
+    private var ledgerOutcomePromptShown = false
     private var staffAdministrationSnapshot: CheckoutStaffAdministrationSnapshot? = null
     private var staffAdministrationMessage: String? = null
     private var staffAdministrationRevision = 0L
@@ -198,8 +199,8 @@ open class CheckoutActivity : Activity() {
     }
 
     private fun onAuthorityState(state: CheckoutAccessState) {
-        if (authorityFlow.requiresSaleReopen()) {
-            lockAfterUncertainSaleWrite()
+        if (authorityFlow.requiresLedgerReopen()) {
+            lockAfterLedgerReload()
             return
         }
         if (state !is CheckoutAccessState.SignedIn) {
@@ -296,7 +297,14 @@ open class CheckoutActivity : Activity() {
                     window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
                     showHome()
                 }
+
             })
+    }
+
+    /** Stops direct provider/counter callbacks after a poisoned Ledger and schedules the reload gate. */
+    private fun latchDirectLedgerFailure(error: Exception): Boolean {
+        val newlyLatched = authorityFlow.latchLedgerWriteFailure(error) != null
+        return newlyLatched || authorityFlow.requiresLedgerReopen()
     }
 
     /** Business stores are opened only after local authority has produced a signed-in actor. */
@@ -312,6 +320,10 @@ open class CheckoutActivity : Activity() {
             ledger.initializeEvents()
             pairing = pairingFile.load()
         } catch (e: Exception) {
+            if (latchDirectLedgerFailure(e)) {
+                lockAfterLedgerReload()
+                return
+            }
             businessStartupFault = safeDetail(e)
             return
         }
@@ -783,8 +795,12 @@ open class CheckoutActivity : Activity() {
     }?.saleId
 
     private fun reconcileBitcoinAttempts() {
+        if (authorityFlow.requiresLedgerReopen()) return
         val currentNode = node ?: return
-        val runSales = ledger.listSales()
+        val runSales = try { ledger.listSales() } catch (e: Exception) {
+            if (latchDirectLedgerFailure(e)) return
+            throw e
+        }
         for (sale in runSales) {
             for (attempt in sale.attempts) {
                 if (attempt.tender != Tender.BITCOIN) continue
@@ -794,7 +810,12 @@ open class CheckoutActivity : Activity() {
                     val received = screen.receivedSats.coerceAtLeast(0)
                     val previous = attempt.bitcoinEvidence.firstOrNull()
                     if (attempt.cancellationRequested && !attempt.cancellationAcknowledged && screen.state == SaleState.Cancelled && received == 0L) {
-                        try { ledger.acknowledgeBitcoinCancellation(sale.saleId, attempt.attemptId) } catch (_: Exception) {}
+                        try {
+                            ledger.acknowledgeBitcoinCancellation(sale.saleId, attempt.attemptId)
+                        } catch (e: Exception) {
+                            if (latchDirectLedgerFailure(e)) return
+                            throw e
+                        }
                     }
                     val enoughDepth = screen.state == SaleState.Confirmed || screen.state == SaleState.Final
                     // Counter FFI exposes its configured check state, not raw block depth. This 1/1 witness means
@@ -826,7 +847,8 @@ open class CheckoutActivity : Activity() {
                         activePayment = screen.payment
                         activeUri = screen.payment?.copyUri
                     }
-                } catch (_: Exception) {
+                } catch (e: Exception) {
+                    if (latchDirectLedgerFailure(e)) return
                     // Keep the last durable evidence. A next pump or app restart retries the native read.
                 }
             }
@@ -1068,7 +1090,7 @@ open class CheckoutActivity : Activity() {
                     is CheckoutAuthorityDeniedException, is CheckoutAuthorityUnavailableException -> {
                         saleCreationInFlight = false
                     }
-                    is CheckoutLedgerWriteUncertainException -> lockAfterUncertainSaleWrite()
+                    is CheckoutLedgerWriteUncertainException, is CheckoutLedgerConcurrentWriteException -> lockAfterLedgerReload()
                     else -> {
                         saleCreationInFlight = false
                         if (authorityFlow.isSignedIn()) {
@@ -1092,14 +1114,21 @@ open class CheckoutActivity : Activity() {
             .show()
     }
 
-    private fun lockAfterUncertainSaleWrite() {
-        if (saleOutcomePromptShown || isFinishing || isDestroyed) return
-        saleOutcomePromptShown = true
+    private fun lockAfterLedgerReload(kind: CheckoutLedgerFailureKind? = authorityFlow.ledgerReloadFailureKind()) {
+        cashRecordInFlight = false
+        if (ledgerOutcomePromptShown || isFinishing || isDestroyed) return
+        ledgerOutcomePromptShown = true
         stopCounterForAuthorityLock()
         authorityFlow.lock()
+        val (title, message) = when (kind ?: CheckoutLedgerFailureKind.UNCERTAIN_COMMIT) {
+            CheckoutLedgerFailureKind.DEFINITIVE_CONFLICT -> "Checkout changed elsewhere" to
+                "Another checkout instance updated the ledger first. This action was not committed by this instance. Checkout is locked; close and reopen the app to load current Sales before retrying."
+            CheckoutLedgerFailureKind.UNCERTAIN_COMMIT -> "Checkout update needs checking" to
+                "The storage write may have committed. Checkout is locked; close and reopen the app to reload the ledger, then inspect Sales before repeating any payment operation."
+        }
         AlertDialog.Builder(this)
-            .setTitle("Sale outcome needs checking")
-            .setMessage("The sale may have been saved. No payment attempt was started. Checkout is locked; close and reopen the app to reload the ledger, then verify Sales before continuing.")
+            .setTitle(title)
+            .setMessage(message)
             .setCancelable(false)
             .setPositiveButton("Close checkout") { _, _ -> finish() }
             .show()
@@ -1108,6 +1137,7 @@ open class CheckoutActivity : Activity() {
     private fun showTenderChoice(saleId: String) {
         receiptToResume = null
         val sale = try { ledger.getSale(saleId) } catch (_: Exception) { return showSalesIfPossible() }
+        if (sale.pendingCashPayment != null) return showReceipt(saleId)
         val body = ArrayList<View>()
         body.add(ui.receipt(pricedItemReceiptLines(sale)))
         sale.pricing?.let { pricing ->
@@ -1513,29 +1543,38 @@ open class CheckoutActivity : Activity() {
 
     private fun canOfferCash(saleId: String): Boolean = try {
         ledger.canRecordCashPayment(saleId)
-    } catch (_: Exception) {
+    } catch (error: Exception) {
+        if (latchDirectLedgerFailure(error)) lockAfterLedgerReload()
         false
     }
 
-    /** Cash entry records only after the cashier explicitly confirms physical receipt. */
-    private fun showCashEntry(saleId: String, stablePaymentId: String = UUID.randomUUID().toString(), stableRecordedAt: Long = nowSecs()) {
-        val sale = try { ledger.getSale(saleId) } catch (_: Exception) { return showSalesIfPossible() }
+    /** Prepare and durably save a cash handover before the UI permits physical collection. */
+    private fun showCashEntry(saleId: String, stablePaymentId: String = UUID.randomUUID().toString(), stablePreparedAt: Long = nowSecs()) {
+        if (cashRecordInFlight) return
+        val snapshot = try { ledger.eventSnapshot() } catch (error: Exception) {
+            if (latchDirectLedgerFailure(error)) return lockAfterLedgerReload()
+            return showSalesIfPossible()
+        }
+        val sale = snapshot.sales.firstOrNull { it.saleId == saleId } ?: return showSalesIfPossible()
+        val expectedSaleVersion = snapshot.saleVersions[saleId] ?: return showSalesIfPossible()
+        if (sale.pendingCashPayment != null) return showCashIntentRecovery(saleId, sale.pendingCashPayment)
         if (!canOfferCash(saleId)) {
             return showReceipt(saleId)
         }
         val paymentId = stablePaymentId
-        val recordedAt = stableRecordedAt
+        val operationId = "cash-prepare-$paymentId"
+        val preparedAt = stablePreparedAt
         val remaining = sale.remainingMinor
         val input = EditText(this).apply {
             inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
             setSingleLine(true)
             hint = "0.00"
-            contentDescription = "Cash received in USD"
+            contentDescription = "Planned cash handover amount in USD"
         }
         val preview = TextView(this).apply {
             textSize = 14f
             setTextColor(Color.rgb(24, 34, 43))
-            text = "Amount applied · ${formatAmount(remaining, "USD")}\nEnter cash received to preview change."
+            text = "Amount applied · ${formatAmount(remaining, "USD")}\nEnter the planned handover amount. No cash has been collected."
         }
         val content = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -1544,19 +1583,19 @@ open class CheckoutActivity : Activity() {
             addView(preview, LinearLayout.LayoutParams(-1, -2).also { it.topMargin = dp(12) })
         }
         val dialog = AlertDialog.Builder(this)
-            .setTitle("Cash received · USD")
-            .setMessage("Remaining balance: ${formatAmount(remaining, "USD")}\nEnter the physical cash received.")
+            .setTitle("Prepare cash handover · USD")
+            .setMessage("Remaining balance: ${formatAmount(remaining, "USD")}\nEnter the amount the customer says they will hand over. Do not accept cash yet. The intent must save before collection is offered.")
             .setView(content)
             .setNegativeButton("Cancel", null)
-            .setPositiveButton("Record cash received", null)
+            .setPositiveButton("Prepare handover", null)
             .create()
         fun parsedTender(): Long? = try { parseCashTendered(input.text.toString()) } catch (_: Exception) { null }
         fun refreshPreview() {
             val tendered = parsedTender()
             preview.text = when {
                 tendered == null -> "Amount applied · ${formatAmount(remaining, "USD")}\nEnter a USD amount with up to two decimal places."
-                tendered < remaining -> "Amount applied · ${formatAmount(remaining, "USD")}\nCash received · ${formatAmount(tendered, "USD")}\nStill due · ${formatAmount(remaining - tendered, "USD")}"
-                else -> "Amount applied · ${formatAmount(remaining, "USD")}\nCash received · ${formatAmount(tendered, "USD")}\nChange due · ${formatAmount(Math.subtractExact(tendered, remaining), "USD")}"
+                tendered < remaining -> "Amount applied · ${formatAmount(remaining, "USD")}\nPlanned handover · ${formatAmount(tendered, "USD")}\nStill due · ${formatAmount(remaining - tendered, "USD")}"
+                else -> "Amount applied · ${formatAmount(remaining, "USD")}\nPlanned handover · ${formatAmount(tendered, "USD")}\nChange due · ${formatAmount(Math.subtractExact(tendered, remaining), "USD")}"
             }
             dialog.getButton(AlertDialog.BUTTON_POSITIVE)?.isEnabled = tendered != null && tendered >= remaining
         }
@@ -1566,26 +1605,54 @@ open class CheckoutActivity : Activity() {
             override fun afterTextChanged(s: Editable?) = Unit
         })
         dialog.setOnShowListener {
-            val record = dialog.getButton(AlertDialog.BUTTON_POSITIVE)
-            record.isEnabled = false
-            record.setOnClickListener {
+            val prepare = dialog.getButton(AlertDialog.BUTTON_POSITIVE)
+            prepare.isEnabled = false
+            prepare.setOnClickListener {
+                if (cashRecordInFlight) return@setOnClickListener
                 val tendered = parsedTender() ?: return@setOnClickListener
                 if (tendered < remaining) return@setOnClickListener
-                // Preserve the destination before the durable write so recreation can reopen its receipt.
+                cashRecordInFlight = true
                 receiptToResume = saleId
                 dialog.dismiss()
-                authorityFlow.executeCapability(CheckoutAuthorityCapability.TENDER_BEGIN, {
-                    ledger.recordCashPayment(saleId, paymentId, tendered, recordedAt)
-                }) { error ->
-                    if (error == null) return@executeCapability showReceipt(saleId)
-                    if (error is CheckoutAuthorityDeniedException || error is CheckoutAuthorityUnavailableException) return@executeCapability
-                    val uncertain = (error.message ?: "").contains("uncertain", ignoreCase = true)
-                    if (!uncertain) receiptToResume = null
+                authorityFlow.executeCashPrepare(
+                    ledger = ledger,
+                    operationId = operationId,
+                    saleId = saleId,
+                    paymentId = paymentId,
+                    tenderedMinor = tendered,
+                    preparedAt = preparedAt,
+                    expectedSaleVersion = expectedSaleVersion,
+                    expectedRemainingMinor = remaining,
+                ) { result, error ->
+                    if (authorityFlow.requiresLedgerReopen()) {
+                        cashRecordInFlight = false
+                        lockAfterLedgerReload()
+                        return@executeCashPrepare
+                    }
+                    if (!authorityFlow.isSignedIn() || !visible || isFinishing || isDestroyed) {
+                        cashRecordInFlight = false
+                        return@executeCashPrepare
+                    }
+                    cashRecordInFlight = false
+                    if (error == null) {
+                        val committed = result?.value ?: return@executeCashPrepare showMessage(
+                            "Cash handover needs checking", "No saved intent was returned. Inspect Sales before collecting cash.",
+                        ) { showReceipt(saleId) }
+                        if (committed.status == CashPaymentIntentStatus.PREPARED) showCashIntentRecovery(saleId, committed)
+                        else showReceipt(saleId)
+                        return@executeCashPrepare
+                    }
+                    if (error is CheckoutAuthorityDeniedException || error is CheckoutAuthorityUnavailableException) return@executeCashPrepare
+                    if (authorityFlow.requiresLedgerReopen()) {
+                        lockAfterLedgerReload()
+                        return@executeCashPrepare
+                    }
+                    receiptToResume = null
                     showMessage(
-                        if (uncertain) "Cash record needs checking" else "Cash payment was not recorded",
-                        "The cash may have been received even though this screen did not confirm the ledger result. Do not collect or record it again until you have inspected the sale in Sales.",
+                        "Cash handover was not prepared",
+                        "No collection action was offered. Verify the saved sale before trying again.",
                         safeDetail(error),
-                    ) { if (uncertain) finish() else showReceipt(saleId) }
+                    ) { showReceipt(saleId) }
                 }
             }
             refreshPreview()
@@ -1593,10 +1660,111 @@ open class CheckoutActivity : Activity() {
         dialog.show()
     }
 
+    private fun showCashIntentRecovery(saleId: String, intent: CashPaymentIntent) {
+        val snapshot = try { ledger.eventSnapshot() } catch (error: Exception) {
+            if (latchDirectLedgerFailure(error)) return lockAfterLedgerReload()
+            return showMessage("Cash handover needs checking", "The current sale balance could not be read. Keep the prepared intent pending and inspect Sales before continuing.", safeDetail(error)) { showReceipt(saleId) }
+        }
+        val sale = snapshot.sales.firstOrNull { it.saleId == saleId } ?: return showSalesIfPossible()
+        val freshIntent = sale.pendingCashPayment ?: return showReceipt(saleId)
+        if (freshIntent.status != CashPaymentIntentStatus.PREPARED || freshIntent.paymentId != intent.paymentId) return showReceipt(saleId)
+        val reviewedVersion = snapshot.saleVersions[saleId] ?: return showReceipt(saleId)
+        val remaining = sale.remainingMinor
+        val applied = minOf(freshIntent.tenderedMinor, remaining)
+        val change = freshIntent.tenderedMinor - applied
+        val remainingAfterPayment = remaining - applied
+        val changedBalance = remaining != freshIntent.expectedRemainingMinor
+        receiptToResume = saleId
+        activeSaleShowing = false
+        val body = mutableListOf<View>(
+            ui.text("Cash handover prepared · ${formatAmount(freshIntent.tenderedMinor, "USD")}", 18f, colour = ui.pal.info.ink),
+            ui.text("Current remaining · ${formatAmount(remaining, "USD")}", 15f, colour = ui.pal.secondary),
+        )
+        body.add(ui.text("If the full tender was received: apply ${formatAmount(applied, "USD")} · return ${formatAmount(change, "USD")} as change.", 15f, colour = ui.pal.secondary))
+        if (remainingAfterPayment > 0) {
+            body.add(ui.text("This will record a partial cash payment. The sale will still have ${formatAmount(remainingAfterPayment, "USD")} remaining afterward.", 15f, colour = ui.pal.secondary))
+        }
+        if (changedBalance) {
+            body.add(ui.text("The sale balance changed after preparation, possibly because of late payment evidence. The current balance determines the amount applied; any tender above that amount is returned as change.", 14f, colour = ui.pal.secondary))
+        }
+        body.add(ui.text("The saved intent blocks all other tenders. After a restart, inspect the drawer and ask the customer what happened. Confirm only after you physically received the cash; cancel only if no cash was received.", 14f, colour = ui.pal.secondary))
+        val confirm = ui.primary("I received cash · confirm payment") {
+            confirmPreparedCash(saleId, freshIntent, reviewedVersion, remaining)
+        }
+        val actions = mutableListOf(confirm, ui.secondary("No cash received · cancel intent") {
+                AlertDialog.Builder(this)
+                    .setTitle("Confirm no cash was received")
+                    .setMessage("Cancel this prepared handover only if the drawer and customer confirm that no cash was received. This will not record a payment.")
+                    .setNegativeButton("Go back", null)
+                    .setPositiveButton("Confirm no cash; cancel") { _, _ -> cancelPreparedCash(saleId, freshIntent) }
+                    .show()
+            })
+        showUiPage(ui.bar("Cash handover recovery", back = { showCashIntentRecovery(saleId, freshIntent) }), body, actions)
+    }
+
+    private fun confirmPreparedCash(saleId: String, intent: CashPaymentIntent, reviewedVersion: Long, reviewedRemaining: Long) {
+        if (cashRecordInFlight) return
+        val snapshot = try { ledger.eventSnapshot() } catch (error: Exception) {
+            if (latchDirectLedgerFailure(error)) return lockAfterLedgerReload()
+            return showMessage("Cash handover needs checking", "The sale changed or could not be read. The intent remains pending; refresh its current balance before confirming.", safeDetail(error)) { showCashIntentRecovery(saleId, intent) }
+        }
+        val sale = snapshot.sales.firstOrNull { it.saleId == saleId } ?: return showReceipt(saleId)
+        val currentIntent = sale.pendingCashPayment ?: return showReceipt(saleId)
+        val currentVersion = snapshot.saleVersions[saleId] ?: return showReceipt(saleId)
+        if (currentIntent.paymentId != intent.paymentId) return showReceipt(saleId)
+        if (currentVersion != reviewedVersion || sale.remainingMinor != reviewedRemaining) {
+            return showCashIntentRecovery(saleId, currentIntent)
+        }
+        cashRecordInFlight = true
+        receiptToResume = saleId
+        authorityFlow.executeCashComplete(ledger, saleId, currentIntent, maxOf(nowSecs(), currentIntent.preparedAt),
+            currentVersion, sale.remainingMinor) { result, error ->
+            cashRecordInFlight = false
+            if (authorityFlow.requiresLedgerReopen()) return@executeCashComplete lockAfterLedgerReload()
+            if (!authorityFlow.isSignedIn() || !visible || isFinishing || isDestroyed) return@executeCashComplete
+            if (error != null) {
+                if (latchDirectLedgerFailure(error)) return@executeCashComplete lockAfterLedgerReload()
+                Toast.makeText(this, "Cash intent remains pending. Review the current balance and change.", Toast.LENGTH_LONG).show()
+                return@executeCashComplete showCashIntentRecovery(saleId, currentIntent)
+            }
+            if (result == null) return@executeCashComplete showMessage("Cash payment needs checking", "No completion result was returned. Inspect Sales before continuing.") { showReceipt(saleId) }
+            receiptToResume = null
+            if (result.disposition == CheckoutLedgerCommandDisposition.REPLAY) {
+                Toast.makeText(this, "This cash intent was already completed; no additional cash was collected.", Toast.LENGTH_LONG).show()
+            }
+            showReceipt(saleId)
+        }
+    }
+
+    private fun cancelPreparedCash(saleId: String, intent: CashPaymentIntent) {
+        if (cashRecordInFlight) return
+        val expectedSaleVersion = try {
+            ledger.eventSnapshot().saleVersions[saleId] ?: return showReceipt(saleId)
+        } catch (error: Exception) {
+            if (latchDirectLedgerFailure(error)) return lockAfterLedgerReload()
+            return showMessage("Cash intent needs checking", "The saved sale could not be inspected. Keep the intent pending and reopen checkout before trying again.", safeDetail(error)) { showReceipt(saleId) }
+        }
+        cashRecordInFlight = true
+        receiptToResume = saleId
+        authorityFlow.executeCashCancel(ledger, saleId, intent, maxOf(nowSecs(), intent.preparedAt), expectedSaleVersion) { result, error ->
+            cashRecordInFlight = false
+            if (authorityFlow.requiresLedgerReopen()) return@executeCashCancel lockAfterLedgerReload()
+            if (!authorityFlow.isSignedIn() || !visible || isFinishing || isDestroyed) return@executeCashCancel
+            if (error != null) {
+                if (latchDirectLedgerFailure(error)) return@executeCashCancel lockAfterLedgerReload()
+                Toast.makeText(this, "Cash intent remains pending. Review the current sale before resolving it.", Toast.LENGTH_LONG).show()
+                return@executeCashCancel showCashIntentRecovery(saleId, intent)
+            }
+            if (result == null) return@executeCashCancel showMessage("Cash intent needs checking", "No cancellation result was returned. Inspect Sales before continuing.") { showReceipt(saleId) }
+            receiptToResume = null
+            showReceipt(saleId)
+        }
+    }
+
     private fun parseCashTendered(raw: String): Long {
         require(raw.matches(Regex("(?:0|[1-9][0-9]*)(?:\\.[0-9]{1,2})?"))) { "Enter USD using digits and up to two decimal places." }
         val minor = BigDecimal(raw).setScale(2, RoundingMode.UNNECESSARY).movePointRight(2).longValueExact()
-        require(minor > 0) { "Cash received must be positive." }
+        require(minor > 0) { "Cash handover amount must be positive." }
         return minor
     }
 
@@ -1607,6 +1775,8 @@ open class CheckoutActivity : Activity() {
     private fun cartTotalMinor(): Long = checkedItemsTotal(cartItemsSnapshot())
 
     private fun openBitcoinSale(saleId: String) {
+        val pendingCash = try { ledger.getSale(saleId).pendingCashPayment } catch (_: Exception) { null }
+        if (pendingCash?.status == CashPaymentIntentStatus.PREPARED) return showCashIntentRecovery(saleId, pendingCash)
         val currentNode = node ?: return showStatus("Counter is starting", "Wait until the Regtest counter is connected. No code has been made.")
         val healthy = try { nativeLock.withLock { currentNode.status().health?.healthy == true } } catch (_: Exception) { false }
         if (!healthy) return showMessage("Bitcoin is not ready", "The native Regtest counter has not passed its network checks. No Bitcoin attempt was created; you can choose Square Sandbox if enabled.") { showTenderChoice(saleId) }
@@ -1770,10 +1940,15 @@ open class CheckoutActivity : Activity() {
                 try {
                     nativeLock.withLock { currentNode.cancel(nowSecs(), counterIndex) }
                     ledger.acknowledgeBitcoinCancellation(saleId, attemptId)
-                } catch (_: Exception) {
+                } catch (e: Exception) {
+                    if (latchDirectLedgerFailure(e)) return@executeCapability
                     val screen = try { nativeLock.withLock { currentNode.judge(nowSecs(), counterIndex) } } catch (_: Exception) { null }
                     if (screen?.state == SaleState.Cancelled && screen.receivedSats == 0L) {
-                        try { ledger.acknowledgeBitcoinCancellation(saleId, attemptId) } catch (_: Exception) {}
+                        try {
+                            ledger.acknowledgeBitcoinCancellation(saleId, attemptId)
+                        } catch (acknowledgementError: Exception) {
+                            if (latchDirectLedgerFailure(acknowledgementError)) return@executeCapability
+                        }
                     }
                 }
             }
@@ -1900,6 +2075,14 @@ open class CheckoutActivity : Activity() {
             receiptLines.add(ReceiptLine("Frozen total · ${formatAmount(pricing.totalMinor, sale.currency)}", LineStyle.Strong))
         }
         body.add(ui.receipt(receiptLines))
+        val pendingCash = sale.pendingCashPayment
+        if (pendingCash?.status == CashPaymentIntentStatus.PREPARED) {
+            body.add(ui.receipt(listOf(
+                ReceiptLine("CASH HANDOVER NEEDS RECOVERY", LineStyle.Strong),
+                ReceiptLine("Prepared · ${formatAmount(pendingCash.tenderedMinor, "USD")}", LineStyle.Small),
+                ReceiptLine("This saved intent blocks every other tender. Inspect the drawer and ask the customer what happened.", LineStyle.Small),
+            )))
+        }
         val paymentLines = ArrayList<ReceiptLine>()
         paymentLines.add(ReceiptLine("${saleStateLabel(sale)} · ${formatAmount(sale.amountMinor, sale.currency)}", LineStyle.Strong))
         paymentLines.add(ReceiptLine("Received · ${formatAmount(sale.receivedMinor, sale.currency)}"))
@@ -1942,10 +2125,12 @@ open class CheckoutActivity : Activity() {
             )))
         }
         val actions = ArrayList<Pair<String, () -> Unit>>()
-        if (sale.attempts.isEmpty() && sale.remainingMinor > 0) {
+        if (pendingCash?.status == CashPaymentIntentStatus.PREPARED) {
+            actions.add("Recover prepared cash handover" to { showCashIntentRecovery(sale.saleId, pendingCash) })
+        } else if (sale.attempts.isEmpty() && sale.remainingMinor > 0) {
             actions.add("Choose payment" to { showTenderChoice(sale.saleId) })
         }
-        if (canOfferCash(sale.saleId)) {
+        if (pendingCash == null && canOfferCash(sale.saleId)) {
             actions.add("Pay remaining by Cash" to { showCashEntry(sale.saleId) })
         }
         val resumableBitcoin = sale.attempts.lastOrNull { it.tender == Tender.BITCOIN && it.state !in setOf(PaymentState.CONFIRMED, PaymentState.PAID, PaymentState.CANCELED) }
@@ -1982,7 +2167,7 @@ open class CheckoutActivity : Activity() {
         actions.add("Back to sales" to { showSales() })
         val bitcoinBlocksCard = sale.attempts.any { it.tender == Tender.BITCOIN && it.state !in setOf(PaymentState.CANCELED, PaymentState.CONFIRMED, PaymentState.PAID) }
         val cardOutcomeUnknown = sale.attempts.any { it.tender == Tender.CARD && it.state == PaymentState.UNKNOWN }
-        if (!sale.requiresReview && sale.currency == "USD" && sale.remainingMinor > 0 && cardBridge != null && !bitcoinBlocksCard && !cardOutcomeUnknown) {
+        if (pendingCash == null && !sale.requiresReview && sale.currency == "USD" && sale.remainingMinor > 0 && cardBridge != null && !bitcoinBlocksCard && !cardOutcomeUnknown) {
             actions.add(0, "Pay remaining by Square Sandbox" to { beginSquareAttempt(sale.saleId, sale.remainingMinor) })
         }
         val fixedActions = ArrayList<Pair<String, () -> Unit>>()
@@ -2079,6 +2264,9 @@ open class CheckoutActivity : Activity() {
 
     private fun confirmRefundRequest(saleId: String, attemptId: String) {
         val sale = ledger.getSale(saleId)
+        sale.pendingCashPayment?.takeIf { it.status == CashPaymentIntentStatus.PREPARED }?.let {
+            return showCashIntentRecovery(saleId, it)
+        }
         val attempt = sale.attempts.firstOrNull { it.attemptId == attemptId } ?: return showReceipt(saleId)
         val amount = refundRequestCapacity(sale, attempt) ?: return showMessage(
             "No refundable amount remains",
@@ -2105,6 +2293,9 @@ open class CheckoutActivity : Activity() {
     private fun beginSquareAttempt(saleId: String, amountMinor: Long) {
         val bridge = cardBridge ?: return showMessage("Square is unavailable in this build", "No card attempt was created. Use Bitcoin or install the Sandbox-only build.") { showReceipt(saleId) }
         val sale = ledger.getSale(saleId)
+        sale.pendingCashPayment?.takeIf { it.status == CashPaymentIntentStatus.PREPARED }?.let {
+            return showCashIntentRecovery(saleId, it)
+        }
         if (sale.requiresReview || sale.currency != "USD" || amountMinor <= 0 || amountMinor > sale.remainingMinor) {
             return showMessage("This card amount cannot be started", "The saved sale was not changed. Check its amount and currency.") { showReceipt(saleId) }
         }
@@ -2124,19 +2315,33 @@ open class CheckoutActivity : Activity() {
             try {
                 bridge.begin(attemptId, referenceId, amountMinor, "USD", object : CardCheckoutBridge.Listener {
                     override fun onEvidence(evidenceId: String, result: CardResult, amountMinor: Long) {
-                        val latest = ledger.getSale(saleId).attempts.first { it.attemptId == attemptId }.cardEvidence.maxByOrNull { it.observedAt }
-                        val observedAt = maxOf(nowSecs(), (latest?.observedAt ?: -1L) + 1L)
-                        ledger.recordCardEvidence(saleId, attemptId, evidenceId, attemptId, result, amountMinor, observedAt)
+                        try {
+                            val latest = ledger.getSale(saleId).attempts.first { it.attemptId == attemptId }.cardEvidence.maxByOrNull { it.observedAt }
+                            val observedAt = maxOf(nowSecs(), (latest?.observedAt ?: -1L) + 1L)
+                            ledger.recordCardEvidence(saleId, attemptId, evidenceId, attemptId, result, amountMinor, observedAt)
+                        } catch (error: Exception) {
+                            if (latchDirectLedgerFailure(error)) return
+                            main.post { showMessage("Card result was not saved", "The card attempt remains unresolved. Keep it locked and reconcile the same reference before retrying.", safeDetail(error)) { showReceipt(saleId) } }
+                            return
+                        }
                         main.post { showReceipt(saleId) }
                     }
 
                     override fun onUncertain() {
-                        ledger.markCancellationUnknown(saleId, attemptId)
+                        try {
+                            ledger.markCancellationUnknown(saleId, attemptId)
+                        } catch (error: Exception) {
+                            if (latchDirectLedgerFailure(error)) return
+                        }
                         main.post { showMessage("Card payment outcome is unknown", "The saved Square attempt stays locked. Do not retry the card or switch tender until it is reconciled.", "Attempt: $attemptId · reference: $referenceId") { showReceipt(saleId) } }
                     }
                 })
             } catch (e: Exception) {
-                try { ledger.markCancellationUnknown(saleId, attemptId) } catch (_: Exception) {}
+                try {
+                    ledger.markCancellationUnknown(saleId, attemptId)
+                } catch (ledgerError: Exception) {
+                    if (latchDirectLedgerFailure(ledgerError)) return@executeCapability
+                }
                 showMessage("Square outcome needs checking", "The saved attempt remains locked. Do not retry or switch tender.", safeDetail(e)) { showReceipt(saleId) }
             }
         }
@@ -2318,19 +2523,33 @@ open class CheckoutActivity : Activity() {
             try {
                 bridge.reconcile(attempt.attemptId, referenceId, attempt.amountMinor, sale.currency, object : CardCheckoutBridge.Listener {
                     override fun onEvidence(evidenceId: String, result: CardResult, amountMinor: Long) {
-                        val latest = ledger.getSale(saleId).attempts.first { it.attemptId == attempt.attemptId }.cardEvidence.maxByOrNull { it.observedAt }
-                        val observedAt = maxOf(nowSecs(), (latest?.observedAt ?: -1L) + 1L)
-                        ledger.recordCardEvidence(saleId, attempt.attemptId, evidenceId, attempt.stableId!!, result, amountMinor, observedAt)
+                        try {
+                            val latest = ledger.getSale(saleId).attempts.first { it.attemptId == attempt.attemptId }.cardEvidence.maxByOrNull { it.observedAt }
+                            val observedAt = maxOf(nowSecs(), (latest?.observedAt ?: -1L) + 1L)
+                            ledger.recordCardEvidence(saleId, attempt.attemptId, evidenceId, attempt.stableId!!, result, amountMinor, observedAt)
+                        } catch (error: Exception) {
+                            if (latchDirectLedgerFailure(error)) return
+                            main.post { showMessage("Card result was not saved", "The saved attempt remains locked. Reopen Sales and reconcile the same provider reference before retrying.", safeDetail(error)) { showReceipt(saleId) } }
+                            return
+                        }
                         main.post { showReceipt(saleId) }
                     }
 
                     override fun onUncertain() {
-                        ledger.markCancellationUnknown(saleId, attempt.attemptId)
+                        try {
+                            ledger.markCancellationUnknown(saleId, attempt.attemptId)
+                        } catch (error: Exception) {
+                            if (latchDirectLedgerFailure(error)) return
+                        }
                         main.post { showMessage("Square still has no final answer", "This attempt remains locked. Do not retry the card or switch tender.", referenceId) { showReceipt(saleId) } }
                     }
                 })
             } catch (e: Exception) {
-                ledger.markCancellationUnknown(saleId, attempt.attemptId)
+                try {
+                    ledger.markCancellationUnknown(saleId, attempt.attemptId)
+                } catch (ledgerError: Exception) {
+                    if (latchDirectLedgerFailure(ledgerError)) return@executeCapability
+                }
                 showMessage("Square could not confirm the outcome", "The attempt remains locked. Do not retry the card or switch tender.", safeDetail(e)) { showReceipt(saleId) }
             }
         }
@@ -2382,8 +2601,23 @@ open class CheckoutActivity : Activity() {
 
     private class AndroidLedgerStorage(private val dir: File, private val name: String) : DurableLedgerStorage {
         private val file = File(dir, name)
-        override fun read(): ByteArray? = if (file.exists()) file.readBytes() else null
+        override fun read(): ByteArray? {
+            if (!file.exists()) return null
+            file.inputStream().use { input ->
+                val output = ByteArrayOutputStream()
+                val buffer = ByteArray(8192)
+                while (true) {
+                    val count = input.read(buffer)
+                    if (count < 0) break
+                    require(output.size().toLong() + count <= 4L * 1024 * 1024) { "ledger file exceeds size limit" }
+                    output.write(buffer, 0, count)
+                }
+                return output.toByteArray()
+            }
+        }
         override fun writeAtomically(bytes: ByteArray) = DurableFile.write(dir, file, bytes)
+        override fun compareAndSwap(expectedBytes: ByteArray?, nextBytes: ByteArray): Boolean =
+            DurableFile.compareAndSwap(dir, file, expectedBytes, nextBytes)
     }
 }
 

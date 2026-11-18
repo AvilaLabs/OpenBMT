@@ -12,6 +12,8 @@ import java.util.concurrent.Executors
 import java.util.concurrent.ThreadFactory
 import java.util.concurrent.atomic.AtomicLong
 
+enum class CheckoutLedgerFailureKind { DEFINITIVE_CONFLICT, UNCERTAIN_COMMIT }
+
 /**
  * Activity-facing worker boundary for authority. Every descriptor, sealed-record, refresh and
  * PBKDF2 operation is serialized on one private executor; only the immutable state is published
@@ -25,6 +27,7 @@ internal class AndroidCheckoutAuthorityFlow(
     private val appContext = context.applicationContext
     private val main = Handler(Looper.getMainLooper())
     private val generation = AtomicLong(0)
+    private val ledgerFailureMonitor = Any()
     private val executor = Executors.newSingleThreadExecutor(ThreadFactory { task ->
         Thread(task, "checkout-authority").apply { isDaemon = true }
     })
@@ -33,17 +36,42 @@ internal class AndroidCheckoutAuthorityFlow(
     }
     @Volatile private var publishedState: CheckoutAccessState = CheckoutAccessState.Loading
     @Volatile private var controller: CheckoutAuthorityController? = null
-    @Volatile private var saleOutcomeNeedsReopen = false
+    @Volatile private var ledgerOutcomeNeedsReopen = false
+    @Volatile private var ledgerFailureKind: CheckoutLedgerFailureKind? = null
     private var authorityRecord: CheckoutAuthority? = null
     private var installationScopeStore: AndroidCheckoutInstallationScopeStore? = null
     private var installationDescriptor: CheckoutInstallationDescriptor? = null
     @Volatile private var closed = false
 
-    fun state(): CheckoutAccessState = if (saleOutcomeNeedsReopen) CheckoutAccessState.Unavailable() else publishedState
-    fun isSignedIn(): Boolean = !saleOutcomeNeedsReopen && publishedState is CheckoutAccessState.SignedIn
-    fun isManager(): Boolean = !saleOutcomeNeedsReopen &&
+    fun state(): CheckoutAccessState = if (ledgerOutcomeNeedsReopen) CheckoutAccessState.Unavailable() else publishedState
+    fun isSignedIn(): Boolean = !ledgerOutcomeNeedsReopen && publishedState is CheckoutAccessState.SignedIn
+    fun isManager(): Boolean = !ledgerOutcomeNeedsReopen &&
         (publishedState as? CheckoutAccessState.SignedIn)?.actor?.role == CheckoutAuthorityRole.MANAGER
-    fun requiresSaleReopen(): Boolean = saleOutcomeNeedsReopen
+    fun requiresLedgerReopen(): Boolean = ledgerOutcomeNeedsReopen
+    fun ledgerReloadFailureKind(): CheckoutLedgerFailureKind? = ledgerFailureKind
+
+    /** Latch a definitive CAS loss or an uncertain storage write and publish recovery state. */
+    fun latchLedgerWriteFailure(error: Exception): CheckoutLedgerFailureKind? {
+        val detected = when (error) {
+            is CheckoutLedgerConcurrentWriteException -> CheckoutLedgerFailureKind.DEFINITIVE_CONFLICT
+            is CheckoutLedgerWriteUncertainException -> CheckoutLedgerFailureKind.UNCERTAIN_COMMIT
+            else -> return null
+        }
+        val (kind, ticket) = synchronized(ledgerFailureMonitor) {
+            ledgerFailureKind?.let { return@synchronized it to null }
+            ledgerFailureKind = detected
+            ledgerOutcomeNeedsReopen = true
+            val next = generation.incrementAndGet()
+            publishedState = CheckoutAccessState.Unavailable()
+            detected to next
+        }
+        ticket?.let { stateTicket ->
+            main.post {
+                if (!closed && generation.get() == stateTicket) onState(CheckoutAccessState.Unavailable())
+            }
+        }
+        return kind
+    }
 
     fun start() = refresh()
 
@@ -164,12 +192,12 @@ internal class AndroidCheckoutAuthorityFlow(
         operation: (CheckoutAuthoritySession) -> Unit,
         completion: (Exception?) -> Unit,
     ) {
-        if (saleOutcomeNeedsReopen) return completion(CheckoutAuthorityUnavailableException())
+        if (ledgerOutcomeNeedsReopen) return completion(CheckoutAuthorityUnavailableException())
         if (closed) return completion(CheckoutAuthorityUnavailableException())
         val ticket = generation.get()
         executor.execute {
             if (closed || generation.get() != ticket) return@execute
-            if (saleOutcomeNeedsReopen) {
+            if (ledgerOutcomeNeedsReopen) {
                 main.post { if (!closed) completion(CheckoutAuthorityUnavailableException()) }
                 return@execute
             }
@@ -203,13 +231,13 @@ internal class AndroidCheckoutAuthorityFlow(
         pricing: CheckoutPricingSnapshot?,
         completion: (Exception?) -> Unit,
     ) {
-        if (saleOutcomeNeedsReopen) return completion(CheckoutAuthorityUnavailableException())
+        if (ledgerOutcomeNeedsReopen) return completion(CheckoutAuthorityUnavailableException())
         if (closed) return completion(CheckoutAuthorityUnavailableException())
         val ticket = generation.get()
         try {
             executor.execute {
                 if (closed) return@execute
-                if (saleOutcomeNeedsReopen) {
+                if (ledgerOutcomeNeedsReopen) {
                     main.post { if (!closed) completion(CheckoutAuthorityUnavailableException()) }
                     return@execute
                 }
@@ -233,13 +261,12 @@ internal class AndroidCheckoutAuthorityFlow(
                 } catch (failure: Exception) {
                     failure
                 }
-                if (error is CheckoutLedgerWriteUncertainException) saleOutcomeNeedsReopen = true
+                error?.let(::latchLedgerWriteFailure)
                 val next = controller?.state() ?: CheckoutAccessState.Unavailable()
                 main.post {
-                    if (closed) return@post
-                    if (generation.get() == ticket && (saleOutcomeNeedsReopen || next !is CheckoutAccessState.SignedIn)) {
+                    if (!closed && generation.get() == ticket && (ledgerOutcomeNeedsReopen || next !is CheckoutAccessState.SignedIn)) {
                         main.removeCallbacks(expireSession)
-                        val effective = if (saleOutcomeNeedsReopen) CheckoutAccessState.Unavailable() else next
+                        val effective = if (ledgerOutcomeNeedsReopen) CheckoutAccessState.Unavailable() else next
                         publishedState = effective
                         onState(effective)
                     }
@@ -253,18 +280,161 @@ internal class AndroidCheckoutAuthorityFlow(
         }
     }
 
+    /** Persist the cash handover intent before the Activity offers an acceptance action. */
+    fun executeCashPrepare(
+        ledger: CheckoutLedger,
+        operationId: String,
+        saleId: String,
+        paymentId: String,
+        tenderedMinor: Long,
+        preparedAt: Long,
+        expectedSaleVersion: Long,
+        expectedRemainingMinor: Long,
+        completion: (CheckoutLedgerCommandResult<CashPaymentIntent>?, Exception?) -> Unit,
+    ) {
+        if (ledgerOutcomeNeedsReopen || closed) {
+            completion(null, CheckoutAuthorityUnavailableException())
+            return
+        }
+        val ticket = generation.get()
+        try {
+            executor.execute {
+                if (closed || ledgerOutcomeNeedsReopen) {
+                    main.post { if (!closed) completion(null, CheckoutAuthorityUnavailableException()) }
+                    return@execute
+                }
+                if (generation.get() != ticket) {
+                    // Authority changed before ledger access, so this cash command did not run.
+                    main.post { if (!closed) completion(null, CheckoutAuthorityUnavailableException()) }
+                    return@execute
+                }
+                var result: CheckoutLedgerCommandResult<CashPaymentIntent>? = null
+                val error = try {
+                    checkNotNull(controller) { "Checkout authority is unavailable" }.runCommand { session ->
+                        val authority = checkNotNull(authorityRecord) { "Checkout authority is unavailable" }
+                        val scope = checkNotNull(installationDescriptor) { "Checkout installation is unavailable" }.scope
+                        ledger.bindCommandAuthority(authority, scope)
+                        result = ledger.prepareCashPayment(
+                            session,
+                            operationId,
+                            saleId,
+                            paymentId,
+                            tenderedMinor,
+                            preparedAt,
+                            expectedSaleVersion,
+                            expectedRemainingMinor,
+                        )
+                    }
+                    null
+                } catch (failure: Exception) {
+                    failure
+                }
+                error?.let(::latchLedgerWriteFailure)
+                val next = controller?.state() ?: CheckoutAccessState.Unavailable()
+                main.post {
+                    if (!closed && generation.get() == ticket && (ledgerOutcomeNeedsReopen || next !is CheckoutAccessState.SignedIn)) {
+                        main.removeCallbacks(expireSession)
+                        val effective = if (ledgerOutcomeNeedsReopen) CheckoutAccessState.Unavailable() else next
+                        publishedState = effective
+                        onState(effective)
+                    }
+                    // A post-access result remains authoritative even after lock or Activity recreation.
+                    completion(result, error)
+                }
+            }
+        } catch (_: java.util.concurrent.RejectedExecutionException) {
+            completion(null, CheckoutAuthorityUnavailableException())
+        }
+    }
+
+    /** Complete an already prepared cash intent after explicit confirmation of physical receipt. */
+    fun executeCashComplete(
+        ledger: CheckoutLedger,
+        saleId: String,
+        intent: CashPaymentIntent,
+        completedAt: Long,
+        expectedSaleVersion: Long,
+        expectedRemainingMinor: Long,
+        completion: (CheckoutLedgerCommandResult<CashPayment>?, Exception?) -> Unit,
+    ) = executeCashIntentMutation(ledger, saleId, intent, completedAt,
+        expectedSaleVersion, expectedRemainingMinor, complete = true, completion = completion)
+
+    /** Cancel a prepared intent only after the cashier confirms that no cash was received. */
+    fun executeCashCancel(
+        ledger: CheckoutLedger,
+        saleId: String,
+        intent: CashPaymentIntent,
+        canceledAt: Long,
+        expectedSaleVersion: Long,
+        completion: (CheckoutLedgerCommandResult<CashPaymentIntent>?, Exception?) -> Unit,
+    ) = executeCashIntentMutation(ledger, saleId, intent, canceledAt,
+        expectedSaleVersion, null, complete = false, completion = completion)
+
+    private fun <T> executeCashIntentMutation(
+        ledger: CheckoutLedger,
+        saleId: String,
+        intent: CashPaymentIntent,
+        at: Long,
+        expectedSaleVersion: Long,
+        expectedRemainingMinor: Long?,
+        complete: Boolean,
+        completion: (CheckoutLedgerCommandResult<T>?, Exception?) -> Unit,
+    ) {
+        if (ledgerOutcomeNeedsReopen || closed) return completion(null, CheckoutAuthorityUnavailableException())
+        val ticket = generation.get()
+        try {
+            executor.execute {
+                if (closed || ledgerOutcomeNeedsReopen || generation.get() != ticket) {
+                    main.post { if (!closed) completion(null, CheckoutAuthorityUnavailableException()) }
+                    return@execute
+                }
+                var result: CheckoutLedgerCommandResult<T>? = null
+                val error = try {
+                    checkNotNull(controller) { "Checkout authority is unavailable" }.runCommand { session ->
+                        val authority = checkNotNull(authorityRecord) { "Checkout authority is unavailable" }
+                        val scope = checkNotNull(installationDescriptor) { "Checkout installation is unavailable" }.scope
+                        ledger.bindCommandAuthority(authority, scope)
+                        @Suppress("UNCHECKED_CAST")
+                        result = (if (complete) {
+                            ledger.completePreparedCashPayment(session, intent.completeOperationId, saleId,
+                                intent.paymentId, at, expectedSaleVersion,
+                                checkNotNull(expectedRemainingMinor) { "current cash balance snapshot is required" })
+                        } else {
+                            ledger.cancelPreparedCashPayment(session, intent.cancelOperationId, saleId,
+                                intent.paymentId, at, expectedSaleVersion)
+                        }) as CheckoutLedgerCommandResult<T>
+                    }
+                    null
+                } catch (failure: Exception) { failure }
+                error?.let(::latchLedgerWriteFailure)
+                val next = controller?.state() ?: CheckoutAccessState.Unavailable()
+                main.post {
+                    if (!closed && generation.get() == ticket && (ledgerOutcomeNeedsReopen || next !is CheckoutAccessState.SignedIn)) {
+                        main.removeCallbacks(expireSession)
+                        val effective = if (ledgerOutcomeNeedsReopen) CheckoutAccessState.Unavailable() else next
+                        publishedState = effective
+                        onState(effective)
+                    }
+                    completion(result, error)
+                }
+            }
+        } catch (_: java.util.concurrent.RejectedExecutionException) {
+            completion(null, CheckoutAuthorityUnavailableException())
+        }
+    }
+
     /** Authorize and serialize a non-cash command; attribution remains inside the worker. */
     fun executeCapability(
         capability: CheckoutAuthorityCapability,
         operation: () -> Unit,
         completion: (Exception?) -> Unit,
     ) {
-        if (saleOutcomeNeedsReopen) return completion(CheckoutAuthorityUnavailableException())
+        if (ledgerOutcomeNeedsReopen) return completion(CheckoutAuthorityUnavailableException())
         if (closed) return completion(CheckoutAuthorityUnavailableException())
         val ticket = generation.get()
         executor.execute {
             if (closed || generation.get() != ticket) return@execute
-            if (saleOutcomeNeedsReopen) {
+            if (ledgerOutcomeNeedsReopen) {
                 main.post { if (!closed) completion(CheckoutAuthorityUnavailableException()) }
                 return@execute
             }
@@ -275,6 +445,7 @@ internal class AndroidCheckoutAuthorityFlow(
             } catch (e: Exception) {
                 e
             }
+            error?.let(::latchLedgerWriteFailure)
             val next = controller?.state() ?: CheckoutAccessState.Unavailable()
             main.post {
                 if (closed || generation.get() != ticket) return@post
@@ -292,7 +463,7 @@ internal class AndroidCheckoutAuthorityFlow(
     fun lock() {
         if (closed) return
         val ticket = generation.incrementAndGet()
-        publish(if (saleOutcomeNeedsReopen) CheckoutAccessState.Unavailable() else CheckoutAccessState.Loading, ticket)
+        publish(if (ledgerOutcomeNeedsReopen) CheckoutAccessState.Unavailable() else CheckoutAccessState.Loading, ticket)
         executor.execute {
             val next = try {
                 controller?.lock() ?: CheckoutAccessState.Loading
@@ -320,9 +491,9 @@ internal class AndroidCheckoutAuthorityFlow(
     private fun enqueue(operation: () -> CheckoutAccessState) {
         if (closed) return
         val ticket = generation.incrementAndGet()
-        publish(if (saleOutcomeNeedsReopen) CheckoutAccessState.Unavailable() else CheckoutAccessState.Loading, ticket)
+        publish(if (ledgerOutcomeNeedsReopen) CheckoutAccessState.Unavailable() else CheckoutAccessState.Loading, ticket)
         executor.execute {
-            val next = if (saleOutcomeNeedsReopen) CheckoutAccessState.Unavailable()
+            val next = if (ledgerOutcomeNeedsReopen) CheckoutAccessState.Unavailable()
                 else try { operation() } catch (_: Exception) { CheckoutAccessState.Unavailable() }
             publish(next, ticket)
         }
@@ -344,7 +515,7 @@ internal class AndroidCheckoutAuthorityFlow(
                     secrets.forEach { it.fill('\u0000') }
                     return@execute
                 }
-                if (saleOutcomeNeedsReopen) {
+                if (ledgerOutcomeNeedsReopen) {
                     secrets.forEach { it.fill('\u0000') }
                     main.post {
                         if (!closed) completion(CheckoutStaffAdministrationResult.Failed("Checkout authority is unavailable."))
@@ -374,7 +545,7 @@ internal class AndroidCheckoutAuthorityFlow(
 
     private fun publish(next: CheckoutAccessState, ticket: Long) {
         if (closed || generation.get() != ticket) return
-        val effective = if (saleOutcomeNeedsReopen) CheckoutAccessState.Unavailable() else next
+        val effective = if (ledgerOutcomeNeedsReopen) CheckoutAccessState.Unavailable() else next
         publishedState = effective
         main.post {
             if (!closed && generation.get() == ticket) {
@@ -424,7 +595,7 @@ internal class AndroidCheckoutAuthorityFlow(
     }
 
     private fun refreshAccess(): CheckoutAccessState {
-        if (saleOutcomeNeedsReopen) return CheckoutAccessState.Unavailable()
+        if (ledgerOutcomeNeedsReopen) return CheckoutAccessState.Unavailable()
         val activeController = authority()
         val scopeStore = checkNotNull(installationScopeStore)
         val descriptor = scopeStore.loadDescriptor()

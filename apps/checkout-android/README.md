@@ -29,13 +29,21 @@ tender: item and modifier amounts, quantities, fixed order discount, one flat
 tax component, optional fixed tip, and exact total. Tax arithmetic supports
 inclusive extraction or exclusive addition, but the current Android form
 exposes a merchant-entered exclusive flat rate. A final zero-total sale is not
-supported. The snapshot is stored in checkout ledger format version 7. Ledger
-versions 2–6 remain readable; they retain historical totals without an invented
-pricing breakdown.
+supported. Pricing snapshots were introduced in checkout ledger format version
+7; current writes use Ledger v10. Ledger versions 2–9 remain readable and are
+left unchanged on read; older records retain historical totals without an
+invented pricing breakdown.
 
-Cash tender remains an explicit cashier acknowledgment: the cashier records
-cash received, amount applied, change, stable payment ID, and timestamp in the
-canonical sale ledger. A separate local cash-session store records opening
+Cash tender remains an explicit cashier acknowledgment rather than physical
+verification. Before the app tells the cashier to collect cash, it durably
+prepares a stable cash intent. Confirmation records cash received, amount
+applied, change, stable payment ID, timestamp, and authenticated actor in the
+same canonical sale ledger. A prepared intent survives process death, blocks
+other tenders, and must be completed after inspecting the drawer/customer or
+explicitly canceled only when no cash was received. If later payment evidence
+changes the balance, confirmation applies the cash actually usable against the
+fresh balance, shows change, and leaves any residual balance due. A separate
+local cash-session store records opening
 float, reasoned cash in/out movements, links to canonical cash payments,
 operator-entered count, close and discrepancy. A payment link records an
 existing payment; it does not collect cash again. The sale ledger and session
@@ -77,20 +85,26 @@ is not included in the audit request digest.
 Current merchant-started sale, tender, refund, catalog, inventory and report
 commands pass exact capability checks. Cash-session v4 records persist actor
 and scope attribution; v1-v3 labels remain explicitly legacy/unverified.
-Ledger v9 now has domain-tagged same-file command events for an
-opaque-session-authorized sale-creation path, and the Android checkout now uses
-that path for new manual sales. A safe typed writer for provider/native
-observations is deliberately
+Ledger v10 has domain-tagged same-file command events for opaque-session-
+authorized sale creation and manual-cash prepare, complete, and cancel paths.
+It retains the exact raw bytes opened and uses storage compare-and-swap under a
+process mutex and OS file lock, so a stale app instance cannot overwrite a
+newer ledger; conflicts and uncertain writes lock checkout until reopen. Exact
+command replay reauthorizes current access while preserving the original event
+attribution. A safe typed writer for provider/native observations is deliberately
 deferred. Existing Ledger v8 command records are verified with their original
-digest and migrate on the next write. Android tender and refund mutations still
-use compatibility methods, which are explicitly marked unattributed; catalog
-and inventory stores also remain unattributed. The generic business
+digest, v9 remains read-only compatible, and either migrates on the next write.
+Bitcoin/card, refund, and provider-observation mutations still use compatibility
+methods, which are explicitly marked unattributed; catalog and inventory stores
+also remain unattributed. The generic business
 prepare/reconcile journal is model-only and does not make separate store files
 atomic. Staff audit intent and authority mutation are likewise separate files,
 so the implementation makes no cross-file atomicity claim.
 
 The coordinator's current implementation and validation record is
-[Android sale attribution and staff reconciliation (18 November 2026)](../../docs/research/android-sale-attribution-staff-reconciliation-2026-11-18.md).
+[Android Ledger v10 cash integrity (18 November 2026)](../../docs/research/android-ledger-v10-cash-integrity-2026-11-18.md).
+The earlier [sale attribution and staff reconciliation record](../../docs/research/android-sale-attribution-staff-reconciliation-2026-11-18.md)
+is a pre-v10 historical milestone.
 Earlier [native POS foundations](../../docs/research/native-pos-foundations-2026-11-17.md),
 [Android authority and cash attribution](../../docs/research/android-authority-cash-foundation-2026-11-17.md),
 and [staff, Ledger v8, adoption-core, and emulator](../../docs/research/android-authority-ledger-adoption-2026-11-17.md)
@@ -162,9 +176,14 @@ reconciled.
 
 Legacy staff/operator labels are not authentication. New cash-session writes
 require a signed-in actor, and current Android merchant commands enforce local
-capabilities. New Android manual-sale creation uses Ledger v9 attribution (with
-strict v8 read/migration support), but tender, refund, provider-observation,
-catalog and inventory attribution remain open.
+capabilities. New Android manual-sale creation and two-stage manual-cash
+handover use Ledger v10 attribution (with strict v2–v9 read/migration support),
+but Bitcoin/card, refund, provider-observation, catalog and inventory
+attribution remain open.
+Terminal cash intents are retained for strict replay and validation; without an
+archival/checkpoint design, the current 1,000-intent, 4 MiB ledger, or 5,000-
+command bound will eventually stop further cash preparation rather than prune
+history silently.
 The staff audit journal is Android-wired, although its file and the authority
 mutation are not cross-file atomic; deterministic staff outcomes now have a
 manager-triggered receipt reconciliation path, while indeterminate outcomes
