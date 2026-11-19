@@ -1,4 +1,4 @@
-# OpenBMT design (draft 3.3, 2026-11-12, first run without keys)
+# OpenBMT design (draft 3.4, 2026-11-18, the standalone terminal)
 
 Status: design and threat model. Headless Rust components now implement many
 of these rules, and the Android apps have initial builds; integration and
@@ -6,6 +6,20 @@ device testing remain incomplete. The Bitcoin Core restore drill passes on
 regtest (`scripts/restore-drill-core.sh`). Every claim about another system
 cites a source in §17. **[verify]** marks a claim that still needs a primary
 check or a device test before it can be relied on.
+
+Draft 3.4 (D10) makes OpenBMT a standalone point of sale: the shop rings up
+the whole sale in OpenBMT and takes bitcoin, cash and cards there, instead of
+sitting beside another register. What the terminal must do is specified in
+`docs/TERMINAL-RULES.md`; `docs/terminal-map.md` places each of the 502
+capabilities. The parts of this design that served the earlier direction
+were removed from the code on 2026-11-18 and kept whole in the git tag
+`parked-2026-11-18`: integration with other registers (POS connectors, the
+till), selling online, Lightning swaps, outside LND and Core Lightning nodes,
+the experimental checkout app and Box packaging. Where this document still
+describes them, it describes that tag, not the current code; those passages
+are rewritten as each milestone reaches them. The 2-of-3 setup, the Key
+app's role in it and the approval session (§2.9, §2.10, §5.4.2) are still in
+the code and are retired with milestone M5.
 
 Draft 3.3 introduced the public-wallet first-run path (D6) and restored
 optional Lightning swaps (D7). D8 subsequently added the explicitly identified
@@ -164,27 +178,23 @@ Nobody has to open either.
    offline, marked Practice on every screen: a sale (ring up, the customer
    pays, Paid), the books and a refund. One tap deletes it.
 4. **Your shop.** Name and currency, the currency guessed from the phone.
-5. **Your till.** A searchable list of tills, plus "No till" and "Another
-   till" (§5.6), and one line on what OpenBMT reads from the till and what
-   it never sees.
-6. **Your wallet.** Two choices of equal size, and a third under them:
+5. **Your wallet.** Two choices of equal size, and a third under them:
    - **Sell today, then move to a hardware wallet.** The plan in two lines:
      "Today: a starter wallet on this phone, with a limit you choose. When
      your hardware wallet arrives: everything moves to it in one step." It
-     goes on to the buying guide (step 7) and the starter wallet (steps 8
-     to 10).
+     goes on to the buying guide (step 6) and the starter wallet (steps 7
+     to 9).
    - **I already have a wallet.** A hardware wallet, a multisig, or any
      wallet that can show its public description, by QR or file. The first
      receive address is compared on the wallet's own screen, and this
      cannot be skipped. OpenBMT refuses a description that holds a private
      key or words (and says that key is now exposed), a wallet type it
      cannot derive or check, and a wallet whose first address was not
-     confirmed. Behind this choice, "Other ways to make one": the Key Maker
-     on a spare laptop (§5.4.1), and a signer built from parts and free
-     software.
+     confirmed. Behind this choice, "Other ways to make one": a signer built
+     from parts and free software.
    - **Set up the rest now, add the wallet later.** The counter says "Not
      taking bitcoin yet" until a wallet is added.
-7. **Getting a hardware wallet.** No brand is named or recommended. Four
+6. **Getting a hardware wallet.** No brand is named or recommended. Four
    rules, each one line:
    - Buy it only from the maker's own website: never a marketplace, a
      reseller or second-hand.
@@ -198,7 +208,7 @@ Nobody has to open either.
    relative or a friend who knows bitcoin. "When it arrives" is a guided
    step on the phone, the upgrade of `docs/START-SIMPLE-RULES.md` section
    6.
-8. **The starter wallet's limit and date.** "If this phone is stolen or
+7. **The starter wallet's limit and date.** "If this phone is stolen or
    infected, someone could take its wallet funds. Choose a small working
    balance. This target is not a guaranteed maximum loss: new and late
    payments can add more funds." Beside
@@ -206,7 +216,7 @@ Nobody has to open either.
    and three round amounts in the shop's money. The field starts empty.
    The date is 30 days from today unless the owner changes it, and at most
    90.
-9. **The 12 words.** "These 12 words are your bitcoin. Whoever has them can
+8. **The 12 words.** "These 12 words are your bitcoin. Whoever has them can
    spend it, so they stay with you, on paper. If this phone is lost,
    stolen or broken, they bring your money back on a new phone." Then the
    plain rules (SS-13), the words four at a time and three asked back
@@ -216,9 +226,9 @@ Nobody has to open either.
    they are shown, and an infected phone could read them then, which is
    why the limit matters; that steel plates keep words through fire and
    water, with a picture, for the hardware wallet's words later.
-10. **Only you can send.** The screen lock (SS-24): "Taking payments never
+9. **Only you can send.** The screen lock (SS-24): "Taking payments never
     needs this. Sending money out always does."
-11. **The counter.** The counter app on the till's phone or tablet scans
+10. **The counter.** The counter app on the till's phone or tablet scans
     the owner phone, or, for someone who sells alone, "Use this phone as
     the counter too" **[to build]**. The counter then shows its line,
     large. "How this works": a stolen counter cannot take any money, and
@@ -231,13 +241,13 @@ Nobody has to open either.
     the owner phone, which is why the day summary lists each counter's
     sales and totals. Then the steps for
     the chosen till, with a cue card for staff to print.
-12. **Instant payments.** Two sentences and one choice: "Small payments
+11. **Instant payments.** Two sentences and one choice: "Small payments
     count at once. Bigger ones wait about ten minutes, until the payment is
     in a block." The owner picks the amount, shown beside the price of a
     typical sale; it starts at the shop's instant limit per sale (§6), and
     0 makes every payment wait. "How this works" gives the risk in one
     picture (§2.7); "Details" gives the exact rules (§6).
-13. **A first real sale.** A tiny amount from any bitcoin wallet, or "Skip,
+12. **A first real sale.** A tiny amount from any bitcoin wallet, or "Skip,
     I'll try it later", and the home screen says "Not tested yet" until a
     sale is paid. The owner phone shows the payment in the owner's own
     wallet, with the first-sale line, and an optional "See it yourself".
@@ -970,35 +980,6 @@ spending access to savings. The existing 2-of-3 Key app setup (§5.4.2) remains
 documented for the code that implements it; supported single-key and multisig
 wallets can also use the held-wallet path.
 
-#### 5.4.1 The OpenBMT Key Maker
-
-One page, one job: turn the owner's own coin flips into a wallet, offline, in
-a way they can check (docs/KEYMAKER-RULES.md).
-
-- **Fixed choices.** 128 coin flips, heads is 1, the first flip the most
-  significant bit; 12 BIP39 English words, no passphrase; native SegWit with
-  one key (BIP84, account m/84'/0'/0'). Nothing to choose, so nothing to get
-  wrong. Dice may come later; tools disagree on how rolls become bits, and
-  coins leave no room for that.
-- **Where it runs.** In the Tor Browser of Tails, started from a USB stick
-  with networking off, from one HTML file with every connection forbidden by
-  its content security policy. It stores nothing; Tails forgets the rest at
-  shutdown.
-- **Checked by someone else's code.** The owner restores the words in Tails'
-  own Electrum. The fingerprint and first address must match the page and the
-  phone before the shop can go live. A faulty or lying page is caught there.
-- **What reaches the phone.** Only the public description
-  `wpkh([fingerprint/84h/0h/0h]xpub/<0;1>/*)` with its checksum, by QR.
-- **What it is built from.** The audited noble and scure libraries, pinned
-  and bundled by a build script in the repository that gives the same file
-  every time. The project's own code adds the flips-to-entropy step, the
-  BIP380 checksum and the page.
-- **Why coins.** Wallets have failed at making random numbers more than once
-  (predictable fallbacks, a flawed chip, weak seeding in Milk Sad and
-  Randstorm). A coin has no chip and no update, and nobody can change how it
-  lands from the other side of the world. The honest limit: a coin protects
-  how a key is made, not how a signer uses it later.
-
 #### 5.4.2 The 2-of-3 setup (draft 3.2, retired from the main path)
 
 
@@ -1390,47 +1371,6 @@ Notes:
   tells the cashier if it cannot get one. Sales continue until the range is
   used, then Bitcoin is not offered.
 
-### 5.6 POS connectors
-
-| POS | How | Button in the POS | Sale closes |
-|---|---|---|---|
-| Clover | Custom tender app (TenderConnector) | Yes | Yes |
-| Lightspeed-style gateway | "Other payment method" opens the counter's own flow and returns "paid". This is the pattern BTCPay's Lightspeed plugin uses (TChukwuleta, v1.1.0, 2026-08-19). | Yes | Yes |
-| Square | Counter device beside Square; the cashier closes the order with a custom tender named "OpenBMT", since Square's own "Bitcoin" method pays into Square's wallet; the Box and the owner read orders only (ORDERS_READ) and match them (`docs/POS-RULES.md`) | Manual tender selection | Manual |
-| Any POS, or no Box | Manual "Bitcoin" payment type; counter device holds the record | Manual | Manual |
-| Cannabis POS (Treez, Cova, Flowhub, Dutchie) | Partner programs with certification | — | — |
-
-The gateway flow must not serve a payment page from a shared server that could
-change the address. The address comes from the counter's signed batch (§5.1).
-**[verify Lightspeed's flow, R6]**
-
-Cannabis POS integration needs partner agreements; that outreach is out of scope
-for the software. Square bans cannabis sellers and runs its own custodial bitcoin.
-
-**Why Square is read-only (decided 2026-11-10).** Square's developer pricing
-page says that using the Orders API "with a non-Square payments provider"
-costs 1% per transaction; the external-payments page repeats that a fee
-applies when an order is paid there with an external payment (both read on
-2026-11-10). Closing a Square order through the API (an `EXTERNAL` payment
-of type `CRYPTO`, then PayOrder) would put that fee on every bitcoin sale.
-The connector therefore only reads orders, which needs only `ORDERS_READ`,
-and the cashier closes the order in Square with the shop's custom tender, named
-"OpenBMT" because Square has a Bitcoin method of its own (PS-10).
-The pages do not say whether an order rung up in the Square app and paid
-there with a custom tender is charged; nothing in this design depends on it.
-Forum answers (not Square's documentation) say an order rung up in the
-Square app may not be visible through the API until it is paid; reading
-only closed orders, as the matching does, does not need it to be.
-**[verify both with a real Square seller account, E5]**
-
-**Clover.** A Clover app used in production must be approved by Clover as a
-private app, and Clover's own sign-in for it expires after 30 minutes and
-is renewed; the read-only polling connector needs that approval before a
-shop can use it. The custom tender app (a "Bitcoin" button inside Clover's
-register) runs on the Clover device itself and needs a Clover developer kit
-to test. Clover's app policies may restrict apps that deal in virtual
-currency; their wording could not be read. **[verify, E6]**
-
 ## 6. Acceptance policy
 
 Full-RBF is unconditional since Bitcoin Core 29, so any unconfirmed payment can
@@ -1610,57 +1550,27 @@ OpenBMT is on-chain by default and says so on the screen: "This shop takes
 on-chain bitcoin." Shops can offer a bitcoin price that absorbs the network
 fee on small tickets (§9).
 
-**Option: Lightning through a swap provider the shop picks** (decided
-2026-11-12, D7; replaces the 2026-11-09 decision to drop swaps). One QR code
-holds both the bitcoin address and a Lightning invoice, and the customer's
-wallet picks. Over Lightning, the provider locks bitcoin on chain in an
-output that only the counter can claim, to a fresh address of the shop's own
-wallet, and the provider is paid only when the shop claims. The provider
-never holds the shop's money: if the counter does not claim in time, the
-provider takes its lockup back and the customer's payment is cancelled
-(docs/SWAP-RULES.md).
+**Option: the shop's own Lightning node on the counter**
+(`docs/SHOP-LIGHTNING-RULES.md`). One counter runs a Lightning node with a
+key made for it alone, which cannot sign for the savings. One QR code holds
+both the bitcoin address and a Lightning invoice, and the customer's wallet
+picks. A channel provider opens the channel to the shop; it never holds the
+shop's money, and the shop can close the channel without its permission.
+Setup says so plainly (TM-153).
 
-- Off until the shop turns it on. The provider is a setting (name, onion
-  address, path) the shop can change, reached over Tor only.
-- Listed providers need no account and swap only bitcoin with Lightning.
-  OpenBMT runs no provider and takes nothing from a swap.
-- Paid before the provider's lockup is in a block only within the shop's
-  instant limits (§6).
-- Costs to the shop: the provider's fee, the claim transaction's network fee,
-  and the provider's minimum and maximum per sale, read live.
-- A sale paid through a swap provider can be refunded in bitcoin as well as
-  in cash (CR-224): the provider's lockup is claimed to the shop's own
-  address, so the owner phone sees the payment on the chain. A sale paid
-  over the shop's own node is refunded in cash (CR-217): that payment is not
+- Every change to a channel is stored on the counter and on a second shop
+  device before the sale counts as paid (SL-20); an old copy is never used.
+  The first build keeps the second copy on the Box (SL-73); without a Box it
+  is another counter, a spare phone left on at the shop, or the owner phone
+  (TM-150, TM-151).
+- Shop Lightning is offered once the shop has moved to its own wallet
+  (TM-152, SL-76).
+- A sale paid over Lightning is refunded in cash (CR-217): the payment is not
   on the chain.
 
-The price of the option is a dependency: every such sale relies on a provider
-that sees amounts and timing. That is why it is off by default and the
-provider can be changed. Survey 2026-11-12: Boltz suspended all swaps on
-2026-08-03 after months of attacks and changed hands, with no relaunch yet.
-The one live fit is SATS Routing, an independent fork of the Boltz server
-speaking the same API (reverse swaps 2,142 to 5,000,000 sats, 0.6% plus about
-560 sats of miner fees, no account; one operator, self-reported audit)
-**[verify over Tor and on a real swap before any use]**.
-
-**Option: connect your own Lightning node** (decided 2026-11-09).
-A merchant who already runs Lightning (Core Lightning or LND on their own
-Box, Start9 or Umbrel) can connect it. The counter then offers a BIP321
-code with both on-chain and Lightning, and Lightning payments are final
-instantly at any amount. Eclair is not supported: it has one password with
-the full power of its API and no restricted credential, so a counter that
-held it would hold a key that can spend (docs/LIGHTNING-RULES.md, LN-02).
-The node decides where Lightning payments go, so its public key is part of
-the signed settings, and naming or changing it needs the owner's approval
-like a changed destination (LN-03). The counter holds only a key to the node
-limited to invoices, which the node software enforces: the node must run a
-current release, and the setup probes the key and makes a test invoice that
-must be signed by the node the settings name (LN-04 to LN-20). OpenBMT does
-not manage the node; the setup screen says plainly that running Lightning
-means watching liquidity, updates and backups. A self-managing node was
-researched and rejected: it cannot be hands-off, because receiving consumes
-inbound liquidity that must keep being bought
-(docs/research/merchant-lightning-node-2026-11-09.md).
+Lightning through a swap provider (D7) and through an outside LND or Core
+Lightning node were removed on 2026-11-18 (D10) and are kept in the tag
+`parked-2026-11-18`.
 
 **Design rule:** keep the payment-method layer pluggable, so a covenant-based
 layer 2 can be added if one ever activates.
@@ -2058,6 +1968,21 @@ Each gets a written protocol before it runs.
   with optional outbound webhooks to merchant-selected receivers. This does
   not require a public device listener, merchant REST server, or publisher
   backend; endpoint/data disclosure and privacy rules still apply.
+
+- **D10. A standalone terminal first.** Decided 2026-11-18. OpenBMT
+  becomes the shop's whole point of sale on Android: items, the sale, tax,
+  discounts, tips, bitcoin, cash and cards through the shop's own card
+  processor, receipts, refunds, the drawer, staff, stock and the books
+  (`docs/TERMINAL-RULES.md`). Nothing has to be bought: no Box, no OpenBMT
+  server, no account. The Box stays optional. Fitting into other registers
+  and selling online come after the terminal works on its own, and the code
+  for them was removed and tagged (`parked-2026-11-18`). Lightning swaps
+  (D7) and outside Lightning nodes were removed in the same cut: swaps had
+  not been tested with a real provider and put a third party in each
+  payment; the shop's own node on the counter is the Lightning path.
+  The Key Maker, an offline page for making a wallet from coin flips on a
+  spare laptop, went too: a hardware wallet is the plain way to a cold
+  wallet, and the laptop path was too hard for most shops.
 
 **Security-review decisions (Q1–Q4).** Decided on 2026-11-09.
 
