@@ -353,7 +353,7 @@ object CounterFlowDemo {
         val signature = listOf(
             s.state.name, shownSays.heading, shownSays.what, shownSays.next, s.receivedSats, s.needsSats, s.missingSats, s.missingMinor,
             wait.ringSecs != null, wait.seen != null, wait.pulse, payment?.copyUri,
-            shownExtra.joinToString("\u0002") { it.heading + it.what + it.next }, s.lightningFirst, info.reference, info.billNumber,
+            shownExtra.joinToString("\u0002") { it.heading + it.what + it.next }, s.lightningFirst, info.billNumber,
         ).joinToString("\u0001")
         return SaleScreenData(
             number = (i + 1).toInt(),

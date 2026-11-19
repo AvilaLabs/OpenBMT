@@ -79,7 +79,7 @@ private fun Controller.showSlOn(state: ShopLightningState) {
     val body = ArrayList<View>()
     body.add(ui.text(ShopLightningWords.onTitle))
     ShopLightningModel.lostFundingNote(state.report)?.let { body.add(ui.text(it)) }
-    for (line in ShopLightningModel.lines(held, state.report)) {
+    for (line in ShopLightningModel.lines(held, state.report, System.currentTimeMillis() / 1000)) {
         body.add(ui.labelled(line.label, ui.text(line.value)))
         line.note?.let { body.add(ui.text(it)) }
     }
@@ -289,7 +289,7 @@ private fun Controller.showSlReview(edit: ShopLightningEditArgs, back: () -> Uni
     val msg = Slot(act)
     val body = ArrayList<View>()
     body.add(ui.text(ShopLightningModel.stepLine(ShopLightningModel.Step.Approve)))
-    p.after?.let { after -> for (line in ShopLightningModel.lines(after, null).dropLast(1)) body.add(ui.labelled(line.label, ui.text(line.value))) }
+    p.after?.let { after -> for (line in ShopLightningModel.lines(after, null, System.currentTimeMillis() / 1000).dropLast(1)) body.add(ui.labelled(line.label, ui.text(line.value))) }
     val needs = when (p.changeClass) {
         ShopLightningClass.Free -> ShopLightningWords.approveFree
         ShopLightningClass.Loosen -> ShopLightningWords.approveLoosen

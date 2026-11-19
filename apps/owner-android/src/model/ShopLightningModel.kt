@@ -132,7 +132,7 @@ object ShopLightningModel {
     fun lines(
         held: ShopLightningHeld,
         report: LightningReport?,
-        nowUnix: Long = System.currentTimeMillis() / 1000,
+        nowUnix: Long,
     ): List<Line> {
         val out = ArrayList<Line>()
         out.add(Line(ShopLightningWords.counterLabel, OwnerModel.counterLabel(held.counter)))
