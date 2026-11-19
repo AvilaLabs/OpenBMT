@@ -5,7 +5,8 @@
 
 Direct control of the wallet means the shop has to preserve the information
 needed to use it. Replacing a phone is only part of recovery. You also need
-enough keys and the wallet description to find and spend the money again.
+the recovery words and the wallet description to find and spend the money
+again.
 
 These are responsibilities to plan before live use. OpenBMT is still
 pre-release, has had no independent audit and must not be used with real
@@ -15,31 +16,20 @@ funds. The setup and recovery walkthroughs remain unfinished.
 
 ## Keep the secret words and public description separately
 
-Recovery words can recreate a key. Anyone who obtains two of the three
-wallet keys can spend, so recording two sets together would make one loss
-or theft affect both. Keys 2 and 3 should have separate steel records,
-kept apart from each other and from the owner phone.
+Recovery words recreate the key, and anyone who obtains them can spend.
+Record them alone, without someone watching, and keep them away from the
+shop and the owner phone.
 
-Record each set alone, without someone watching. Use steel rather than
-paper for the retained backup. Paper can burn or tear and writing can
-fade. If paper is needed while stamping steel, compare the steel with the
-phone and destroy the paper afterward. Do not keep it as a backup.
-
-Key 3 is generated outside OpenBMT, offline and away from key 2. A phone
-or tablet used for that job is factory-reset afterward. The detailed
-procedures and current hardware-signer limitations are in the
-[wallet reference](wallet-reference.md#three-rules-about-the-keys).
+Use steel rather than paper for the retained backup. Paper can burn or
+tear and writing can fade. If paper is needed while stamping steel,
+compare the steel with the wallet and destroy the paper afterward. Do not
+keep it as a backup.
 
 The wallet description is different. It tells compatible software how to
-find the wallet's addresses, but does not authorize spending. The planned
-recovery kit puts this description, the key locations and recovery steps
-on one printed page. It contains no secret words. Keep it current, dated
-and available to the people who may need to act.
-
-The Key app can compare a scanned description with its own. It does not
-verify every kit field, and producing and printing the kit is not built.
-Do not assume a successful scan proves that every recovery instruction
-or key location is correct.
+find the wallet's addresses, but does not authorize spending. Keep a copy,
+dated, with a note of where the words are kept and how to recover, where
+the people who may need to act can find it. It contains no secret words.
+Printing such a recovery page from the owner app is not built.
 
 <a id="test-recovery-first"></a>
 
@@ -52,11 +42,10 @@ network, not in real-funds use.
 
 The Bitcoin Core test-network restore passed. A Sparrow restore has not
 been run. Both are used watch-only for finding the funds: they receive
-the public wallet description, not the secret keys. A separate signer
-provides the signatures needed to spend. The eventual kit instructions
-are held back until the Sparrow test is complete.
+the public wallet description, not the secret keys. The wallet itself
+provides the signatures needed to spend.
 
-Inspect key 3 once a year without exposing its words. Confirm that the
+Inspect the steel once a year without exposing its words. Confirm that the
 steel is still present and readable and that its storage remains
 appropriate. That inspection is a planned responsibility, not a reminder
 the app currently enforces.
@@ -64,7 +53,7 @@ the app currently enforces.
 ## Compare the records each month
 
 The monthly outside check uses different wallet software to compare
-incoming payments with the POS Bitcoin total. Watch-only means the
+incoming payments with the Bitcoin total in the owner app's Books. Watch-only means the
 software can display activity but cannot spend. This helps catch a bad
 counter or app claiming the shop received payments that actually went
 elsewhere.
@@ -83,8 +72,8 @@ routine.
 
 ## Arrange access for someone acting for the owner
 
-Decide who should be able to act and how they could reach two keys and the
-wallet description. A sealed letter can give locations and contacts
+Decide who should be able to act and how they could reach the wallet, its
+words and the wallet description. A sealed letter can give locations and contacts
 without containing the secret words themselves. The recovery kit should
 be somewhere those people can find it.
 
@@ -98,24 +87,23 @@ resources and the original self-custody guidance are linked in the
 
 ## Protect the phones without depending on them as backups
 
-Use at least six digits for a signing app's PIN or, preferably, a
-passphrase of at least eight characters. The tenth wrong attempt wipes
-that phone's key. Never keep the PIN beside the words. A cashier PIN
+Lock the owner phone and the counter with a screen lock. On the starter
+plan the starter key is opened only by the owner's fingerprint, face or
+the phone's PIN. Never keep a PIN beside the words. A cashier PIN
 should differ from the manager PIN, and any PIN known by a former employee
 should be changed.
 
 Keep the operating system updated, use a screen lock and avoid unrelated
-apps on the signing phones. Do not sideload apps onto the owner or Key
-phone. A hostile keyboard or accessibility service can read input; the
-Key app refuses to run with an accessibility service enabled. A phone
-already controlled by someone else cannot be made trustworthy by an
-OpenBMT PIN.
+apps on the owner phone. Do not sideload apps onto it. A hostile keyboard
+or accessibility service can read input; before making the starter key
+and before each payment from it, the owner app names any service that
+could watch the screen or act for the owner. A phone already controlled
+by someone else cannot be made trustworthy by an OpenBMT PIN.
 
-The signing apps exclude their key files from cloud backup and device
+The owner app excludes its key files from cloud backup and device
 transfer. Those files depend on Android's protected key storage on that
 phone, so copying them to another phone would not provide a usable
-restore. The spare Key phone should stay in airplane mode with no
-accounts on it.
+restore; the words do.
 
 <a id="tor-and-the-shops-own-node"></a>
 <a id="the-instant-limit"></a>
@@ -139,14 +127,14 @@ own-node connection only through a Tor v3 address.
 
 ## Include approvals and money transfers in the routine
 
-Review refunds, cash-outs, more payment addresses and sensitive settings
-with the second signer. A new cash-out address must be enrolled on the
-Key app and wait 24 hours. Cashiers should know that requesting a refund
-does not pay it immediately.
+Sign refunds and cash-outs on the wallet, reading the destination and
+amount on its own screen. A settings change that increases risk waits on
+each counter until a manager confirms it there. Cashiers should know that
+requesting a refund in bitcoin does not pay it immediately.
 
 If the shop keeps bitcoin, the design calls for moving savings to separate
 long-term storage it controls while leaving working amounts in the shop
-wallet. Approve those transfers in a session. Combining small incoming
+wallet. Combining small incoming
 payments links them publicly; choose when to do it deliberately rather
 than treating it as a privacy-neutral housekeeping task.
 
@@ -160,14 +148,12 @@ it to the person running the counter.
 
 | Lost device | Planned or current response |
 |---|---|
-| Owner phone | Treat the loss as urgent. Use the remaining keys and recovery plan to move to a new wallet. The automatic "Move to a new wallet" feature is not built. |
-| Key phone | Restore key 2 from its words on a new device. The new Key app starts with its original spending ceilings and no enrolled destinations. |
-| Counter | Remove it from the owner phone and pair a replacement. Its local cashier list is lost with it. |
+| Owner phone | The savings are safe in the wallet. On the starter plan, treat the loss as urgent: restore the starter wallet from its card of words and move what it holds. The guide for setting up a new owner phone for the same shop is not written yet. |
+| Counter | Remove it from the owner phone and pair a replacement. A removed counter refuses new sales. Its local cashier list is lost with it. |
 
 <a id="seed-splitting"></a>
 
-Do not split a set of recovery words into extra pieces. The two-of-three
-wallet already distributes control among three keys. Splitting one key
+Do not split a set of recovery words into extra pieces. Splitting one key
 adds pieces that can be lost. The detailed reference discusses Seed XOR
 and similar tools and links the source guidance.
 

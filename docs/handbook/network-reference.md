@@ -38,8 +38,8 @@ with [sealing code](https://github.com/AvilaLabs/OpenBMT/blob/main/crates/openbm
 
 A Bitcoin payment need not carry a customer's name, but its transaction is
 public. An address or transaction ID can let someone connect that payment
-to other activity. The default apps keep these details out of the POS and
-ordinary accounting exports, and do not upload analytics or crash data.
+to other activity. The default apps keep these details out of ordinary accounting
+exports, and do not upload analytics or crash data.
 
 > **This network behavior is built. It has been checked against Bitcoin
 > Core and observed on test and live networks. The apps have not been run
@@ -53,12 +53,10 @@ ordinary accounting exports, and do not upload analytics or crash data.
 | Internet provider or carrier | That the device speaks Bitcoin and when; with Tor, that it uses Tor | Use Tor |
 | DNS seeds used to find peers | The address of a device looking for peers | With Tor, seed lookups stay inside Tor rather than reaching the phone's resolver |
 | Price sources | Price requests and their timing, without a sale or address | Fetch over Tor; requests already run every 60 seconds rather than in response to sales |
-| POS vendor | Every order, amount and "Bitcoin" tender, without an address or transaction ID | The vendor necessarily sees its own orders |
-| An outside Box host | Order amounts and timing, without addresses, transaction IDs or the wallet description | Run the Box yourself; a hosted Box is not built yet |
+| An outside Box host | When the shop's devices exchange messages and their sizes, without addresses, transaction IDs or the wallet description | Run the Box yourself; a hosted Box is not built yet |
 | Push services | Nothing; push wake-ups are not built yet | |
 | App download host | The downloader's network address and requested version | Download over Tor |
 | Customer's phone | The address and amount for that sale | OpenBMT uses a fresh address for each sale |
-| Square (only in the optional Sandbox debug build) | Sandbox authorization/location, payment amount and attempt reference, and card-present payment data; SDK destinations/telemetry beyond the documented Square calls are unverified | Keep this experimental variant disabled outside the Sandbox test |
 | Cash-out exchange | Its deposit and the coins the owner chooses to send | Use coin control; see the accounting section below |
 
 The counter never sends a shop address or script to a Bitcoin peer
@@ -110,21 +108,21 @@ peers, preventing a Box from inventing a confirmation.
 
 ## The Box
 
-The Box relays sealed messages between the shop's devices, reads the POS
-and matches orders to sales. It can be reached on the local network or
-through an onion address. Only the recipient can read a relayed message.
+The Box relays sealed messages between the shop's devices. It can be
+reached on the local network or through an onion address. Only the
+recipient can read a relayed message.
 
-It sees order amounts in the shop's currency and their timing, as the POS
-vendor does. It holds no wallet key and sees no address, transaction ID
-or wallet description (`BX-04`, `BX-40`). A host can nevertheless estimate
-payments by combining the orders with a public Bitcoin price. Run the
-Box yourself to keep that information inside the shop
-(`docs/BOX-RULES.md`, section 6).
+It holds no wallet key and sees no address, transaction ID or wallet
+description (`BX-04`, `BX-40`). It sees when the devices exchange messages
+and their sizes, and, when it keeps Shop Lightning's encrypted second copy,
+the names that copy is stored under, their sizes and when they change
+(`SL-75`). A host can estimate how busy the shop is from that. Run the Box
+yourself to keep that information inside the shop.
 
 ## The books and the export
 
 The accountant's export contains opaque sale IDs. It excludes transaction
-IDs, addresses and satoshi amounts, as do all POS fields, because those
+IDs, addresses and satoshi amounts, because those
 would let the recipient trace payments on the public ledger. The full
 ledger contains those details and is shown behind a warning.
 
@@ -148,6 +146,11 @@ is listed at <https://btcmaxis.com/bitcoin-information/privacy.html>
 > funds.**
 
 ### What the protection claims, and when it does not hold
+
+> **This section and the risk table below describe the earlier setup with
+> three keys and the Key app**, still in the code but no longer offered at
+> setup (design decision D6) and due to be removed. For the shop's own
+> wallet, see [Who controls the money](safety.md).
 
 The wallet design aims to withstand one compromised OpenBMT component
 without allowing a spend. The script itself enforces two keys, not two
@@ -232,18 +235,17 @@ Tap to pay is not built and this behavior is untested.
 | Area | What remains unknown |
 |---|---|
 | Hardware signers, experiment E8 | Coldcard, Jade, Passport and Keystone have not been tested for wallet acceptance, change checks or full previous-transaction requirements. Large QR transfer frame counts are unmeasured. Bitcoin Core was tested as a second signer on a test network; Sparrow was not. |
-| POS readers, E5 and E6 | No real Square or Clover seller account has been used. Square's custom-tender order fee is unknown from its pages. Clover's virtual-currency app rules could not be read. |
-| Lightning | Request and response formats came from source and documentation. No real node has been run. |
+| Lightning | Shop Lightning has run only on test networks, with a test channel provider. |
 | Sparrow recovery | No restore has been run. |
-| NFC tap, E1 and E10 | Not built. |
+| NFC tap, E1 and E10 | Built at the counter; not yet tried with a wallet on a phone. |
 | Timings | Setup time, time to "Seen", battery use and bandwidth have not been measured. |
 | Competitor figures in the design | Marked "to verify" and excluded from merchant screens until sourced. The processor fees in [Why bitcoin](why-bitcoin.md) came from their own pages, read 2026-11-11, and may change. |
 
 ### The monthly outside check
 
 Once a month, open the recovery kit's wallet description as watch-only in
-Sparrow or Bitcoin Core. Compare the receipts with the POS Bitcoin-tender
-total. This is the only check independent of OpenBMT's software, and the
+Sparrow or Bitcoin Core. Compare the receipts with the Bitcoin total in
+the owner app's Books. This is the only check independent of OpenBMT's software, and the
 only one that catches a counter or main-app build substituting its own
 address while claiming payment.
 
@@ -374,7 +376,7 @@ A device identifies itself with a key it generates. Staff names on the
 counter are labels entered by the shop, without identity verification
 (`CR-156`). There is no OpenBMT account or payment server.
 
-The shop still deals with accounts at its POS vendor and chosen exchange.
+The shop still deals with accounts at its card processor and chosen exchange.
 Those companies have their own sign-up and checks. OpenBMT neither asks
 for those accounts nor sees them.
 
@@ -403,8 +405,9 @@ OpenBMT does not send the publisher the shop's sales activity. The Key
 app has camera permission only, with no network permission; a build check
 fails if its manifest changes. The Counter and Owner apps have network
 permission only for the contacts listed in the design: Bitcoin peers, price
-sources, POS reads, and the shop's own Box and node. The Owner app itself
-opens no connection beyond the proxy greeting and till read (`OA-15`).
+sources, the channel provider of Shop Lightning, and the shop's own Box
+and node. The Owner app itself opens no connection beyond the proxy
+greeting (`OA-15`).
 [Privacy](privacy.md) lists all contacts.
 
 These rules and manifest checks have not had outside review. They cannot
@@ -424,9 +427,7 @@ There is no OpenBMT service for a remote switch. Counter commands require
 the owner phone's signature and sequence numbers that prevent replay
 (`CR-14`).
 
-The Box ships as a container without an updater. Its host, such as a mini
-PC, Umbrel or StartOS, controls its own update behavior. The shop must
-manage that there.
+The Box runs from source; it has no package or updater yet.
 
 The Key app's proposed signed release manifest, install-date delay,
 F-Droid and signed-file distribution, and reproducible builds are planned.
@@ -434,22 +435,18 @@ Google Play distribution is excluded.
 
 ### Never a Lightning service provider holding the shop's channels
 
-Lightning connects to the shop's existing LND or Core Lightning node.
-OpenBMT does not run, rent or select one (design section 8). A provider
-holding the channels would hold the money and see every payment. A swap
-provider never holds the shop's money, so Lightning through one the shop
-picks is planned as an option, off by default and reached over Tor only.
+Shop Lightning runs the shop's own node on the counter
+(`docs/SHOP-LIGHTNING-RULES.md`). Its key is a child made for it alone and
+cannot sign for the savings. A channel provider opens the shop's channel;
+it never holds the shop's money, and the shop can close the channel without
+its permission. Each change to a channel is stored on a second shop device
+before a sale counts as paid (`SL-20`); today that device is the Box
+(`SL-73`). Turning Shop Lightning on, or changing its node, is a change
+that redirects money and carries the wallet's own signature (`AP-13`,
+`AP-14`). Shop Lightning has run only on test networks.
 
-The node's public key is in the signed settings. Naming or changing it
-needs the Key app's co-signature, and each invoice must be signed by that
-key (`LN-03`, `LN-17`). Setup checks that the counter's credential permits
-invoices only (`LN-04` to `LN-20`).
-
-OpenBMT cannot establish who actually operates the named node. If the shop
-chooses a hosting company's node, that company holds its channels.
-OpenBMT offers no such provider. Setup explains that the shop must manage
-liquidity, updates and backups. The counter integration is built but has
-never been run against a real node.
+Lightning through a swap provider and through an outside LND or Core
+Lightning node were removed from the code on 2026-11-18.
 
 ### Never calling an unconfirmed payment final
 

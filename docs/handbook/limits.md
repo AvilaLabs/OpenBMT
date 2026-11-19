@@ -68,8 +68,8 @@ wallet. It could show an attacker's payment address and falsely report
 that the shop was paid. That would steal new sales proceeds rather than
 spend the existing wallet balance.
 
-Matching POS orders to wallet receipts helps find discrepancies. The
-design also requires the monthly outside check below, so the shop does
+Comparing the day's sales with the wallet's receipts helps find
+discrepancies. The design also requires the monthly outside check below, so the shop does
 not rely entirely on OpenBMT to judge its own records.
 
 <a id="what-the-pin-does-not-stop"></a>
@@ -110,7 +110,8 @@ owner responsibilities rather than a service operated by OpenBMT.
 ## Check the receipts independently
 
 Once a month, the design calls for comparing the wallet's incoming
-payments with the POS Bitcoin total using different wallet software.
+payments with the Bitcoin total in the owner app's Books, using
+different wallet software.
 It uses the wallet's public description in **watch-only** mode: it can
 locate and display payments but has no spending keys.
 
@@ -130,7 +131,7 @@ is not a substitute for reconciliation.
 
 Test-network payment and restore checks show specific parts working with
 test bitcoin. They do not establish readiness for real funds. Real-phone
-use, hardware signers, real POS seller accounts, a real Lightning node
+use, hardware signers, real card processors, a real Lightning provider
 and Sparrow recovery remain unverified in the ways recorded on the
 [status page](status.md) and in the
 [detailed inventory](network-reference.md#unverified-items).

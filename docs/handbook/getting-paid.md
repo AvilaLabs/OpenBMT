@@ -3,14 +3,12 @@
 # A sale at the counter
 
 Imagine a customer buying an $8 item. They already have bitcoin in a wallet
-that can make an on-chain payment. The cashier still rings up the goods in
-the shop's usual POS. OpenBMT handles the Bitcoin payment alongside it. The
-counter is a shop
-phone or tablet running the Counter app.
+that can make an on-chain payment. The counter is a shop phone or tablet
+running the Counter app, where the sale is rung up and paid.
 
 The following describes the current design and built payment handling.
-The apps have been installed on one physical phone but not used for real
-sales, so this is not a live-sales walkthrough.
+The apps have not been used for real sales, so this is not a live-sales
+walkthrough.
 
 <a id="an-on-chain-sale-as-built"></a>
 
@@ -26,13 +24,9 @@ The customer scans the code, reviews the payment in their wallet and
 presses send. Their wallet pays the network fee for sending. OpenBMT then
 watches for the payment.
 
-Today the cashier enters the amount manually. A Square or Clover order
-does not automatically start the counter, and OpenBMT does not automatically
-close the POS order. The cashier closes it using the shop's Bitcoin
-payment type (on Square, the one named OpenBMT) after the counter reports
-acceptance. Order matching can
-later flag a mismatch between the POS and counter records; it cannot
-prove that goods were handed over.
+Today the cashier enters the amount. Ringing up items, tax and discounts
+on the counter, and taking cash and cards on the same screen, are the next
+work.
 
 ## Decide when to hand over the goods
 

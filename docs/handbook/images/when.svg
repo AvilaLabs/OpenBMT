@@ -13,12 +13,12 @@
 <line x1="64" y1="316" x2="78" y2="324" stroke="#5B616B" stroke-width="4" stroke-linecap="round" />
 <circle cx="64" cy="316" r="3" fill="#5B616B" stroke="none" stroke-width="1"/>
 <text x="124" y="52" font-size="24" font-weight="bold" text-anchor="start" fill="#111317">Once</text>
-<text x="124" y="82" font-size="20" font-weight="normal" text-anchor="start" fill="#4A505A">Steps 1 to 5</text>
-<text x="124" y="108" font-size="20" font-weight="bold" text-anchor="start" fill="#12805C">About two hours</text>
+<text x="124" y="82" font-size="20" font-weight="normal" text-anchor="start" fill="#4A505A">Steps 1 to 4</text>
+<text x="124" y="108" font-size="20" font-weight="bold" text-anchor="start" fill="#12805C">At setup</text>
 <text x="124" y="174" font-size="24" font-weight="bold" text-anchor="start" fill="#111317">Every sale</text>
-<text x="124" y="204" font-size="20" font-weight="normal" text-anchor="start" fill="#4A505A">Step 6</text>
+<text x="124" y="204" font-size="20" font-weight="normal" text-anchor="start" fill="#4A505A">Step 5</text>
 <text x="124" y="230" font-size="20" font-weight="bold" text-anchor="start" fill="#12805C">Under a minute</text>
 <text x="124" y="296" font-size="24" font-weight="bold" text-anchor="start" fill="#111317">Now and then</text>
-<text x="124" y="326" font-size="20" font-weight="normal" text-anchor="start" fill="#4A505A">Step 7</text>
+<text x="124" y="326" font-size="20" font-weight="normal" text-anchor="start" fill="#4A505A">Step 6</text>
 <text x="124" y="352" font-size="20" font-weight="bold" text-anchor="start" fill="#5B616B">When needed</text>
 </svg>

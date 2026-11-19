@@ -45,9 +45,9 @@ excluded as optional integrations and future features.
 This ruled out co-signed instant payments, whose signer group could freeze
 funds and see spends. It also ruled out third-party Lightning swaps,
 whose provider would see the amount, timing and both sides of each swap.
-The supported Lightning route uses the shop's own node.
+The Lightning route is the shop's own node, on the counter.
 
-The POS vendor and a chosen cash-out exchange still see their part of the
+The shop's card processor and a chosen cash-out exchange still see their part of the
 business. Any future optional service that saw metadata alone would have
 to be off by default, explain the exposure where it was selected, and be
 listed in [Privacy](privacy.md). No such service is offered today.

@@ -15,21 +15,26 @@ internal checks constitutes an independent security audit.
 
 | Component | Authority | Boundary |
 |---|---|---|
-| Counter | Opens sales, uses approved receive addresses, produces signed records and applies acceptance policy | No wallet spending key or full descriptor. A compromised counter can still divert new sales or report false payment. |
-| Owner phone | Holds wallet key 1 and an owner device identity; tracks coins, prepares spends and manages the queue | Cannot satisfy the wallet's two-signature requirement alone. Its sales and dollar claims are not independently known to the offline signer. |
-| Key app | Holds its device identity and, in the default setup, wallet key 2; checks spends, batches and settings | No network view or independent sale records. Its signing library receives time and persistence services from the app. |
-| Recovery key 3 | An independently generated third wallet key | Its independence is a setup condition. Generating it on key 2's device would undermine the intended separation. |
-| Box | Relays sealed messages, reads POS orders and matches notices | Has an identity key, not a wallet key. It relays opaque ciphertext without access to the descriptor, payment addresses or transaction IDs. It can withhold messages and infer activity from orders. |
+| Shop's wallet | The savings key, on a hardware wallet or another wallet the owner keeps offline: a single-key P2WPKH wallet (BIP84) | OpenBMT receives only its public description, pinned at connection after the owner compares the first receive address on the wallet's own screen. |
+| Owner phone | The owner root (a device identity), the pinned public description and the allocation of address ranges; on the starter plan, also a capped starter key | Signs settings and pairings; prepares PSBTs for the wallet to sign. A loosening change still needs a manager's confirmation on each counter, and a change that redirects money needs the wallet's own message signature. |
+| Counter | Its device identity, the pinned description and its address ranges | Opens sales, derives its own receive addresses, produces signed records and applies acceptance policy. No savings key. A compromised counter can still divert new sales or report false payment. |
+| Box (optional) | Relays sealed messages; may keep Shop Lightning's encrypted second copy | Has an identity key, not a wallet key. It relays opaque ciphertext without access to the descriptor, payment addresses or transaction IDs. It can withhold messages and infer activity from their timing and size. |
 | Shop's full node | Additional payment evidence from a node named in signed settings | Does not replace the counter's light check. Authentication of the endpoint does not establish who operates it. |
 
-The on-chain threshold is two of three keys, not two people. A person
-controlling two usable wallet keys can spend, and the script cannot enforce
-physical device separation. The intended claim about one compromised
-component also depends on key 3 being generated independently
-and the Key app's release key being held by a second independent person.
-That second condition is unmet. Reproducible builds and an independent
-rebuilder are also absent. The protocol threshold should not be confused
-with an established single-component security result.
+The owner phone holds no savings key, and the counter cannot spend. A
+compromised owner phone can sign settings, so the counters enforce the
+classes of change themselves (`docs/APPROVAL-RULES.md`): a loosening
+change waits for a manager's confirmation on the counter, and a change
+that redirects money must carry a message signature from the wallet the
+counter pinned. Release independence is absent: one publisher signs the
+apps, and reproducible builds and an independent rebuilder are not in
+place.
+
+> **The sections below describe the earlier setup with three keys, two
+> needed to spend, and the separate Key app.** That setup is still in the
+> code but is no longer offered at setup (design decision D6), and it is
+> due to be removed. These sections will be rewritten for the shop's own
+> wallet when it is.
 
 ## Wallet keys, device identities and release keys
 

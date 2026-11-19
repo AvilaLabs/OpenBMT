@@ -20,12 +20,11 @@ what it shares, but does not make the shop's activity invisible.
 | Who | What it can learn |
 |---|---|
 | Customer | The address and amount for that purchase. |
-| POS vendor | Its orders, prices and the fact that a Bitcoin payment type was used. OpenBMT does not put wallet addresses or transaction IDs in those fields. |
+| Card processor (once cards are built) | The card sales it processes, as it does for any shop. It never sees bitcoin sales. |
 | Bitcoin peers | Computers used for payment checking can see the counter's network address and which blocks it requests. |
 | Price sources | That a device requested a price and when. They receive no sale or wallet address. |
-| Someone hosting a Box for you | Order amounts and timing, enough to estimate activity using the public bitcoin price. |
+| Someone hosting a Box for you | When the shop's devices send each other messages, and their sizes. |
 | Exchange | The deposit and the incoming payments linked when you spend them together. |
-| Square (only in the optional Sandbox debug build) | Sandbox authorization, location, payment amount/currency and attempt reference, plus card-present payment data; additional SDK collection is unverified. |
 
 The [network reference](network-reference.md#who-sees-what) lists every
 contact and the exact data exposed. OpenBMT sends no analytics or crash
@@ -92,11 +91,12 @@ checks.
 
 ## Who runs the Box matters
 
-The Box relays messages and reads POS orders. Device messages are
-encrypted so only their intended recipient can read the contents. The
-Box has no wallet key, wallet description,
-address or transaction ID. It can still see order values and timing.
-Someone else running it can estimate how much the shop sells.
+The Box relays messages between the shop's devices. They are encrypted so
+only their intended recipient can read the contents. The Box has no
+wallet key, wallet description, address or transaction ID. It can still
+see when the devices talk and how much they send, and, when it keeps Shop
+Lightning's second copy, when that copy changes. Someone else running it
+can estimate how busy the shop is.
 
 Running it yourself keeps that information inside the shop. The Box can
 be reached on the local network or through a Tor address. A hosted Box

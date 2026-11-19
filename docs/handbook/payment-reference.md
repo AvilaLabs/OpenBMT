@@ -52,15 +52,14 @@ and [header implementation](https://github.com/AvilaLabs/OpenBMT/blob/main/crate
 
 ## An on-chain sale, as built
 
-1. Ring up the order in the POS.
-2. Enter the amount on the counter's keypad in the shop's currency. The POS
-   does not start the counter automatically.
-3. Show the customer the payment code. The screen also displays the amount
+1. Enter the amount on the counter's keypad in the shop's currency.
+   Ringing up items, tax and discounts on the counter is the next work
+   ([the terminal rules](https://github.com/AvilaLabs/OpenBMT/blob/main/docs/TERMINAL-RULES.md)).
+2. Show the customer the payment code. The screen also displays the amount
    and the address's first and last characters in large type.
-4. The customer scans the code and approves the payment in their wallet.
-5. When the counter turns green, close the POS order with the shop's
-   "Bitcoin" tender. On Square it is named "OpenBMT", because Square's own
-   "Bitcoin" method pays into Square's wallet.
+3. The customer scans the code, or taps an Android phone on the counter,
+   and approves the payment in their wallet.
+4. When the counter turns green, hand over the goods.
 
 The code is a standard `bitcoin:` payment request, so any wallet that reads
 that format can pay it. Each sale gets a new address, saved before it is
@@ -68,24 +67,9 @@ displayed (`CR-01` to `CR-09`). If the connection is down, the counter stops
 offering Bitcoin and asks the cashier to take another payment type
 (`CR-01`).
 
-Customers must scan today. NFC tap to pay is not built; the design
-proposes an NFC tag for Android customers. The manifest checks currently
-fail the build if an NFC permission appears.
-
-Square and Clover support read-only order matching. The POS closes the
-order, and the owner phone matches each payment of the shop's tender (named
-OpenBMT on Square) to a counter sale
-under `docs/POS-RULES.md`. The amount still comes from the cashier's entry.
-Matching can flag a discrepancy but cannot prove that goods were handed
-over for a payment (section 10 of those rules). Both readers were written
-from vendor documentation and have not been tried with real seller
-accounts. A Clover custom tender button is planned.
-
-Lightspeed and Hike use the manual Bitcoin payment type: the cashier types
-the amount on the counter and closes the sale in the till as Bitcoin. Their
-built-in payment step runs as a web page that would have to come from a
-server on the internet, and OpenBMT runs no server between a shop and its
-customers.
+Tap to pay gives the same request as the code, as a read-only NFC tag,
+only while a sale's payment screen is showing (`docs/TAP-RULES.md`). It has
+not yet been tried with a wallet on a phone.
 
 ## The states a cashier sees
 
@@ -222,8 +206,9 @@ without changing the address. It comes from at least two public sources
 that must agree; only United States dollars are supported
 (`docs/RATE-RULES.md`).
 
-Customers request refunds at the counter. Refunds are paid in an approval
-session; the walkthrough belongs to the next part of the handbook.
+Customers request refunds at the counter. A refund in cash is paid there.
+A refund in bitcoin is prepared on the owner phone and signed with the
+shop's wallet.
 
 ## Small sales and the shop's own Lightning node
 
@@ -236,16 +221,13 @@ You can set a minimum on-chain sale. Below it, the cashier must take another
 payment type (`CR-75`). There is no minimum by default. Each receipt also
 costs the shop a fee when spent later, which is another reason to set one.
 
-Alternatively, a shop already running LND or Core Lightning can let the
-counter display a code with both an on-chain address and a Lightning
-invoice. A Lightning payment is final immediately at any amount, without
-the instant limit. This counter integration is built but has never been
-run against a real node.
-
-The shop must operate the node and manage liquidity, updates and backups.
-OpenBMT does not do that work. Eclair is unsupported (`LN-02`).
-
-Lightning without a node, through a swap provider the shop picks, is
-planned as an option, off by default (design section 8). The library that
-checks a provider's replies exists (`docs/SWAP-RULES.md`); the counter does
-not use it yet.
+The shop can also run its own Lightning node on the counter (Shop
+Lightning, `docs/SHOP-LIGHTNING-RULES.md`). The counter then displays a
+code with both an on-chain address and a Lightning invoice, and a
+Lightning payment is final at once at any amount, without the instant
+limit. A channel provider opens the shop's channel; it never holds the
+shop's money, and the shop can close the channel without its permission.
+Each change to a channel is stored on a second shop device before the sale
+counts as paid; today that device is the Box. Shop Lightning is built and
+started by the counter app, tested on test networks only, and not yet run
+on a phone. A sale paid over Lightning is refunded in cash (`CR-217`).

@@ -4,9 +4,14 @@ For an introduction to keys and the shop's responsibilities, start with
 [Who controls the money](safety.md). This reference preserves the detailed
 checks, limits and recovery conditions.
 
-OpenBMT uses a wallet with three keys. Spending requires any two of them,
-so losing one phone need not lose the money. The protection depends on
-keeping the keys apart and having the second device check what it signs.
+> **Most of this reference describes the earlier setup with three keys, two
+> needed to spend, and the separate Key app.** That setup is still in the
+> code but is no longer offered at setup (design decision D6), and it is
+> due to be removed. Today a shop uses its own single-key wallet, usually a
+> hardware wallet, or starts on a capped starter wallet:
+> [Who controls the money](safety.md) and
+> [Setting up a shop](setting-up.md) describe that. This reference will be
+> rewritten for it when the earlier setup is removed.
 
 > **OpenBMT has had internal review only and no independent security audit.
 > The apps have not been run on a phone. Do not use it with real funds.**
@@ -468,7 +473,8 @@ The linked guidance advises newcomers against putting keys in a node's
 built-in wallet.
 
 Each month, open the wallet description watch-only in Sparrow or Bitcoin
-Core and compare the receipts with the POS Bitcoin-tender total. This
+Core and compare the receipts with the Bitcoin total in the owner app's
+Books. This
 checks the records using software outside OpenBMT.
 
 ### Verify what you download

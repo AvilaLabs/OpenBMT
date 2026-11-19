@@ -92,7 +92,7 @@ Key app's independent release arrangements are unfinished. The
 
 OpenBMT requires no account or identity verification. Devices identify
 themselves using keys, and staff names are labels entered by the shop.
-The shop still has its own POS and exchange relationships. Their account
+The shop still has its own card processor and exchange relationships. Their account
 and legal requirements remain outside OpenBMT.
 
 <a id="never-a-third-party-deciding-where-money-goes"></a>
@@ -139,20 +139,14 @@ still planned. Google Play distribution is excluded.
 
 ## Lightning belongs on the shop's node
 
-OpenBMT connects only to the shop's LND or Core Lightning node. It does
-not choose, run or rent one. A provider holding the channels would control
-those funds and see payments.
+OpenBMT's Lightning route is the shop's own node, which runs on the
+counter with a key that cannot sign for the savings. A channel provider
+opens the shop's channel and is paid for it as its terms say, but it never
+holds the shop's money: the shop can close the channel without its
+permission, and the money comes back to the shop's wallet. Shop Lightning has been tested on test networks only.
 
-A swap provider is different: it never holds the shop's money, because the
-bitcoin it locks can be claimed only by the shop. Lightning through a swap
-provider the shop picks is planned as an option, off by default (design
-section 8). It is not built into the apps yet.
-
-Naming or changing the node needs approval through the Key app. OpenBMT
-cannot establish who actually operates the named node: pointing it at a
-node run by a hosting company would leave those channels with that
-operator. The shop must manage liquidity, updates and backups, and the
-counter integration has not yet been tried against a real node.
+Lightning through a swap provider and through an outside node were removed
+from the code on 2026-11-18, to keep each payment free of a third party.
 
 <a id="never-calling-an-unconfirmed-payment-final"></a>
 

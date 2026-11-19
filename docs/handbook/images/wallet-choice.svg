@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 652" role="img" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif">
-<title>Do you have a cold wallet? Yes: connect it. No: make one with a coin or a die. Not now: set up the rest first.</title>
+<title>Do you have a cold wallet? Yes: connect it. No: start today with a capped starter wallet, then move to a hardware wallet. Not now: set up the rest first.</title>
 <rect x="0.5" y="0.5" width="479" height="651" rx="16" fill="#FFFFFF" stroke="#D5D9E0" stroke-width="1" />
 <rect x="40" y="16" width="400" height="56" rx="10" fill="#F4F5F7" stroke="#4A505A" stroke-width="2" />
 <text x="240" y="53" font-size="24" font-weight="bold" text-anchor="middle" fill="#111317">Do you have a cold wallet?</text>
@@ -27,18 +27,10 @@
 <text x="196" y="244" font-size="20" font-weight="normal" text-anchor="start" fill="#4A505A">first address</text>
 <rect x="308" y="106" width="146" height="30" rx="15" fill="#12805C" stroke="none" stroke-width="1" />
 <text x="381" y="127" font-size="18" font-weight="bold" text-anchor="middle" fill="#FFFFFF">Recommended</text>
-<text x="196" y="328" font-size="24" font-weight="bold" text-anchor="start" fill="#111317">Make one</text>
-<text x="196" y="360" font-size="20" font-weight="normal" text-anchor="start" fill="#4A505A">Coin or die,</text>
-<text x="196" y="386" font-size="20" font-weight="normal" text-anchor="start" fill="#4A505A">offline laptop</text>
-<text x="196" y="416" font-size="20" font-weight="bold" text-anchor="start" fill="#4A505A">About an hour</text>
-<circle cx="386" cy="390" r="17" fill="#E7E9EE" stroke="#4A505A" stroke-width="2"/>
-<circle cx="386" cy="390" r="12" fill="none" stroke="#6B7280" stroke-width="1.5"/>
-<rect x="414" y="376" width="30" height="30" rx="7" fill="#FFFFFF" stroke="#4A505A" stroke-width="2" />
-<circle cx="422.4" cy="384.4" r="2.6" fill="#4A505A" stroke="none" stroke-width="1"/>
-<circle cx="435.6" cy="384.4" r="2.6" fill="#4A505A" stroke="none" stroke-width="1"/>
-<circle cx="429.0" cy="391.0" r="2.6" fill="#4A505A" stroke="none" stroke-width="1"/>
-<circle cx="422.4" cy="397.6" r="2.6" fill="#4A505A" stroke="none" stroke-width="1"/>
-<circle cx="435.6" cy="397.6" r="2.6" fill="#4A505A" stroke="none" stroke-width="1"/>
+<text x="196" y="328" font-size="24" font-weight="bold" text-anchor="start" fill="#111317">Start today</text>
+<text x="196" y="360" font-size="20" font-weight="normal" text-anchor="start" fill="#4A505A">Starter wallet,</text>
+<text x="196" y="386" font-size="20" font-weight="normal" text-anchor="start" fill="#4A505A">then a hardware</text>
+<text x="196" y="412" font-size="20" font-weight="normal" text-anchor="start" fill="#4A505A">wallet</text>
 <text x="196" y="496" font-size="24" font-weight="bold" text-anchor="start" fill="#111317">Set up the rest</text>
 <text x="196" y="528" font-size="20" font-weight="normal" text-anchor="start" fill="#4A505A">Counter says:</text>
 <text x="196" y="554" font-size="20" font-weight="normal" text-anchor="start" fill="#4A505A">Not taking bitcoin yet</text>

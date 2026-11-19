@@ -183,7 +183,7 @@ A payment contains no customer name or shop bank details. The wallet
 description stays on the shop's devices, and OpenBMT does not give its
 addresses to a company. Anyone with an address or transaction ID can,
 however, inspect linked payments on Bitcoin's public ledger.
-[Privacy](privacy.md) describes what the POS vendor and network still see.
+[Privacy](privacy.md) describes what the card processor and network still see.
 
 ## Sources
 

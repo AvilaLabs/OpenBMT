@@ -10,8 +10,8 @@
 <path d="M 32 184 v 12 a 32 11 0 0 0 64 0 v -12" fill="#E7E9EE" stroke="#5B616B" stroke-width="2.5"/><ellipse cx="64" cy="184" rx="32" ry="11" fill="#FFFFFF" stroke="#5B616B" stroke-width="2.5"/>
 <polygon points="72,286 42,324 61,324 55,360 87,316 67,316" fill="#5B616B"/>
 <text x="124" y="54" font-size="24" font-weight="bold" text-anchor="start" fill="#111317">The Box</text>
-<text x="124" y="84" font-size="20" font-weight="normal" text-anchor="start" fill="#4A505A">Till sends amounts</text>
-<text x="124" y="110" font-size="20" font-weight="normal" text-anchor="start" fill="#4A505A">to the counter</text>
+<text x="124" y="84" font-size="20" font-weight="normal" text-anchor="start" fill="#4A505A">Passes messages</text>
+<text x="124" y="110" font-size="20" font-weight="normal" text-anchor="start" fill="#4A505A">between devices</text>
 <text x="124" y="180" font-size="24" font-weight="bold" text-anchor="start" fill="#111317">Your own node</text>
 <text x="124" y="210" font-size="20" font-weight="normal" text-anchor="start" fill="#4A505A">Checks each payment</text>
 <text x="124" y="236" font-size="20" font-weight="normal" text-anchor="start" fill="#4A505A">yourself</text>

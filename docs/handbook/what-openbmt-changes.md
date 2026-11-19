@@ -160,26 +160,27 @@ OpenBMT therefore does not define convenience as hiding every technical
 dependency behind an OpenBMT service. It tries to make the dependencies
 visible and give the owner a workable choice among the supported arrangements.
 
-## It works beside the business the shop already has
+## It is the shop's whole point of sale
 
-Most merchants considering Bitcoin already have a POS, a catalog, accounting
-records and a bank relationship. Replacing all of that would make a new
-payment method much harder to adopt.
+Most merchants considering Bitcoin already have a register, a catalog,
+accounting records and a bank relationship. OpenBMT first tried to sit
+beside the register the shop already had. That kept running into the same
+wall: each register company decides what an outside payment may do, and
+the ways in that exist need that company's approval, a server on the
+internet, or a second device beside the register with the sale typed
+twice.
 
-OpenBMT is intended to handle the Bitcoin side of the sale while the existing
-POS remains the business record. Its Square and Clover work reads orders for
-matching; it does not take control of those systems. The cashier still closes
-the order using the shop's Bitcoin payment type. The records library keeps the
-transaction with the counter sale. The matching code associates a final sale
-with its POS order and tender, using a reference where available or defined
-amount-and-time rules. OpenBMT does not put the address or transaction ID in
-the POS fields. The records library has no books screen in the apps yet.
+So OpenBMT becomes the register. The shop rings up the whole sale on the
+counter, an Android phone or tablet it may already own, and takes bitcoin,
+cash and cards there: cards through the shop's own card processor, bitcoin
+straight into the shop's own wallet. Nothing has to be bought, and there is
+no OpenBMT server or account. The books export goes to the shop's
+accountant. Fitting into other registers and selling online come after the
+terminal works on its own.
 
-That integration is limited today. It has been checked against vendor
-documentation rather than real seller accounts, and closing the order remains
-manual. The useful idea is the boundary: OpenBMT should add direct Bitcoin
-acceptance without demanding that the merchant migrate the rest of the shop
-into an OpenBMT platform.
+Today the counter takes an amount and a bitcoin payment. Ringing up items,
+tax, discounts, cash and cards is the next work, written down rule by rule
+in [the terminal rules](https://github.com/AvilaLabs/OpenBMT/blob/main/docs/TERMINAL-RULES.md).
 
 ## Convenience without giving the money back to a middleman
 
@@ -218,7 +219,7 @@ the combination should be the normal design, not a custom configuration a
 merchant has to invent.
 
 The current software has not proved the result yet.
-Physical-device testing, release independence, real POS and Lightning trials,
+Physical-device testing, release independence, real card and Lightning trials,
 reproducible builds and an independent audit are still outstanding. Those
 limits are collected in [What is built and tested](status.md).
 

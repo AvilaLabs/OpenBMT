@@ -31,7 +31,7 @@ when several employees and real inventory are involved.
 Who can spend from that wallet? How does the cashier know that an unconfirmed
 transaction is safe enough for this sale? What happens if the customer sends
 the wrong amount, pays late or replaces the transaction? How does the owner
-match the wallet history to the day's POS total? What does a lost counter
+match the wallet history to the day's sales? What does a lost counter
 phone put at risk?
 
 A conventional card or custodial payment processor normally answers those
@@ -140,7 +140,7 @@ together. A merchant still has to answer questions like these:
 | What can the counter do? | A checkout device needs enough authority to take sales without quietly becoming the shop's treasury. |
 | When may the cashier release the goods? | A quick report of a transaction is not the same evidence as inclusion in a block. Different sale sizes justify different limits. |
 | Who approves refunds and transfers? | A request from the counter should not automatically become a payment from the wallet. |
-| How does Bitcoin fit the existing POS? | The Bitcoin record and the business's order record need to agree without creating a second, disconnected set of sales. |
+| How does Bitcoin fit the rest of the sale? | Bitcoin, cash and cards need to land in one record of the day's sales, not two disconnected sets. |
 | What happens after a failure? | The shop needs a tested answer for a lost phone, exhausted addresses, a broken server, a bad network connection and a missing signer. |
 
 BTCPay offers tools for several of these jobs, including multisignature and
@@ -188,8 +188,8 @@ also fits fewer merchants.
 
 OpenBMT does not provide automatic conversion and bank payout. It does not
 remove the need for backups, reconciliation or owner approvals. Its supported
-Lightning route requires the shop to operate its own node. Its current POS
-connections only read orders; the cashier still closes them manually. A
+Lightning route is the shop's own node, which runs on the counter and needs
+a channel provider. It does not connect to other registers yet. A
 merchant that wants a hosted service, broad ecommerce integrations or many
 currencies is asking for a different product. OpenBMT will not weaken these
 boundaries to serve that case.

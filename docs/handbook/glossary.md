@@ -22,8 +22,8 @@ through animated QR codes.
 **Blockchain.** The shared transaction record, extended in groups called
 blocks. A payment included in a block has its first confirmation.
 
-**Box.** The shop's optional server for relaying device messages and reading
-POS orders. It holds no wallet key.
+**Box.** The shop's optional server for relaying device messages. It holds
+no wallet key.
 
 **Cash-out.** Sending bitcoin to an exchange the owner chooses, followed
 by conversion and withdrawal under that exchange's terms. OpenBMT does

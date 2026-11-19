@@ -35,10 +35,10 @@ parts.
 
 ## What would change at the shop
 
-A cashier would enter the sale amount, show a payment code and wait for the
-counter to report the payment. The customer needs a wallet containing
-bitcoin. The cashier then closes the order in the shop's existing
-point-of-sale system, or POS, using a Bitcoin payment type.
+A cashier would ring up the sale on the counter, show a payment code and
+wait for the counter to report the payment. The customer needs a wallet
+containing bitcoin. Cash and cards are taken on the same counter; that part
+is the next work.
 
 You would also have owner work outside checkout: looking after the wallet,
 approving refunds and transfers, checking the records, and deciding how much

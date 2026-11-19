@@ -15,15 +15,14 @@ built.
 
 | Part | What it is and does |
 |---|---|
-| **Your wallet** | A hardware wallet, or a computer kept offline, with its recovery words written by hand and later kept on steel. It holds the keys: every payment lands here, and only it can send money out. |
-| **Owner phone** | Your own Android phone with the OpenBMT Owner app. It sets up the shop, shows every payment, keeps the books, and prepares refunds and cash-outs for your wallet to sign. It cannot spend. |
-| **Counter** | An Android phone or tablet at the till with the OpenBMT Counter app. It shows the customer a payment code for each sale and says when it is paid. It cannot spend. |
+| **Your wallet** | A hardware wallet, with its recovery words written by hand and later kept on steel. It holds the keys: the shop's bitcoin lands here, and only it can send money out. Until it arrives, a starter wallet on the owner phone can hold a small amount you choose. |
+| **Owner phone** | Your own Android phone with the OpenBMT Owner app. It sets up the shop, shows every payment, keeps the books, and prepares refunds and cash-outs for your wallet to sign. |
+| **Counter** | An Android phone or tablet where you ring up sales, with the OpenBMT Counter app. It shows the customer a payment code for each sale and says when it is paid. It cannot spend your savings. |
 
-The owner phone and the counter hold only your wallet's public
-description. It lets them make a new address for each sale and see
-payments arrive. It cannot spend. A lost or stolen phone does not put the
-money in your wallet at risk; it can show the shop's payments, so lock
-both phones with a PIN.
+The counter holds only your wallet's public description. It lets it make
+a new address for each sale and see payments arrive. It cannot spend. A
+lost or stolen counter does not put the money in your wallet at risk; it
+can show the shop's payments, so lock it with a PIN.
 
 ## How a payment travels
 
@@ -32,8 +31,7 @@ both phones with a PIN.
 The customer's wallet pays an address of your wallet. The counter watches
 the Bitcoin network for that payment and tells the cashier when it has
 arrived. The counter never holds the bitcoin, and no company sits between
-the customer and your wallet. The till records the sale as it does any
-other payment.
+the customer and your wallet.
 
 ## When you do what
 
@@ -41,9 +39,9 @@ other payment.
 
 | When | What and where |
 |---|---|
-| Once | Steps 1 to 5, on the owner phone, a laptop, the counter and the till's back office. About two hours, most of it making the wallet. |
-| Every sale | Step 6, at the counter and the till. Under a minute. |
-| Now and then | Step 7, on the owner phone and your wallet. Minutes, when needed. |
+| Once | Steps 1 to 4, on the owner phone, your wallet and the counter. |
+| Every sale | Step 5, at the counter. |
+| Now and then | Step 6, on the owner phone and your wallet. Minutes, when needed. |
 
 ## Step 1. Install the Owner app on your phone
 
@@ -53,24 +51,22 @@ Install the Owner app and open it. The first screen offers to try it
 first: a practice shop runs one sale from start to finish with pretend
 money, then deletes itself. It needs no wallet and no second device.
 
-**Status:** built for Android, with iPhone and iPad versions planned. The apps
-are not yet published for download.
+**Status:** built for Android. The apps are not yet published for
+download.
 
-## Step 2. Name the shop and choose your till
+## Step 2. Name the shop
 
 **Where:** owner phone. **When:** once.
 
-Enter the shop's name and its money, then pick the till you use today
-from the list: Square, Toast, Shopify POS, Loyverse, Odoo, Hike, StoreHub,
-"No till" or "Another till".
+Enter the shop's name and its money.
 
 **Status:** built.
 
 ## Step 3. Choose your wallet
 
-**Where:** owner phone, with your wallet or a laptop. **When:** once.
+**Where:** owner phone, with your wallet. **When:** once.
 
-<img src="images/wallet-choice.svg" alt="Do you have a cold wallet? Yes: connect it. No: make one with a coin or a die. Not now: set up the rest first." style="width:100%;max-width:480px">
+<img src="images/wallet-choice.svg" alt="Do you have a cold wallet? Yes: connect it. No: start today with a capped starter wallet, then move to a hardware wallet. Not now: set up the rest first." style="width:100%;max-width:480px">
 
 A **cold wallet** keeps its keys on a device that never connects to the
 internet. This is the industry's standard for money a business keeps. A
@@ -82,70 +78,59 @@ small amounts but not for a shop's takings.
   first receiving address on both screens; they must match before the shop
   takes a payment. A description that holds a private key or recovery
   words is refused.
-- **Help me make one.** You make the wallet yourself on a laptop you
-  already own, offline, from about 512 coin flips or about 270 die rolls.
-  It takes about an hour, with two USB sticks, a pen and the card from the
-  app. [Setting up a shop](setting-up.md#making-a-cold-wallet-with-a-coin-or-a-die)
-  has the steps.
-- **Not now.** Steps 4 and 5 can be done first. The counter shows "Not
-  taking bitcoin yet" until a wallet is added.
+- **Start today, then move to a hardware wallet.** The owner phone makes a
+  starter wallet with a limit you choose: the most you would be OK losing
+  if the phone were stolen. When your hardware wallet arrives, everything
+  moves to it in one step. The owner phone says which hardware wallets
+  work and how to buy one safely; it names no brand.
+- **Not now.** Step 4 can be done first. The counter shows "Not taking
+  bitcoin yet" until a wallet is added.
 
-**Status:** making a wallet with a coin or a die is built and tested on a
-computer kept offline. Connecting a wallet you already have is being
-built.
+**Status:** built; tested against Bitcoin Core on a test network, not yet
+run on a phone.
 
 ## Step 4. Set up the counter
 
 **Where:** the counter and the owner phone. **When:** once per counter.
 
-<img src="images/pairing.svg" alt="The counter shows a code, the owner phone scans it, both show the same four words, then the counter scans the owner phone's code and says Paired." style="width:100%;max-width:480px">
+<img src="images/pairing.svg" alt="The counter scans the owner phone's code, the owner phone scans the counter's code, both show the same four words, then the counter scans the owner phone's last code and says Paired." style="width:100%;max-width:480px">
 
-1. Install the Counter app on the phone or tablet that stays at the till.
-   It shows a code.
-2. On the owner phone, choose to add a counter and scan that code.
-3. Both screens show the same four words. Check that they match.
-4. The owner phone shows a code. Scan it with the counter, which then says
-   Paired.
+1. Install the Counter app on the phone or tablet you ring up sales on.
+2. On the owner phone, choose Add a counter. It shows a code; scan it with
+   the counter. The counter shows your wallet's first address: check it
+   against your wallet.
+3. The counter shows a code; scan it with the owner phone. Both screens
+   show the same four words. Check that they match.
+4. The owner phone shows a last code. Scan it with the counter, which then
+   says Paired.
 
 From then on the counter makes addresses only for your wallet. Keep it
 plugged in and on the shop's Wi-Fi.
 
-**Status:** built for the earlier setup with a separate Key phone
-([Who controls the money](safety.md)). Joining a counter to a wallet you
-hold is being built.
+**Status:** built; not yet run on a phone.
 
-## Step 5. Add Bitcoin to your till
+## Step 5. Take a payment
 
-**Where:** your till's back office. **When:** once.
+**Where:** the counter. **When:** every sale.
 
-In most tills this means adding a payment type called Bitcoin, which takes
-about two minutes. The owner app shows the steps for your till. The till
-company does not move this money, so it charges nothing for that payment
-type.
+<img src="images/sale-steps.svg" alt="Ring up the sale, the customer scans and pays, the counter says Paid, hand over the goods." style="width:100%;max-width:480px">
 
-**Status:** built. With Odoo and the optional Box, the till can also send
-the amount to the counter, so the cashier does not type it twice.
-
-## Step 6. Take a payment
-
-**Where:** the counter and the till. **When:** every sale.
-
-<img src="images/sale-steps.svg" alt="Type the amount, the customer scans, the counter says Paid, close the sale in the till." style="width:100%;max-width:480px">
-
-1. Ring up the sale in the till as usual.
-2. Type the amount on the counter, or let the till send it.
-3. The customer scans the code with their wallet and pays.
-4. Hand over the goods when the counter says so.
-5. In the till, close the sale with the Bitcoin payment type.
+1. Ring up the sale on the counter. Today that means typing the amount;
+   items, tax, discounts, cash and cards on the same screen are the next
+   work.
+2. The customer scans the code with their wallet and pays.
+3. The counter says Paid.
+4. Hand over the goods.
 
 Small sales can be handed over as soon as the payment is seen, within
 limits you set. Larger ones wait for the payment to be in a block, which
 takes about 10 minutes on average. [A sale at the counter](getting-paid.md)
 explains each result the counter can show.
 
-**Status:** built; tried on an emulator, not yet on a real phone.
+**Status:** taking a bitcoin payment is built; tried on an emulator, not
+yet on a real phone. Ringing up items is not built yet.
 
-## Step 7. Now and then
+## Step 6. Now and then
 
 **Where:** owner phone and your wallet.
 
@@ -157,7 +142,8 @@ explains each result the counter can show.
 | Backup check | Every few months, make sure the steel plate is where you left it and that the person you chose knows how to find it. |
 
 **Status:** the books screen is built. Refunds and transfers signed from a
-wallet you hold are being built.
+wallet you hold are built and tested against Bitcoin Core on a test
+network, not yet run on a phone.
 
 ## Optional parts
 
@@ -165,9 +151,9 @@ wallet you hold are being built.
 
 | Part | What it adds, and when it is worth it |
 |---|---|
-| **The Box** | A small computer in the shop that lets the till send amounts to the counter. Worth it when typing each amount twice slows the queue. |
+| **The Box** | A small computer in the shop that passes messages between the shop's devices. Today Shop Lightning also keeps its second copy there; keeping that copy on another counter or the owner phone instead is being built, so that Lightning will need no Box. |
 | **Your own Bitcoin node** | A second, independent check of each payment, on a computer you run. Worth it when you want to rely on nobody else's view of the network. |
-| **Lightning** | Fast, low-fee payments for small sales, through your own Lightning node or a swap service you name. The money still lands in your wallet. Worth it when you sell many small items, such as coffee. |
+| **Lightning** | Fast, low-fee payments for small sales, through the shop's own Lightning node on the counter. A channel provider opens the channel but never holds your money. Worth it when you sell many small items, such as coffee. |
 
 ## The good practice behind these steps
 
